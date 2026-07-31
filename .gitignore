@@ -1,0 +1,6 @@
+# In this i need project root specific ignore rules
+# and not specific for desktop(rust part) or mobile(dart part)
+
+# OS files
+.DS_Store
+Thumbs.db
