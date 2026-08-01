@@ -1,0 +1,11 @@
+[package]
+name = "clipx-tray"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "1.0"
+arboard = "3.6.1"
+winapi = { version = "0.3", features = ["winuser"] }
+winrt-notification = "0.5"
+dirs = "5.0"
