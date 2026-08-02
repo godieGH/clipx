@@ -1,4 +1,6 @@
 use crate::{clipboard::watcher, device, net};
+use device::identity::DeviceIdentity;
+use std::sync::Arc;
 use tokio::{signal, sync::{mpsc, watch}, task::JoinHandle};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -12,7 +14,7 @@ pub enum ServiceState {
 pub struct CoreService {
     state: ServiceState,
     shutdown_tx: Option<watch::Sender<bool>>,
-    tasks: Vec<JoinHandle<()>>
+    tasks: Vec<JoinHandle<()>>,
 }
 
 impl Default for CoreService {
@@ -20,7 +22,7 @@ impl Default for CoreService {
         Self {
             state: ServiceState::Stopped,
             shutdown_tx: None,
-            tasks: vec![]
+            tasks: vec![],
         }
     }
 }
@@ -50,51 +52,48 @@ impl CoreService {
         self.start();
         tracing::info!("Core service starting");
 
-        let device_id = crate::device::config::get_or_create_device_id(crate::device::config::machine_device_id_path());
+        let device_id = device::config::get_or_create_device_id(device::config::machine_device_id_path());
+        let identity = Arc::new(DeviceIdentity::load_or_create(device::config::identity_key_path()));
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         self.shutdown_tx = Some(shutdown_tx);
 
         let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
         let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
+
         let shutdown_for_device_manager = shutdown_rx.clone();
         let shutdown_for_clipboard = shutdown_rx.clone();
         let shutdown_for_transport = shutdown_rx.clone();
-        let shutdown_for_broadcast = shutdown_rx.clone();
-        let shutdown_for_discover = shutdown_rx.clone();
-        let device_id_for_broadcast = device_id.clone();
-        let device_id_for_discover = device_id.clone();
+        let shutdown_for_discovery = shutdown_rx.clone();
 
         let watcher_task = tokio::spawn(async move {
             watcher::watch_clipboard(shutdown_for_clipboard, clipboard_tx).await;
         });
         self.tasks.push(watcher_task);
 
-        // handle device discovery
-        let (broadcast_presence_task, discover_devices_task) = (
-            tokio::spawn(async move {
-                net::discovery::broadcast_presence(shutdown_for_broadcast, device_id_for_broadcast).await
-            }),
-            tokio::spawn(async move {
-                net::discovery::listen_for_devices(shutdown_for_discover, device_id_for_discover, discovered_tx).await
-            })
-        );
-        self.tasks.push(broadcast_presence_task);
-        self.tasks.push(discover_devices_task);
+        let (discovery_tasks, shared_socket, pending) = net::discovery::spawn(
+            shutdown_for_discovery,
+            device_id.clone(),
+            identity.clone(),
+            discovered_tx,
+        ).expect("failed to start discovery");
+        self.tasks.extend(discovery_tasks);
 
         let device_manager = device::manager::DeviceManager::new(
-            crate::device::config::trusted_devices_path()
+            device::config::trusted_devices_path(),
+            identity.clone(),
+            shared_socket,
+            pending,
         );
         let device_manager_task = tokio::spawn(async move {
             device_manager.run(shutdown_for_device_manager, discovered_rx).await;
         });
         self.tasks.push(device_manager_task);
 
-        // handle transport
-        let trasport_task = tokio::spawn(async move {
+        let transport_task = tokio::spawn(async move {
             net::transport::cordinator(shutdown_for_transport, clipboard_rx).await
         });
-        self.tasks.push(trasport_task);
+        self.tasks.push(transport_task);
 
         signal::ctrl_c().await?;
 

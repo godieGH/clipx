@@ -25,5 +25,6 @@ pub fn approve(seen: &SeenDevice, trusted: &mut TrustedDeviceStore) {
         name: seen.name.clone(),
         device_type: seen.device_type,
         paired_at: SystemTime::now(),
+        public_key: seen.public_key
     });
 }

@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 const MACHINE_DEVICE_ID_FILE: &str = "device_id";
 const TRUSTED_DEVICES_FILE: &str = "trusted_devices.json";
+const IDENTITY_KEY_FILE: &str = "identity_key";
 
 pub fn get_or_create_device_id(device_id_path: PathBuf) -> String {
     if let Ok(existing) = fs::read_to_string(&device_id_path) {
@@ -36,4 +37,8 @@ pub fn machine_device_id_path() -> PathBuf {
 
 pub fn trusted_devices_path() -> PathBuf {
     config_dir().join(TRUSTED_DEVICES_FILE)
+}
+
+pub fn identity_key_path() -> PathBuf {
+    config_dir().join(IDENTITY_KEY_FILE)
 }

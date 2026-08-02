@@ -17,6 +17,7 @@ pub struct TrustedDevice {
     pub name: String,
     pub device_type: DeviceType,
     pub paired_at: SystemTime,
+    pub public_key: [u8; 32],
 }
 
 /// A device currently visible via discovery. Purely in-memory, ephemeral —
@@ -28,4 +29,5 @@ pub struct SeenDevice {
     pub device_type: DeviceType,
     pub addr: SocketAddr,
     pub last_seen: Instant,
+    pub public_key: [u8; 32],
 }

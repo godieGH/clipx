@@ -4,8 +4,9 @@ pub mod seen;
 pub mod trusted;
 pub mod types;
 pub mod pairing;
+pub mod identity;
 
-// some tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -16,10 +17,14 @@ mod tests {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9999)
     }
 
+    fn test_public_key() -> [u8; 32] {
+        [0u8; 32] // dummy key, fine for tests that don't exercise real verification
+    }
+
     #[test]
     fn trusted_device_store_roundtrip() {
         let path = std::env::temp_dir().join("clipx_test_trusted.json");
-        let _ = std::fs::remove_file(&path); // clean slate
+        let _ = std::fs::remove_file(&path);
 
         let mut store = trusted::TrustedDeviceStore::load(path.clone());
         assert!(!store.is_trusted("abc"));
@@ -29,10 +34,10 @@ mod tests {
             name: "Test Device".into(),
             device_type: types::DeviceType::Windows,
             paired_at: std::time::SystemTime::now(),
+            public_key: test_public_key(),
         });
         assert!(store.is_trusted("abc"));
 
-        // reload from disk, confirm it persisted
         let reloaded = trusted::TrustedDeviceStore::load(path.clone());
         assert!(reloaded.is_trusted("abc"));
 
@@ -48,6 +53,7 @@ mod tests {
             device_type: types::DeviceType::Windows,
             addr: test_addr(),
             last_seen: std::time::Instant::now() - Duration::from_secs(60),
+            public_key: test_public_key(),
         });
 
         registry.prune_stale(Duration::from_secs(30));
