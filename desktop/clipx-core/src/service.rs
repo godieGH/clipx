@@ -56,6 +56,8 @@ impl CoreService {
         self.shutdown_tx = Some(shutdown_tx);
 
         let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
+        let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
+        let shutdown_for_device_manager = shutdown_rx.clone();
         let shutdown_for_clipboard = shutdown_rx.clone();
         let shutdown_for_transport = shutdown_rx.clone();
         let shutdown_for_broadcast = shutdown_rx.clone();
@@ -74,11 +76,19 @@ impl CoreService {
                 net::discovery::broadcast_presence(shutdown_for_broadcast, device_id_for_broadcast).await
             }),
             tokio::spawn(async move {
-                net::discovery::listen_for_devices(shutdown_for_discover, device_id_for_discover).await
+                net::discovery::listen_for_devices(shutdown_for_discover, device_id_for_discover, discovered_tx).await
             })
         );
         self.tasks.push(broadcast_presence_task);
         self.tasks.push(discover_devices_task);
+
+        let device_manager = device::manager::DeviceManager::new(
+            crate::device::config::trusted_devices_path()
+        );
+        let device_manager_task = tokio::spawn(async move {
+            device_manager.run(shutdown_for_device_manager, discovered_rx).await;
+        });
+        self.tasks.push(device_manager_task);
 
         // handle transport
         let trasport_task = tokio::spawn(async move {

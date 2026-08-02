@@ -1,7 +1,8 @@
 use crate::message::proto;
 use prost::Message;
-use std::net::UdpSocket as StdUdpSocket;
-use tokio::{net::UdpSocket, sync::watch, time::Duration};
+use std::{net::UdpSocket as StdUdpSocket};
+use tokio::{net::UdpSocket, sync::{watch, mpsc}, time::Duration};
+use std::net::SocketAddr;
 
 fn make_broadcast_socket() -> std::io::Result<UdpSocket> {
     let std_socket = StdUdpSocket::bind("0.0.0.0:0")?;
@@ -36,7 +37,11 @@ pub async fn broadcast_presence(mut shutdown_rx: watch::Receiver<bool>, device_i
     tracing::info!("broadcaster stopped");
 }
 
-pub async fn listen_for_devices(mut shutdown_rx: watch::Receiver<bool>, device_id: String) {
+pub async fn listen_for_devices(
+    mut shutdown_rx: watch::Receiver<bool>,
+    device_id: String,
+    discovered_tx: mpsc::UnboundedSender<(proto::Announce, SocketAddr)>
+) {
     let socket = UdpSocket::bind("0.0.0.0:9999").await.expect("bind failed");
     let mut buf = [0u8; 1024];
 
@@ -59,6 +64,7 @@ pub async fn listen_for_devices(mut shutdown_rx: watch::Receiver<bool>, device_i
                             continue;
                         }
                         tracing::info!("Descover device IP = {src_addr} {:?}", announce);
+                        let _ = discovered_tx.send((announce, src_addr));
                     }
             }
         }
