@@ -1,6 +1,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::RngCore;
 use rand::rngs::OsRng;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 
@@ -41,14 +42,22 @@ impl DeviceIdentity {
     }
 
     pub fn random_nonce(&self) -> Vec<u8> {
-        _random_nounce()
+        let mut nonce = vec![0u8; 32];
+        OsRng.fill_bytes(&mut nonce);
+        nonce
+    }
+
+    // gives us fingerprint for device id from the public key
+    pub fn get_this_device_fingerprint(&self) -> [u8; 32] {
+        let public_key_bytes = self.public_key_bytes();
+        DeviceIdentity::get_fingerprint_for(public_key_bytes)
     }
 }
 
-pub fn _random_nounce() -> Vec<u8> {
-    let mut nonce = vec![0u8; 32];
-    OsRng.fill_bytes(&mut nonce);
-    nonce
+impl DeviceIdentity {
+    pub fn get_fingerprint_for(public_key: [u8; 32]) -> [u8; 32] {
+        Sha256::digest(public_key).into()
+    }
 }
 
 /// Verifies a signature against a claimed public key.

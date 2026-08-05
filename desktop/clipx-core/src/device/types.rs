@@ -2,12 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::{Instant, SystemTime};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DeviceType {
-    Windows,
-    Android,
-    // Linux, MacOS later
-}
+// just reuse from the protobuf def.
+pub use crate::message::proto::DeviceType;
 
 /// A device that has been paired and is persisted to disk.
 /// Identity only — no connection state, no address (that's session-specific).
@@ -29,5 +25,4 @@ pub struct SeenDevice {
     pub device_type: DeviceType,
     pub addr: SocketAddr,
     pub last_seen: Instant,
-    pub public_key: [u8; 32],
 }

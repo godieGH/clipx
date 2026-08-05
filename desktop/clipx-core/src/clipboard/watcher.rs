@@ -1,5 +1,8 @@
 use arboard::Clipboard;
-use tokio::{sync::{mpsc, watch}, time::{sleep, Duration}};
+use tokio::{
+    sync::{mpsc, watch},
+    time::{Duration, sleep},
+};
 
 pub async fn watch_clipboard(
     mut shutdown_rx: watch::Receiver<bool>,
@@ -16,7 +19,11 @@ pub async fn watch_clipboard(
     let mut last_content = clipboard.get_text().unwrap_or_default();
     let last_char_count = last_content.chars().count();
     let last_snippet: String = last_content.chars().take(50).collect();
-    tracing::info!("clipboard watcher started initial content: {:?}{}", last_snippet, if last_char_count > 50 {"..."} else {""});
+    tracing::info!(
+        "clipboard watcher started initial content: {:?}{}",
+        last_snippet,
+        if last_char_count > 50 { "..." } else { "" }
+    );
 
     loop {
         tokio::select! {
@@ -36,10 +43,16 @@ pub async fn watch_clipboard(
             Ok(current) if current != last_content => {
                 let current_char_count = current.chars().count();
                 let current_snippet: String = current.chars().take(50).collect();
-                tracing::info!("Clipboard changed: {:?}{}", current_snippet, if current_char_count > 50 {"..."} else {""});
+                tracing::info!(
+                    "Clipboard changed: {:?}{}",
+                    current_snippet,
+                    if current_char_count > 50 { "..." } else { "" }
+                );
                 last_content = current.clone();
                 if tx.send(current).is_err() {
-                    tracing::warn!("Clipboard event receiver dropped — transport might be down; continuing to watch");
+                    tracing::warn!(
+                        "Clipboard event receiver dropped — transport might be down; continuing to watch"
+                    );
                     // do not break; keep watching clipboard even if transport is down
                 }
             }

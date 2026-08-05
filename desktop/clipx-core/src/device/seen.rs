@@ -29,6 +29,7 @@ impl SeenDeviceRegistry {
     /// gone offline or left the network without a graceful goodbye.
     pub fn prune_stale(&mut self, max_age: Duration) {
         let now = Instant::now();
-        self.devices.retain(|_, d| now.duration_since(d.last_seen) < max_age);
+        self.devices
+            .retain(|_, d| now.duration_since(d.last_seen) < max_age);
     }
 }

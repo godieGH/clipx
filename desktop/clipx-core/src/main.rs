@@ -1,9 +1,9 @@
 mod clipboard;
+mod device;
 mod logging;
 mod message;
 mod net;
 mod service;
-mod device;
 
 use service::CoreService;
 

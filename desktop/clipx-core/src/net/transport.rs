@@ -1,19 +1,20 @@
-use tokio::sync::{watch, mpsc};
+//use std::collections::HashMap;
+use tokio::net::TcpListener;
+//use tokio_tungstenite::accept_async;
+//use futures_util::{SinkExt, Stream};
 
-pub async fn cordinator(
-    mut shutdown_rx: watch::Receiver<bool>,
-    mut clipboard_rx: mpsc::UnboundedReceiver<String>,
-) {
-    loop {
-        tokio::select! {
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() { break; }
-            }
-            Some(value) = clipboard_rx.recv() => {
-                tracing::info!("transport received: {value}");
-                // later: wrap in ClipboardMessage, send to connected trusted devices
-            }
-        }
+pub struct Transport {
+    listener: TcpListener,
+    //connections: HashMap<DeviceId, WsConnection>,
+}
+
+impl Transport {
+    pub async fn create_transport() -> Self {
+        let ws_port = crate::device::config::get_ws_port();
+        let listener = TcpListener::bind(format!("0.0.0.0:{ws_port}"))
+            .await
+            .unwrap();
+        tracing::info!("WS server running on port={ws_port} ...");
+        Self { listener }
     }
-    tracing::info!("transport coordinator stopped");
 }

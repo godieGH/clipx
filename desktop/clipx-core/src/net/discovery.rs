@@ -1,6 +1,5 @@
 use crate::device::identity::DeviceIdentity;
 use crate::message::proto;
-use crate::net::pending_requests::PendingRequests;
 use prost::Message;
 use std::net::SocketAddr;
 use std::net::UdpSocket as StdUdpSocket;
@@ -18,37 +17,26 @@ use tokio::{
 /// socket and correlate their responses.
 pub fn spawn(
     shutdown_rx: watch::Receiver<bool>,
-    device_id: String,
     identity: Arc<DeviceIdentity>,
     discovered_tx: mpsc::UnboundedSender<(proto::Announce, SocketAddr)>,
-) -> std::io::Result<(
-    Vec<JoinHandle<()>>,
-    Arc<UdpSocket>,
-    PendingRequests<proto::ChallengeResponse>,
-)> {
+) -> std::io::Result<Vec<JoinHandle<()>>> {
     let socket = Arc::new(make_shared_socket()?);
-    let pending = PendingRequests::new();
 
     let broadcast_task = {
         let socket = socket.clone();
         let shutdown_rx = shutdown_rx.clone();
         let identity = identity.clone();
-        let device_id = device_id.clone();
-        tokio::spawn(async move {
-            broadcast_presence(shutdown_rx, device_id, identity, socket).await
-        })
+        tokio::spawn(async move { broadcast_presence(shutdown_rx, identity, socket).await })
     };
 
     let listen_task = {
         let socket = socket.clone();
-        let pending = pending.clone();
         tokio::spawn(async move {
-            listen_for_devices(shutdown_rx, device_id, identity, discovered_tx, pending, socket)
-                .await
+            listen_for_devices(shutdown_rx, identity, discovered_tx, socket).await
         })
     };
 
-    Ok((vec![broadcast_task, listen_task], socket, pending))
+    Ok(vec![broadcast_task, listen_task])
 }
 
 fn make_shared_socket() -> std::io::Result<UdpSocket> {
@@ -60,23 +48,19 @@ fn make_shared_socket() -> std::io::Result<UdpSocket> {
 
 async fn broadcast_presence(
     mut shutdown_rx: watch::Receiver<bool>,
-    device_id: String,
     identity: Arc<DeviceIdentity>,
     socket: Arc<UdpSocket>,
 ) {
+    let device_type = crate::device::config::get_current_device_type() as i32;
     let announce = proto::Announce {
-        device_id,
+        fingerprint: identity.get_this_device_fingerprint().to_vec(),
         device_name: crate::device::config::get_hostname(),
-        device_type: proto::DeviceType::Windows as i32,
-        ws_port: 8080,
-        public_key: identity.public_key_bytes().to_vec(),
+        device_type,
+        ws_port: crate::device::config::get_ws_port(),
     };
 
-    let envelope = proto::UdpEnvelope {
-        payload: Some(proto::udp_envelope::Payload::Announce(announce)),
-    };
     let mut message: Vec<u8> = vec![];
-    envelope.encode(&mut message).unwrap();
+    announce.encode(&mut message).unwrap();
 
     loop {
         tokio::select! {
@@ -94,10 +78,8 @@ async fn broadcast_presence(
 
 async fn listen_for_devices(
     mut shutdown_rx: watch::Receiver<bool>,
-    device_id: String,
     identity: Arc<DeviceIdentity>,
     discovered_tx: mpsc::UnboundedSender<(proto::Announce, SocketAddr)>,
-    pending: PendingRequests<proto::ChallengeResponse>,
     socket: Arc<UdpSocket>,
 ) {
     let mut buf = [0u8; 1024];
@@ -110,7 +92,7 @@ async fn listen_for_devices(
             result = socket.recv_from(&mut buf) => {
                 let Ok((len, src_addr)) = result else { continue; };
 
-                let envelope = match proto::UdpEnvelope::decode(&buf[..len]) {
+                let announce = match proto::Announce::decode(&buf[..len]) {
                     Ok(e) => e,
                     Err(e) => {
                         tracing::warn!("failed to decode envelope from {src_addr}: {e}");
@@ -118,30 +100,10 @@ async fn listen_for_devices(
                     }
                 };
 
-                match envelope.payload {
-                    Some(proto::udp_envelope::Payload::Announce(announce)) => {
-                        if announce.device_id == device_id { continue; }
-                        let _ = discovered_tx.send((announce, src_addr));
-                    }
-                    Some(proto::udp_envelope::Payload::Challenge(challenge)) => {
-                        let signature = identity.sign(&challenge.nonce);
-                        let response = proto::UdpEnvelope {
-                            payload: Some(proto::udp_envelope::Payload::ChallengeResponse(
-                                proto::ChallengeResponse {
-                                    request_id: challenge.request_id,
-                                    signature: signature.to_vec(),
-                                },
-                            )),
-                        };
-                        let mut out = Vec::new();
-                        response.encode(&mut out).unwrap();
-                        let _ = socket.send_to(&out, src_addr).await;
-                    }
-                    Some(proto::udp_envelope::Payload::ChallengeResponse(resp)) => {
-                        pending.resolve(&resp.request_id, resp.clone()).await;
-                    }
-                    None => {}
+                if announce.fingerprint == identity.get_this_device_fingerprint() {
+                    continue;
                 }
+                let _ = discovered_tx.send((announce, src_addr));
             }
         }
     }
