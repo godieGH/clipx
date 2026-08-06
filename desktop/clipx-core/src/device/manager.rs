@@ -147,7 +147,7 @@ impl DeviceManager {
             return "already trusted".to_string();
         }
 
-        if let Some(device) = self.seen.get(device_id) {
+        if let Some(_device) = self.seen.get(device_id) {
             let challenge = pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
             let response = pairing::respond_to_challenge(&self.identity, &challenge);
             let code = pairing::pairing_code(&challenge, &response);
