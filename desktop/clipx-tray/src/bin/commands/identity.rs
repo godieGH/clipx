@@ -1,4 +1,5 @@
 use clap::Args;
+use crate::{clipx, ipc::IpcClient};
 
 #[derive(Args)]
 pub struct IdentityArgs {
@@ -16,4 +17,34 @@ pub struct IdentityArgs {
 
     #[arg(long, alias = "type", help = "Displays only the device type")]
     device_type: bool,
+}
+
+impl IdentityArgs {
+    pub fn run(args: IdentityArgs, mut ipc: IpcClient) {
+        let ipcreq = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::Identity(clipx::IdentityRequest {})),
+        };
+
+        if let Ok(res) = ipc.send(ipcreq) {
+            if let Some(clipx::ipc_response::Response::Identity(response)) = res.response {
+                if args.id {
+                    println!("{}", response.device_id);
+                } else if args.name {
+                    println!("{}", response.device_name);
+                } else if args.pub_key {
+                    println!("{}", response.public_key_hex);
+                } else if args.ws_port {
+                    println!("{}", response.ws_port);
+                } else if args.device_type {
+                    println!("{:?}", response.device_type);
+                } else {
+                    println!("id: {}", response.device_id);
+                    println!("name: {}", response.device_name);
+                    println!("public_key: {}", response.public_key_hex);
+                    println!("ws_port: {}", response.ws_port);
+                    println!("device_type: {}", response.device_type);
+                }
+            }
+        }
+    }
 }

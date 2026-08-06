@@ -26,3 +26,32 @@ pub struct SeenDevice {
     pub addr: SocketAddr,
     pub last_seen: Instant,
 }
+
+#[derive(Debug, Clone)]
+pub struct IdentitySnapshot {
+    pub device_id: String,
+    pub device_name: String,
+    pub public_key_hex: String,
+    pub ws_port: u32,
+    pub device_type: DeviceType,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_snapshot_uses_provided_name_and_port() {
+        let snapshot = IdentitySnapshot {
+            device_id: "abc123".to_string(),
+            device_name: "my-host".to_string(),
+            public_key_hex: "deadbeef".to_string(),
+            ws_port: 9000,
+            device_type: DeviceType::Windows,
+        };
+
+        assert_eq!(snapshot.device_name, "my-host");
+        assert_eq!(snapshot.ws_port, 9000);
+        assert_eq!(snapshot.device_type, DeviceType::Windows);
+    }
+}

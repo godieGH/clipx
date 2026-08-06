@@ -40,8 +40,12 @@ fn main() {
         Cmd::Seen(args) => {
             SeenArgs::run(args, ipc);
         }
-        Cmd::Trusted(_args) => {}
-        Cmd::Identity(_args) => {}
+        Cmd::Trusted(args) => {
+            commands::trusted::TrustedArgs::run(args, ipc);
+        }
+        Cmd::Identity(args) => {
+            commands::identity::IdentityArgs::run(args, ipc);
+        }
         Cmd::Pair(_args) => {}
     }
 }

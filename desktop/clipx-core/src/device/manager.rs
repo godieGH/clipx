@@ -14,9 +14,16 @@ pub struct DeviceManager {
     identity: Arc<DeviceIdentity>,
 }
 
+pub enum SeenMode {
+    All,
+    Trusted,
+    Untrusted,
+}
+
 pub enum DeviceCommands {
     GetSeen {
-        reply_to: oneshot::Sender<Vec<SeenDevice>>
+        mode: SeenMode,
+        reply_to: oneshot::Sender<Vec<SeenDevice>>,
     }
 }
 
@@ -85,7 +92,7 @@ impl DeviceManager {
 
         match self.trusted.get(&device_id) {
             Some(_trusted_device) => {
-                // if the device is in the trusted tray they is trusted no need to pair
+                // if the device is in the trusted store then is trusted no need to pair
             }
             None => {}
         }
@@ -107,11 +114,19 @@ impl DeviceManager {
 impl DeviceManager {
     fn handle_device_command(&self, cmd: DeviceCommands) {
         match cmd {
-            DeviceCommands::GetSeen { reply_to } => {
-                let p = self.seen.list().map(|i| {(*i).clone()}).collect::<Vec<SeenDevice>>();
-                let _ = reply_to.send(p);
+            DeviceCommands::GetSeen { mode, reply_to } => {
+                let devices = self
+                    .seen
+                    .list()
+                    .filter(|device| match mode {
+                        SeenMode::All => true,
+                        SeenMode::Trusted => self.trusted.is_trusted(&device.id),
+                        SeenMode::Untrusted => !self.trusted.is_trusted(&device.id),
+                    })
+                    .cloned()
+                    .collect::<Vec<SeenDevice>>();
+                let _ = reply_to.send(devices);
             }
-            _ => {}
         }
     }
 }

@@ -57,15 +57,18 @@ impl IpcClient {
             let msg = ws.read()?;
 
             match msg {
-                tungstenite::Message::Binary(bytes) => {                   
+                tungstenite::Message::Binary(bytes) => {
                     let res = clipx::IpcResponse::decode(bytes.as_slice())?;
+                    ws.close(None)?;
                     return Ok(res);
                 }
-                tungstenite::Message::Close(_) => {break;}
+                tungstenite::Message::Close(_) => {
+                    ws.close(None)?;
+                    break;
+                }
                 _ => {}
             }
         }
-        ws.close(None)?;
         Err(anyhow::anyhow!("No response"))
     }
 }

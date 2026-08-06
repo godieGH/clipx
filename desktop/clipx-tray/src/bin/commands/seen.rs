@@ -17,25 +17,25 @@ pub struct SeenArgs {
 
 impl SeenArgs {
     pub fn run(args: SeenArgs, mut ipc: IpcClient) {
-        let mode = {
-            if args.trusted {
-                clipx::seen_request::Mode::Trusted.into()
-            }
-            else if args.untrusted {
-                clipx::seen_request::Mode::Untrusted.into()
-            }
-            else {
-                clipx::seen_request::Mode::All.into()
-            }
+        let mode = if args.trusted {
+            clipx::seen_request::Mode::Trusted as i32
+        } else if args.untrusted {
+            clipx::seen_request::Mode::Untrusted as i32
+        } else {
+            clipx::seen_request::Mode::All as i32
         };
-        let req = clipx::SeenRequest {mode};
+
+        let req = clipx::SeenRequest { mode };
         let ipcreq = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Seen(req))
+            request: Some(clipx::ipc_request::Request::Seen(req)),
         };
 
-        let _res = ipc.send(ipcreq).unwrap();
-
- 
-        
+        if let Ok(res) = ipc.send(ipcreq) {
+            if let Some(clipx::ipc_response::Response::Seen(response)) = res.response {
+                for device in response.devices {
+                    println!("{} ({}) - {}", device.name, device.id, device.address);
+                }
+            }
+        }
     }
 }

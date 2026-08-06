@@ -7,7 +7,10 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot, watch};
 use tokio_tungstenite::{accept_async, WebSocketStream, tungstenite::Message as WsMessage};
 use futures_util::{SinkExt, StreamExt};
 
-use crate::{device::manager::DeviceCommands, message::proto::clipx};
+use crate::{
+    device::{manager::DeviceCommands, types::IdentitySnapshot},
+    message::proto::clipx,
+};
 use prost::Message;
 
 // starts and manage ipc resources
@@ -89,40 +92,69 @@ impl IpcService {
         ipcreq: clipx::IpcRequest,
         ws: &mut WebSocketStream<LocalStream>
     ) -> anyhow::Result<()> {
-        let (cmdres_tx, cmdres_rx) = oneshot::channel();
         let req = match ipcreq.request {
             Some(req) => req,
             None => return Err(anyhow::anyhow!("Invalid Ipc request"))
         };
 
-        match req {
-            clipx::ipc_request::Request::Seen(clipx::SeenRequest {mode}) => {
+        let response = match req {
+            clipx::ipc_request::Request::Seen(clipx::SeenRequest { mode }) => {
                 use clipx::seen_request::Mode;
                 let mode = Mode::try_from(mode)?;
-                match mode {
-                    Mode::All => {
-                        //let buf = Vec::new();
-                        let _ = self
-                            .device_tx
-                            .send(DeviceCommands::GetSeen { reply_to: cmdres_tx });
-                        
-
-
-                        //ws.send(WsMessage::Binary(buf)).await?;
-                        ws.close(None).await?;
-                    }
-                    Mode::Trusted => {}
-                    Mode::Untrusted => {}
+                let seen_mode = match mode {
+                    Mode::All => crate::device::manager::SeenMode::All,
+                    Mode::Trusted => crate::device::manager::SeenMode::Trusted,
+                    Mode::Untrusted => crate::device::manager::SeenMode::Untrusted,
+                };
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::GetSeen { mode: seen_mode, reply_to: cmdres_tx });
+                let devices = cmdres_rx.await?;
+                let response = clipx::SeenResponse {
+                    devices: devices
+                        .into_iter()
+                        .map(|device| clipx::DeviceInfo {
+                            id: device.id,
+                            name: device.name,
+                            device_type: device.device_type as i32,
+                            address: device.addr.to_string(),
+                            last_seen_ms: device.last_seen.elapsed().as_millis() as u64,
+                        })
+                        .collect(),
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Seen(response)),
                 }
-
             }
-            _ => {
-                return Err(anyhow::anyhow!("Invalid ipc req"));
+            clipx::ipc_request::Request::Trusted(_) => {
+                let response = clipx::TrustedResponse { devices: vec![] };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Trusted(response)),
+                }
             }
-        }
+            clipx::ipc_request::Request::Identity(_) => {
+                let snapshot = IdentitySnapshot {
+                    device_id: "local-device".to_string(),
+                    device_name: "clipx-core".to_string(),
+                    public_key_hex: "00".to_string(),
+                    ws_port: 0,
+                    device_type: crate::message::proto::DeviceType::Unspecified,
+                };
+                let response = clipx::IdentityResponse {
+                    device_id: snapshot.device_id,
+                    device_name: snapshot.device_name,
+                    public_key_hex: snapshot.public_key_hex,
+                    ws_port: snapshot.ws_port,
+                    device_type: snapshot.device_type as i32,
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Identity(response)),
+                }
+            }
+        };
 
-
-
+        let mut buf = Vec::new();
+        response.encode(&mut buf)?;
+        ws.send(WsMessage::Binary(buf.into())).await?;
         Ok(())
     }
 }
