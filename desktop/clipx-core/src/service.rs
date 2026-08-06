@@ -60,18 +60,27 @@ impl CoreService {
             device::config::identity_key_path(),
         ));
 
-        let _ws_transport = crate::net::transport::Transport::create_transport().await;
-
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         self.shutdown_tx = Some(shutdown_tx);
 
         let (clipboard_tx, _clipboard_rx) = mpsc::unbounded_channel();
         let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
         let (device_tx, device_rx) = mpsc::unbounded_channel();
+        let (_transport_tx, transport_rx) = mpsc::unbounded_channel();
+
+        let shutdown_for_transport = shutdown_rx.clone();
+        let transport_task = tokio::spawn(async move {
+            let transport = crate::net::transport::Transport::create_transport(
+                shutdown_for_transport,
+                transport_rx,
+            )
+            .await;
+            transport.run().await;
+        });
+        self.tasks.push(transport_task);
 
         let shutdown_for_device_manager = shutdown_rx.clone();
         let shutdown_for_clipboard = shutdown_rx.clone();
-        let shutdown_for_transport = shutdown_rx.clone();
         let shutdown_for_discovery = shutdown_rx.clone();
         let shutdown_for_ipc = shutdown_rx.clone();
 
@@ -95,11 +104,6 @@ impl CoreService {
                 .await;
         });
         self.tasks.push(device_manager_task);
-
-        // let transport_task = tokio::spawn(async move {
-        //     net::transport::cordinator(shutdown_for_transport, clipboard_rx).await
-        // });
-        // self.tasks.push(transport_task);
 
         let mut ipc_service = net::ipc::IpcService::new(
             "clipx",
