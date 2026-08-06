@@ -66,7 +66,7 @@ impl CoreService {
         let (clipboard_tx, _clipboard_rx) = mpsc::unbounded_channel();
         let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
         let (device_tx, device_rx) = mpsc::unbounded_channel();
-        let (_transport_tx, transport_rx) = mpsc::unbounded_channel();
+        let (transport_tx, transport_rx) = mpsc::unbounded_channel();
 
         let shutdown_for_transport = shutdown_rx.clone();
         let transport_task = tokio::spawn(async move {
@@ -97,6 +97,7 @@ impl CoreService {
         let device_manager = device::manager::DeviceManager::new(
             device::config::trusted_devices_path(),
             identity.clone(),
+            Some(transport_tx),
         );
         let device_manager_task = tokio::spawn(async move {
             device_manager

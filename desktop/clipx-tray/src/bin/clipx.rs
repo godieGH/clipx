@@ -11,7 +11,7 @@ mod clipx {
 }
 
 use clap::{Parser, Subcommand};
-use commands::{seen::SeenArgs, trusted::TrustedArgs, identity::IdentityArgs, pair::PairArgs};
+use commands::{seen::SeenArgs, trusted::TrustedArgs, identity::IdentityArgs, pair::PairArgs, connect::ConnectArgs};
 
 #[derive(Parser)]
 #[command(about = "clipx is a cli tool to manage devices or work with clipx-core through a command line tool")]
@@ -30,6 +30,8 @@ enum Cmd {
    Identity(IdentityArgs),
    #[command(about = "Pair with another devices")]
    Pair(PairArgs),
+   #[command(about = "Connect to a trusted device")]
+   Connect(ConnectArgs),
 }
 
 fn main() {
@@ -46,7 +48,12 @@ fn main() {
         Cmd::Identity(args) => {
             commands::identity::IdentityArgs::run(args, ipc);
         }
-        Cmd::Pair(_args) => {}
+        Cmd::Pair(args) => {
+            commands::pair::PairArgs::run(args, ipc);
+        }
+        Cmd::Connect(args) => {
+            commands::connect::ConnectArgs::run(args, ipc);
+        }
     }
 }
 

@@ -8,7 +8,7 @@ use tokio_tungstenite::{accept_async, WebSocketStream, tungstenite::Message as W
 use futures_util::{SinkExt, StreamExt};
 
 use crate::{
-    device::{manager::DeviceCommands, types::IdentitySnapshot},
+    device::{manager::{DeviceCommands, SeenMode}, types::IdentitySnapshot},
     message::proto::clipx,
 };
 use prost::Message;
@@ -126,19 +126,29 @@ impl IpcService {
                 }
             }
             clipx::ipc_request::Request::Trusted(_) => {
-                let response = clipx::TrustedResponse { devices: vec![] };
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::GetSeen { mode: SeenMode::Trusted, reply_to: cmdres_tx });
+                let devices = cmdres_rx.await?;
+                let response = clipx::TrustedResponse {
+                    devices: devices
+                        .into_iter()
+                        .map(|device| clipx::DeviceInfo {
+                            id: device.id,
+                            name: device.name,
+                            device_type: device.device_type as i32,
+                            address: device.addr.to_string(),
+                            last_seen_ms: device.last_seen.elapsed().as_millis() as u64,
+                        })
+                        .collect(),
+                };
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::Trusted(response)),
                 }
             }
             clipx::ipc_request::Request::Identity(_) => {
-                let snapshot = IdentitySnapshot {
-                    device_id: "local-device".to_string(),
-                    device_name: "clipx-core".to_string(),
-                    public_key_hex: "00".to_string(),
-                    ws_port: 0,
-                    device_type: crate::message::proto::DeviceType::Unspecified,
-                };
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::GetIdentity { reply_to: cmdres_tx });
+                let snapshot = cmdres_rx.await?;
                 let response = clipx::IdentityResponse {
                     device_id: snapshot.device_id,
                     device_name: snapshot.device_name,
@@ -148,6 +158,88 @@ impl IpcService {
                 };
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::Identity(response)),
+                }
+            }
+            clipx::ipc_request::Request::Pair(req) => {
+                let device_id = req.device_id.clone();
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::Pair { device_id: device_id.clone(), reply_to: cmdres_tx });
+                let message = cmdres_rx.await?;
+                let response = clipx::PairResponse {
+                    device_id,
+                    status: "ok".to_string(),
+                    message,
+                    pairing_code: None.unwrap_or_default(),
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Pair(response)),
+                }
+            }
+            clipx::ipc_request::Request::PairPending(_) => {
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::PendingPairings { reply_to: cmdres_tx });
+                let pending = cmdres_rx.await?;
+                let response = clipx::PairPendingResponse {
+                    pending: pending
+                        .into_iter()
+                        .map(|(device_id, code)| clipx::PairPendingDevice {
+                            device_id,
+                            device_name: "pending".to_string(),
+                            status: code,
+                        })
+                        .collect(),
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::PairPending(response)),
+                }
+            }
+            clipx::ipc_request::Request::PairApprove(req) => {
+                let device_id = req.device_id.clone();
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::ApprovePairing { device_id: device_id.clone(), reply_to: cmdres_tx });
+                let message = cmdres_rx.await?;
+                let response = clipx::PairApproveResponse {
+                    device_id,
+                    status: "ok".to_string(),
+                    message,
+                    pairing_code: None.unwrap_or_default(),
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::PairApprove(response)),
+                }
+            }
+            clipx::ipc_request::Request::Connect(req) => {
+                let device_id = req.device_id.clone();
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::Connect { device_id: device_id.clone(), reply_to: cmdres_tx });
+                let message = cmdres_rx.await?;
+                let response = clipx::ConnectResponse {
+                    device_id,
+                    status: "ok".to_string(),
+                    message,
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Connect(response)),
+                }
+            }
+            clipx::ipc_request::Request::Connected(_) => {
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = self.device_tx.send(DeviceCommands::Connected { reply_to: cmdres_tx });
+                let devices = cmdres_rx.await?;
+                let response = clipx::ConnectedResponse {
+                    devices: devices
+                        .into_iter()
+                        .map(|device| clipx::DeviceInfo {
+                            id: device.id,
+                            name: device.name,
+                            device_type: device.device_type as i32,
+                            address: device.addr.to_string(),
+                            last_seen_ms: device.last_seen.elapsed().as_millis() as u64,
+                        })
+                        .collect(),
+                };
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Connected(response)),
                 }
             }
         };

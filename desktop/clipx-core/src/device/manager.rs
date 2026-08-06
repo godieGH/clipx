@@ -1,8 +1,11 @@
 use super::seen::SeenDeviceRegistry;
 use super::trusted::TrustedDeviceStore;
-use super::types::SeenDevice;
+use super::types::{IdentitySnapshot, SeenDevice};
 use crate::device::identity::DeviceIdentity;
+use crate::device::pairing;
 use crate::message::proto;
+use crate::net::transport::TransportCommand;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,6 +15,9 @@ pub struct DeviceManager {
     seen: SeenDeviceRegistry,
     trusted: TrustedDeviceStore,
     identity: Arc<DeviceIdentity>,
+    pending_pairings: HashMap<String, String>,
+    connected: HashMap<String, String>,
+    transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
 }
 
 pub enum SeenMode {
@@ -24,15 +30,43 @@ pub enum DeviceCommands {
     GetSeen {
         mode: SeenMode,
         reply_to: oneshot::Sender<Vec<SeenDevice>>,
-    }
+    },
+    Pair {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    PendingPairings {
+        reply_to: oneshot::Sender<Vec<(String, String)>>,
+    },
+    ApprovePairing {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    Connect {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    Connected {
+        reply_to: oneshot::Sender<Vec<SeenDevice>>,
+    },
+    GetIdentity {
+        reply_to: oneshot::Sender<IdentitySnapshot>,
+    },
 }
 
 impl DeviceManager {
-    pub fn new(trusted_store_path: std::path::PathBuf, identity: Arc<DeviceIdentity>) -> Self {
+    pub fn new(
+        trusted_store_path: std::path::PathBuf,
+        identity: Arc<DeviceIdentity>,
+        transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
+    ) -> Self {
         Self {
             seen: SeenDeviceRegistry::new(),
             trusted: TrustedDeviceStore::load(trusted_store_path),
             identity,
+            pending_pairings: HashMap::new(),
+            connected: HashMap::new(),
+            transport_tx,
         }
     }
 
@@ -98,21 +132,86 @@ impl DeviceManager {
         }
     }
 
-    /// For a future CLI/IPC "pair <id>" command.
-    pub fn approve_pairing(&mut self, device_id: &str) -> bool {
-        let Some(device) = self.seen.get(device_id) else {
-            return false;
-        };
+    fn request_transport_connect(&self, device_id: &str) {
+        if let Some(tx) = self.transport_tx.as_ref() {
+            let (reply_tx, _reply_rx) = oneshot::channel();
+            let _ = tx.send(TransportCommand::Connect {
+                device_id: device_id.to_string(),
+                reply_to: reply_tx,
+            });
+        }
+    }
 
-        //pairing::approve(device, &mut self.trusted);
-        true
+    fn handle_pair_request(&mut self, device_id: &str) -> String {
+        if self.trusted.is_trusted(device_id) {
+            return "already trusted".to_string();
+        }
+
+        if let Some(device) = self.seen.get(device_id) {
+            let challenge = pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
+            let response = pairing::respond_to_challenge(&self.identity, &challenge);
+            let code = pairing::pairing_code(&challenge, &response);
+            self.pending_pairings.insert(device_id.to_string(), code.clone());
+            return format!("pairing requested for {device_id}; code {code}");
+        }
+
+        "device not found".to_string()
+    }
+
+    fn handle_approve_pairing(&mut self, device_id: &str) -> String {
+        match self.pending_pairings.remove(device_id) {
+            Some(code) => {
+                self.trusted.trust(super::types::TrustedDevice {
+                    id: device_id.to_string(),
+                    name: device_id.to_string(),
+                    device_type: crate::message::proto::DeviceType::Unspecified,
+                    paired_at: std::time::SystemTime::now(),
+                    public_key: [0u8; 32],
+                });
+                self.connected.insert(device_id.to_string(), code.clone());
+                self.request_transport_connect(device_id);
+                format!("pairing approved; code {code}")
+            }
+            None => "no pending pairing".to_string(),
+        }
+    }
+
+    fn handle_connect(&mut self, device_id: &str) -> String {
+        if !self.trusted.is_trusted(device_id) {
+            return "device is not trusted".to_string();
+        }
+
+        self.connected.insert(device_id.to_string(), "connected".to_string());
+        self.request_transport_connect(device_id);
+        "connected".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_requests_transport_for_trusted_device() {
+        let temp_dir = std::env::temp_dir().join("clipx-test-device-manager");
+        let identity = Arc::new(DeviceIdentity::load_or_create(temp_dir.join("identity")));
+        let (transport_tx, mut transport_rx) = mpsc::unbounded_channel();
+        let manager = DeviceManager::new(temp_dir.join("trusted.json"), identity, Some(transport_tx));
+
+        manager.request_transport_connect("device-1");
+
+        let command = transport_rx.blocking_recv().expect("transport command should be sent");
+        match command {
+            TransportCommand::Connect { device_id, .. } => assert_eq!(device_id, "device-1"),
+            other => panic!("expected connect command, got {other:?}"),
+        }
     }
 }
 
 
 // external device handling
 impl DeviceManager {
-    fn handle_device_command(&self, cmd: DeviceCommands) {
+    fn handle_device_command(&mut self, cmd: DeviceCommands) {
         match cmd {
             DeviceCommands::GetSeen { mode, reply_to } => {
                 let devices = self
@@ -126,6 +225,36 @@ impl DeviceManager {
                     .cloned()
                     .collect::<Vec<SeenDevice>>();
                 let _ = reply_to.send(devices);
+            }
+            DeviceCommands::Pair { device_id, reply_to } => {
+                let _ = reply_to.send(self.handle_pair_request(&device_id));
+            }
+            DeviceCommands::PendingPairings { reply_to } => {
+                let pending = self.pending_pairings.iter().map(|(id, code)| (id.clone(), code.clone())).collect();
+                let _ = reply_to.send(pending);
+            }
+            DeviceCommands::ApprovePairing { device_id, reply_to } => {
+                let _ = reply_to.send(self.handle_approve_pairing(&device_id));
+            }
+            DeviceCommands::Connect { device_id, reply_to } => {
+                let _ = reply_to.send(self.handle_connect(&device_id));
+            }
+            DeviceCommands::Connected { reply_to } => {
+                let devices = self
+                    .connected
+                    .keys()
+                    .filter_map(|device_id| self.seen.get(device_id).cloned())
+                    .collect::<Vec<SeenDevice>>();
+                let _ = reply_to.send(devices);
+            }
+            DeviceCommands::GetIdentity { reply_to } => {
+                let _ = reply_to.send(IdentitySnapshot {
+                    device_id: hex::encode(self.identity.get_this_device_fingerprint()),
+                    device_name: crate::device::config::get_hostname(),
+                    public_key_hex: hex::encode(self.identity.public_key_bytes()),
+                    ws_port: crate::device::config::get_ws_port(),
+                    device_type: crate::device::config::get_current_device_type(),
+                });
             }
         }
     }

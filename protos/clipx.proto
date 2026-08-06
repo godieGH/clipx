@@ -57,6 +57,11 @@ message IpcRequest {
     SeenRequest seen = 1;
     TrustedRequest trusted = 2;
     IdentityRequest identity = 3;
+    PairRequest pair = 4;
+    PairPendingRequest pair_pending = 5;
+    PairApproveRequest pair_approve = 6;
+    ConnectRequest connect = 7;
+    ConnectedRequest connected = 8;
   }
 }
 
@@ -65,7 +70,12 @@ message IpcResponse {
     SeenResponse seen = 1;
     TrustedResponse trusted = 2;
     IdentityResponse identity = 3;
-    ErrorResponse error = 4;
+    PairResponse pair = 4;
+    PairPendingResponse pair_pending = 5;
+    PairApproveResponse pair_approve = 6;
+    ConnectResponse connect = 7;
+    ConnectedResponse connected = 8;
+    ErrorResponse error = 9;
   }
 }
 
@@ -101,6 +111,56 @@ message IdentityResponse {
 
 message ErrorResponse {
   string message = 1;
+}
+
+message PairRequest {
+  string device_id = 1;
+}
+
+message PairResponse {
+  string device_id = 1;
+  string status = 2;
+  string message = 3;
+  string pairing_code = 4;
+}
+
+message PairPendingRequest {}
+
+message PairPendingResponse {
+  repeated PairPendingDevice pending = 1;
+}
+
+message PairPendingDevice {
+  string device_id = 1;
+  string device_name = 2;
+  string status = 3;
+}
+
+message PairApproveRequest {
+  string device_id = 1;
+}
+
+message PairApproveResponse {
+  string device_id = 1;
+  string status = 2;
+  string message = 3;
+  string pairing_code = 4;
+}
+
+message ConnectRequest {
+  string device_id = 1;
+}
+
+message ConnectResponse {
+  string device_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message ConnectedRequest {}
+
+message ConnectedResponse {
+  repeated DeviceInfo devices = 1;
 }
 
 message DeviceInfo {
