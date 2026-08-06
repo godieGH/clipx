@@ -1,0 +1,112 @@
+syntax = "proto3";
+package clipx;
+
+
+// ---------------------------------
+// Clipboard types
+// ---------------------------------
+message Hello {
+    uint32 proto_version = 1;
+}
+
+message ClipboardMessage {
+    oneof content {
+        string text = 1;
+    }
+}
+
+// -----------------------------------------
+// Device Discovery types
+// ----------------------------------------
+message Announce {
+  bytes fingerprint = 1;
+  string device_name = 2;
+  DeviceType device_type = 3;
+  uint32 ws_port = 4;
+}
+
+enum DeviceType {
+  UNSPECIFIED = 0;
+  WINDOWS = 1;
+  ANDROID = 2;
+  LINUX = 3;
+  MACOS = 4;
+  IOS = 5;
+}
+
+// -----------------------------
+// Device pairing and Connection
+// -----------------------------
+message PairChallenge {
+  bytes request_id = 1;
+  bytes nonce = 2;
+  bytes initiator_public = 3;
+}
+
+message PairChallengeResponse {
+  bytes request_id = 1;
+  bytes signature = 2;
+  bytes responder_public = 3;
+}
+
+// --------------------------------------------------------------
+// IPC based types - will split them later into different package
+// --------------------------------------------------------------
+message IpcRequest {
+  oneof request {
+    SeenRequest seen = 1;
+    TrustedRequest trusted = 2;
+    IdentityRequest identity = 3;
+  }
+}
+
+message IpcResponse {
+  oneof response {
+    SeenResponse seen = 1;
+    TrustedResponse trusted = 2;
+    IdentityResponse identity = 3;
+    ErrorResponse error = 4;
+  }
+}
+
+message SeenRequest {
+  enum Mode {
+    ALL = 0;
+    TRUSTED = 1;
+    UNTRUSTED = 2;
+  }
+
+  Mode mode = 1;
+}
+
+message SeenResponse {
+  repeated DeviceInfo devices = 1;
+}
+
+message TrustedRequest {}
+
+message TrustedResponse {
+  repeated DeviceInfo devices = 1;
+}
+
+message IdentityRequest {}
+
+message IdentityResponse {
+  string device_id = 1;
+  string device_name = 2;
+  string public_key_hex = 3;
+  uint32 ws_port = 4;
+  DeviceType device_type = 5;
+}
+
+message ErrorResponse {
+  string message = 1;
+}
+
+message DeviceInfo {
+  string id = 1;
+  string name = 2;
+  DeviceType device_type = 3;
+  string address = 4;
+  uint64 last_seen_ms = 5;
+}
