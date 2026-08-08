@@ -8,7 +8,7 @@ use tokio_tungstenite::{accept_async, WebSocketStream, tungstenite::Message as W
 use futures_util::{SinkExt, StreamExt};
 
 use crate::{
-    device::{manager::{DeviceCommands, SeenMode}, types::IdentitySnapshot},
+    device::{manager::{DeviceCommands, SeenMode}},
     message::proto::clipx,
 };
 use prost::Message;
