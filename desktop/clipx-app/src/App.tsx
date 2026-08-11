@@ -498,6 +498,7 @@ function App() {
 
       await appWindow.setPosition(new PhysicalPosition(x, y));
       appWindow.show();
+      handleScan();
     }
     positionAppWindow();
   }, []);

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "clipx-app",
+  "productName": "Clipx App",
   "version": "0.1.0",
-  "identifier": "com.godiegh.clipx-app",
+  "identifier": "com.godiegh.clipx-ui",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",

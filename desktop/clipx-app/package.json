@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "manage:tauri": "node manage-tauri.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "pretauri": "node manage-tauri.mjs --sync-icons",
     "tauri": "tauri"
   },
   "dependencies": {
