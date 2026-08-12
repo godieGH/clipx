@@ -40,6 +40,7 @@ pub fn respond_to_challenge(
     }
 }
 
+#[allow(unused)]
 pub fn verify_response(
     challenge: &PairingChallenge,
     response: &PairingChallengeResponse,
@@ -58,6 +59,7 @@ pub fn pairing_code(challenge: &PairingChallenge, response: &PairingChallengeRes
     format!("{code:06}")
 }
 
+#[allow(unused)]
 pub fn approve(seen: &SeenDevice, trusted: &mut TrustedDeviceStore) {
     trusted.trust(TrustedDevice {
         id: seen.id.clone(),

@@ -457,6 +457,12 @@ main {
   border-color: transparent;
 }
 
+button.device-hit:active {
+ background: none;
+ transform: translateX(5px);
+ transition: 0.1s;
+}
+
 .device-icon {
   display: flex;
   align-items: center;

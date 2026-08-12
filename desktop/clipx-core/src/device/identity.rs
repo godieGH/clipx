@@ -63,6 +63,7 @@ impl DeviceIdentity {
 /// Verifies a signature against a claimed public key.
 /// Returns false (never panics) on any malformed input — this handles
 /// untrusted network bytes, so it must never crash the caller.
+#[allow(unused)]
 pub fn verify(public_key_bytes: &[u8], message: &[u8], signature_bytes: &[u8]) -> bool {
     let Ok(pk_array) = <[u8; 32]>::try_from(public_key_bytes) else {
         return false;

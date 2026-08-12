@@ -33,6 +33,7 @@ impl TrustedDeviceStore {
         self.devices.get(device_id)
     }
 
+    #[allow(unused)]
     pub fn list(&self) -> impl Iterator<Item = &TrustedDevice> {
         self.devices.values()
     }
@@ -45,6 +46,7 @@ impl TrustedDeviceStore {
         }
     }
 
+    #[allow(unused)]
     /// Removes a device's trust and persists immediately.
     pub fn revoke(&mut self, device_id: &str) {
         self.devices.remove(device_id);

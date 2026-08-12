@@ -4,18 +4,21 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
 };
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct ConnectedDevice {
     pub id: String,
     pub addr: SocketAddr,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum TransportEvent {
     Connected(ConnectedDevice),
     Disconnected(String),
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum TransportCommand {
     Connect { device_id: String, reply_to: oneshot::Sender<bool> },
@@ -60,8 +63,8 @@ impl Transport {
                 Some(cmd) = self.command_rx.recv() => {
                     self.handle_command(cmd);
                 }
-                result = self.listener.accept() => {
-                    match result {
+                connection = self.listener.accept() => {
+                    match connection {
                         Ok((socket, addr)) => {
                             tracing::info!("transport accepted connection from {addr}");
                             let _ = socket;

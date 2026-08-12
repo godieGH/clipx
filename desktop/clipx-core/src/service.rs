@@ -36,6 +36,7 @@ impl CoreService {
         Self::default()
     }
 
+    #[allow(unused)]
     pub fn state(&self) -> ServiceState {
         self.state
     }

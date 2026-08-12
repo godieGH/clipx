@@ -17,6 +17,7 @@ fn config_dir() -> PathBuf {
     dirs.config_dir().to_path_buf()
 }
 
+#[allow(unused)]
 pub fn machine_device_id_path() -> PathBuf {
     config_dir().join(MACHINE_DEVICE_ID_FILE)
 }
