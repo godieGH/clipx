@@ -1,15 +1,6 @@
 mod commands;
-mod ipc;
-mod clipx {
-    #![allow(unused)]
-    mod clipx {
-        include!(concat!(env!("OUT_DIR"), "/clipx.rs"));
-    }
-    
-    pub use clipx::*;
-    
-}
-
+use clipx_tray_lib::ipc;
+use clipx_tray_lib::clipx;
 use clap::{Parser, Subcommand};
 use commands::{seen::SeenArgs, trusted::TrustedArgs, identity::IdentityArgs, pair::PairArgs, connect::ConnectArgs};
 
@@ -40,7 +31,7 @@ fn main() {
 
     match cli.cmd {
         Cmd::Seen(args) => {
-            SeenArgs::run(args, ipc);
+            commands::seen::SeenArgs::run(args, ipc);
         }
         Cmd::Trusted(args) => {
             commands::trusted::TrustedArgs::run(args, ipc);
@@ -54,19 +45,5 @@ fn main() {
         Cmd::Connect(args) => {
             commands::connect::ConnectArgs::run(args, ipc);
         }
-    }
-}
-
-mod utils {
-    #![allow(unused)]
-    use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-    pub fn serialize(value: &impl Serialize) -> String {
-        serde_json::to_string(value).unwrap()
-    }
-
-    pub fn deserialize<T>(value: &str) -> anyhow::Result<T> 
-    where T: DeserializeOwned {
-        Ok(serde_json::from_str(value)?)
     }
 }

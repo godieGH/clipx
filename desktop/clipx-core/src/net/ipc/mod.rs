@@ -68,7 +68,9 @@ impl IpcService {
 
         while let Some(msg) = ws.next().await {
             let msg = msg?;
-            if  msg.is_close() {break;}
+            if  msg.is_close() {
+                break;
+            }
 
             match msg {
                 WsMessage::Binary(bytes) => {
@@ -83,7 +85,7 @@ impl IpcService {
             }
         }
 
-        ws.close(None).await?;
+        // ws.close(None).await?; //this is redundant since peer is one iniating a close and tungestenite sends a closing ack autoamatically
         Ok(())
     }
 
@@ -155,6 +157,7 @@ impl IpcService {
                     public_key_hex: snapshot.public_key_hex,
                     ws_port: snapshot.ws_port,
                     device_type: snapshot.device_type as i32,
+                    ip_address: snapshot.ip_addr
                 };
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::Identity(response)),

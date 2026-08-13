@@ -107,6 +107,7 @@ message IdentityResponse {
   string public_key_hex = 3;
   uint32 ws_port = 4;
   DeviceType device_type = 5;
+  string ip_address = 6;
 }
 
 message ErrorResponse {

@@ -1,6 +1,7 @@
 import { currentMonitor, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 type DeviceType = "windows" | "android" | "linux" | "macos" | "ios";
 type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailable";
@@ -40,11 +41,11 @@ interface OwnIdentity {
 }
 
 const OWN_IDENTITY: OwnIdentity = {
-  name: "Godies-PC",
+  name: "Clipx Laptop",
   fingerprint: "3edaGf6yfggzbA9c1e0f7a2b4c9d8e1f",
   deviceType: "Windows",
   wsPort: 8080,
-  ipAddress: "192.168.0.181",
+  ipAddress: "10.x.x.x",
 };
 
 const MOCK_PAIRED: PairedDevice[] = [
@@ -254,7 +255,7 @@ function AvailableRow({ device, onPair }: { device: AvailableDevice; onPair: (fp
 }
 
 function DeviceIdentity({ identity, onClose }: { identity: OwnIdentity; onClose: () => void }) {
-  const grouped = identity.fingerprint.match(/.{1,4}/g)?.join(" ") ?? identity.fingerprint;
+  const grouped = identity.fingerprint.match(/.{1,4}/g)?.slice(0, 7).join("-") ?? identity.fingerprint;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -323,7 +324,7 @@ function DeviceDetail({
   onForget: (fp: string) => void;
   onToggleAutoConnect: (fp: string, value: boolean) => void;
 }) {
-  const grouped = device.fingerprint.match(/.{1,4}/g)?.join(" ") ?? device.fingerprint;
+  const grouped = device.fingerprint.match(/.{1,4}/g)?.slice(0, 7).join("-") ?? device.fingerprint;
   const isConnected = device.connection === "connected" || device.connection === "connecting";
 
   return (
@@ -484,7 +485,18 @@ function App() {
   const [showIdentity, setShowIdentity] = useState(false);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(null);
 
+  const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY)
+
   useEffect(() => {
+    async function getThisDeviceIdenty() {
+      try {
+        let result: OwnIdentity = await invoke("get_this_device_identity");
+        setOwnIdentity(result)
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
     async function positionAppWindow() {
       const monitor = await currentMonitor();
       if (!monitor) return;
@@ -500,6 +512,7 @@ function App() {
       appWindow.show();
       handleScan();
     }
+    getThisDeviceIdenty();
     positionAppWindow();
   }, []);
 
@@ -698,7 +711,7 @@ function App() {
 
       <main>{screen === "devices" ? renderDevicesScreen() : renderHistoryScreen()}</main>
 
-      {showIdentity && <DeviceIdentity identity={OWN_IDENTITY} onClose={() => setShowIdentity(false)} />}
+      {showIdentity && <DeviceIdentity identity={ownIdentity} onClose={() => setShowIdentity(false)} />}
 
       {detailDevice && (
         <DeviceDetail

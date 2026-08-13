@@ -254,6 +254,15 @@ impl DeviceManager {
                     public_key_hex: hex::encode(self.identity.public_key_bytes()),
                     ws_port: crate::device::config::get_ws_port(),
                     device_type: crate::device::config::get_current_device_type(),
+                    // the device manager should ask the network component for what addr this device is bound
+                    // for now since this is prototype the device is bound to 0.0.0.0 all interfaces as long as they send to the bound ws_port
+                    // so we're going to hardcode it, but later we'll need a way to dynamically/progamatically decide what interfaces to bind
+                    // it is also going to be determined through wifi-direct routing or hotsport routing when these features are built
+                    // Or if not, the network service will find a suitable Ip address to bind to, maybe that one in an active Wifi network
+                    // Or if not, we can just leave binding to all interface (0.0.0.0) to ensure any kind of packet meant to reach this core is delivered no matter what interface gave it
+                    // it could be a wifi, hotsport, or a VPN networks, or mobile networks but for the ip_addr field in the snapshot, We find it dynamically/progamatically the code should figure out what is the active Interface by now
+                    // and this is best design than binding to a specific addr
+                    ip_addr: "0.0.0.0".into()
                 });
             }
         }

@@ -43,6 +43,7 @@ impl IdentityArgs {
                     println!("public_key: {}", response.public_key_hex);
                     println!("ws_port: {}", response.ws_port);
                     println!("device_type: {}", response.device_type);
+                    println!("ip: {}", response.ip_address);
                 }
             }
         }

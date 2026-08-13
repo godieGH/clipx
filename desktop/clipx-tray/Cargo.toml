@@ -3,6 +3,10 @@ name = "clipx-tray"
 version = "0.1.0"
 edition = "2021"
 
+
+[lib]
+name = "clipx_tray_lib"
+
 [dependencies]
 interprocess = { version = "2.4.2", features = ["tokio"] }
 clap = { version = "4.5", features = ["derive"] }

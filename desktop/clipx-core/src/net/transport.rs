@@ -42,7 +42,7 @@ impl Transport {
         let ws_port = crate::device::config::get_ws_port();
         let listener = TcpListener::bind(format!("0.0.0.0:{ws_port}"))
             .await
-            .expect("websocket listener should bind");
+            .expect("websocket listener failed bind");
         tracing::info!("WS server running on port={ws_port} ...");
         Self {
             listener,

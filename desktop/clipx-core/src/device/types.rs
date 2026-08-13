@@ -34,6 +34,7 @@ pub struct IdentitySnapshot {
     pub public_key_hex: String,
     pub ws_port: u32,
     pub device_type: DeviceType,
+    pub ip_addr: String,
 }
 
 #[cfg(test)]
@@ -48,6 +49,7 @@ mod tests {
             public_key_hex: "deadbeef".to_string(),
             ws_port: 9000,
             device_type: DeviceType::Windows,
+            ip_addr: "192.168.0.101".into(),
         };
 
         assert_eq!(snapshot.device_name, "my-host");

@@ -609,6 +609,7 @@ dependencies = [
 name = "clipx-app"
 version = "0.1.0"
 dependencies = [
+ "clipx-tray",
  "serde",
  "serde_json",
  "tauri",

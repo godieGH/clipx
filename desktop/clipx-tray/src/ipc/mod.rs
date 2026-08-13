@@ -60,10 +60,20 @@ impl IpcClient {
                 tungstenite::Message::Binary(bytes) => {
                     let res = clipx::IpcResponse::decode(bytes.as_slice())?;
                     ws.close(None)?;
+                    loop {
+                        let msg = ws.read();
+                        match msg {                       
+                            Ok(tungstenite::Message::Close(_)) => {
+                                break;
+                            }
+                            Ok(_) => continue,
+                            Err(_) => break,
+                        }
+
+                    }
                     return Ok(res);
                 }
                 tungstenite::Message::Close(_) => {
-                    ws.close(None)?;
                     break;
                 }
                 _ => {}
