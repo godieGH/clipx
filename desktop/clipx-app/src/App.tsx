@@ -59,7 +59,7 @@ const MOCK_PAIRED: PairedDevice[] = [
 ];
 
 const MOCK_AVAILABLE: AvailableDevice[] = [
-  { fingerprint: "9f21caccbe0912ff3310", name: "Unknown Laptop", deviceType: "windows", pairing: "idle" },
+  { fingerprint: "9f21caccbe0912ff3310637e2f33323f34faf3f3a3f322323", name: "Unknown Laptop", deviceType: "windows", pairing: "idle" },
 ];
 
 const MOCK_HISTORY: ClipItem[] = [
@@ -238,15 +238,15 @@ function AvailableRow({ device, onPair }: { device: AvailableDevice; onPair: (fp
 
   return (
     <div className="device-row">
-      <div style={{display: "flex", alignItems: "center", gap: "10px"}}>
+      <button className="device-hit">
         <div className="device-icon">
           <DeviceIcon type={device.deviceType} />
         </div>
         <div className="device-info">
-          <div className="device-name" style={{padding: "0px", transform: "translateY(4px)"}}>{device.name}</div>
-          <div className="device-sub" style={{padding: "0px", transform: "translateY(-4px)"}}>{device.fingerprint.slice(0, 8)}…</div>
+          <div className="device-name">{device.name}</div>
+          <div className="device-sub">{device.fingerprint.match(/.{1,4}/g)?.slice(0, 7).join("-") ?? device.fingerprint}</div>
         </div>
-      </div>
+      </button>
       <button className="device-action" disabled={busy} onClick={() => onPair(device.fingerprint)}>
         {busy ? "Requesting…" : "Pair"}
       </button>
