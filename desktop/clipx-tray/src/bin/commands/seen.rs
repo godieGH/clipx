@@ -1,5 +1,5 @@
 use clap::Args;
-use crate::ipc::IpcClient;
+use crate::ipc::Client;
 use crate::clipx;
 
 #[derive(Args, Debug)]
@@ -16,7 +16,7 @@ pub struct SeenArgs {
 }
 
 impl SeenArgs {
-    pub fn run(args: SeenArgs, mut ipc: IpcClient) {
+    pub fn run(args: SeenArgs, mut ipc: Client) {
         let mode = if args.trusted {
             clipx::seen_request::Mode::Trusted as i32
         } else if args.untrusted {

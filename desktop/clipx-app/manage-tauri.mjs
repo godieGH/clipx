@@ -73,6 +73,18 @@ async function syncIcons() {
 async function cleanCargo() {
   console.log('🦀 Cleaning Cargo build artifacts...');
   try {
+    const { stdout } = await execAsync('cargo clean --package=clipx-app');
+    if (stdout.trim()) console.log(stdout);
+    console.log('  ✔ Package clipx-app cleaned successfully.');
+  } catch (error) {
+    console.error('  ✖ Failed to clean cargo package:', error.message);
+    process.exit(1);
+  }
+}
+
+async function cleanCargoAll() {
+  console.log('🦀 Cleaning Cargo build artifacts...');
+  try {
     const { stdout } = await execAsync('cargo clean');
     if (stdout.trim()) console.log(stdout);
     console.log('  ✔ Cargo workspace cleaned successfully.');
@@ -119,8 +131,12 @@ async function run() {
       await syncIcons();
     }
 
-    if (runAll || args.includes('--cargo-clean')) {
+    if (args.includes('--cargo-clean')) {
       await cleanCargo();
+    }
+
+    if (runAll || args.includes('--cargo-clean-all')) {
+      await cleanCargoAll();
     }
 
     console.log('\n✨ Task execution completed!');

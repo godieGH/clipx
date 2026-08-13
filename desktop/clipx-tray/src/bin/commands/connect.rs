@@ -1,5 +1,5 @@
 use clap::Args;
-use crate::{clipx, ipc::IpcClient};
+use crate::{clipx, ipc::Client};
 
 #[derive(Args)]
 pub struct ConnectArgs {
@@ -11,7 +11,7 @@ pub struct ConnectArgs {
 }
 
 impl ConnectArgs {
-    pub fn run(args: ConnectArgs, mut ipc: IpcClient) {
+    pub fn run(args: ConnectArgs, mut ipc: Client) {
         let request = if args.list {
             clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::Connected(clipx::ConnectedRequest {})),

@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use crate::{clipx, ipc::IpcClient};
+use crate::{clipx, ipc::Client};
 
 #[derive(Args)]
 pub struct TrustedArgs {
@@ -16,7 +16,7 @@ enum TrustedSubcmd {
 }
 
 impl TrustedArgs {
-    pub fn run(args: TrustedArgs, mut ipc: IpcClient) {
+    pub fn run(args: TrustedArgs, mut ipc: Client) {
         let ipcreq = clipx::IpcRequest {
             request: Some(clipx::ipc_request::Request::Trusted(clipx::TrustedRequest {})),
         };

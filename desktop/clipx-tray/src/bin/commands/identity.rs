@@ -1,5 +1,5 @@
 use clap::Args;
-use crate::{clipx, ipc::IpcClient};
+use crate::{clipx, ipc::Client};
 
 #[derive(Args)]
 pub struct IdentityArgs {
@@ -20,7 +20,7 @@ pub struct IdentityArgs {
 }
 
 impl IdentityArgs {
-    pub fn run(args: IdentityArgs, mut ipc: IpcClient) {
+    pub fn run(args: IdentityArgs, mut ipc: Client) {
         let ipcreq = clipx::IpcRequest {
             request: Some(clipx::ipc_request::Request::Identity(clipx::IdentityRequest {})),
         };

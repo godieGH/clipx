@@ -27,7 +27,7 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    let ipc = ipc::IpcClient::new("clipx").run();
+    let ipc = ipc::Client::new("clipx").run();
 
     match cli.cmd {
         Cmd::Seen(args) => {

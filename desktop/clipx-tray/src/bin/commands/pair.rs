@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use crate::{clipx, ipc::IpcClient};
+use crate::{clipx, ipc::Client};
 
 #[derive(Args)]
 pub struct PairArgs {
@@ -18,7 +18,7 @@ enum PairSubcmd {
 }
 
 impl PairArgs {
-    pub fn run(args: PairArgs, mut ipc: IpcClient) {
+    pub fn run(args: PairArgs, mut ipc: Client) {
         let request = match args.cmd {
             Some(PairSubcmd::Start { device_id }) => clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::Pair(clipx::PairRequest { device_id })),
