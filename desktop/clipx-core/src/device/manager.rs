@@ -34,7 +34,6 @@ pub enum DeviceCommands {
     Connect { device_id: String, reply_to: oneshot::Sender<String> },
     Connected { reply_to: oneshot::Sender<Vec<SeenDevice>> },
     GetIdentity { reply_to: oneshot::Sender<IdentitySnapshot> },
-    // --- new ---
     GetPaired { reply_to: oneshot::Sender<Vec<proto::DeviceInfo>> },
     Disconnect { device_id: String, reply_to: oneshot::Sender<String> },
     SetAutoConnect { device_id: String, auto_connect: bool, reply_to: oneshot::Sender<bool> },
