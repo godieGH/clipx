@@ -16,7 +16,7 @@ pub struct SeenArgs {
 }
 
 impl SeenArgs {
-    pub fn run(args: SeenArgs, mut ipc: Client) {
+    pub fn run(args: SeenArgs, ipc: &mut Client) {
         let mode = if args.trusted {
             clipx::seen_request::Mode::Trusted as i32
         } else if args.untrusted {

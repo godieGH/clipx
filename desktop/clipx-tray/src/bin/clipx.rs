@@ -27,23 +27,23 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    let ipc = ipc::Client::new("clipx").run();
+    let mut ipc = ipc::Client::new("clipx").start();
 
     match cli.cmd {
         Cmd::Seen(args) => {
-            commands::seen::SeenArgs::run(args, ipc);
+            commands::seen::SeenArgs::run(args, &mut ipc);
         }
         Cmd::Trusted(args) => {
-            commands::trusted::TrustedArgs::run(args, ipc);
+            commands::trusted::TrustedArgs::run(args, &mut ipc);
         }
         Cmd::Identity(args) => {
-            commands::identity::IdentityArgs::run(args, ipc);
+            commands::identity::IdentityArgs::run(args, &mut ipc);
         }
         Cmd::Pair(args) => {
-            commands::pair::PairArgs::run(args, ipc);
+            commands::pair::PairArgs::run(args, &mut ipc);
         }
         Cmd::Connect(args) => {
-            commands::connect::ConnectArgs::run(args, ipc);
+            commands::connect::ConnectArgs::run(args, &mut ipc);
         }
     }
 }

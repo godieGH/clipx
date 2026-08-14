@@ -2,6 +2,8 @@ import { currentMonitor, getCurrentWindow, PhysicalPosition } from "@tauri-apps/
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { showToast, subscribeToast, ToastState } from "./components/toast";
+import { Toast } from "./components/Toast.tsx";
 
 type DeviceType = "windows" | "android" | "linux" | "macos" | "ios";
 type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailable";
@@ -42,10 +44,10 @@ interface OwnIdentity {
 
 const OWN_IDENTITY: OwnIdentity = {
   name: "Clipx Laptop",
-  fingerprint: "3edaGf6yfggzbA9c1e0f7a2b4c9d8e1f",
+  fingerprint: "x".repeat(32),
   deviceType: "Windows",
-  wsPort: 8080,
-  ipAddress: "10.x.x.x",
+  wsPort: 0,
+  ipAddress: "x.x.x.x",
 };
 
 const MOCK_PAIRED: PairedDevice[] = [
@@ -485,7 +487,10 @@ function App() {
   const [showIdentity, setShowIdentity] = useState(false);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(null);
 
-  const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY)
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY);
+
+  useEffect(() => subscribeToast(setToast), []);
 
   useEffect(() => {
     async function getThisDeviceIdenty() {
@@ -493,7 +498,13 @@ function App() {
         let result: OwnIdentity = await invoke("get_this_device_identity");
         setOwnIdentity(result)
       } catch (e) {
-        console.error(e)
+        showToast(`${e}`, {
+          variant: "error",
+          onOk: () => {
+            appWindow.close()
+          },
+          okLabel: "Close App"
+        })
       }
     }
 
@@ -572,7 +583,7 @@ function App() {
   }
 
   function handleCopy(content: string) {
-    navigator.clipboard?.writeText(content).catch(() => {});
+    navigator.clipboard?.writeText(content).catch(() => { });
   }
 
   function handleRemoveHistory(id: string) {
@@ -722,6 +733,8 @@ function App() {
           onToggleAutoConnect={handleToggleAutoConnect}
         />
       )}
+
+      <Toast toast={toast}/>
     </>
   );
 }

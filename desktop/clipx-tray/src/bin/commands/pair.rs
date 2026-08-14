@@ -18,7 +18,7 @@ enum PairSubcmd {
 }
 
 impl PairArgs {
-    pub fn run(args: PairArgs, mut ipc: Client) {
+    pub fn run(args: PairArgs, ipc: &mut Client) {
         let request = match args.cmd {
             Some(PairSubcmd::Start { device_id }) => clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::Pair(clipx::PairRequest { device_id })),

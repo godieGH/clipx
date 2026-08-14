@@ -11,7 +11,7 @@ pub struct ConnectArgs {
 }
 
 impl ConnectArgs {
-    pub fn run(args: ConnectArgs, mut ipc: Client) {
+    pub fn run(args: ConnectArgs, ipc: &mut Client) {
         let request = if args.list {
             clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::Connected(clipx::ConnectedRequest {})),
