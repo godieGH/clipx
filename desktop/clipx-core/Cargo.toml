@@ -23,6 +23,7 @@ sha2 = "0.11.0"
 hex = "0.4.3"
 interprocess = { version = "2.4.2", features = ["tokio"] }
 anyhow = "1.0.104"
+tokio-util = { version = "0.7.19", features = ["full"] }
 
 [build-dependencies]
 prost-build = "0.14.4"

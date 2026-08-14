@@ -10,6 +10,7 @@ type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailabl
 type PairingState = "idle" | "requesting";
 type Screen = "devices" | "history";
 
+
 interface PairedDevice {
   fingerprint: string;
   name: string;
@@ -44,25 +45,17 @@ interface OwnIdentity {
 
 const OWN_IDENTITY: OwnIdentity = {
   name: "Clipx Laptop",
-  fingerprint: "x".repeat(32),
-  deviceType: "Windows",
+  fingerprint: "",
+  deviceType: "unknown",
   wsPort: 0,
-  ipAddress: "x.x.x.x",
+  ipAddress: "0.0.0.0",
 };
 
-const MOCK_PAIRED: PairedDevice[] = [
-  { fingerprint: "3edaGf6yfggzbA9c1e0", name: "Godies-PC", deviceType: "windows", connection: "connected", ipAddress: "192.168.0.181", wsPort: 8080, autoConnect: true },
-  { fingerprint: "86831dabc4a279aabd10", name: "samsung SM-G970U", deviceType: "android", connection: "disconnected", ipAddress: "192.168.0.101", wsPort: 8081, autoConnect: true },
-  { fingerprint: "5f0912ccbe0912ff3399", name: "Office Laptop", deviceType: "windows", connection: "unavailable", ipAddress: "192.168.0.114", wsPort: 8080, autoConnect: false },
-  { fingerprint: "1a2b3c4d5e6f7a8b9c0d", name: "Living Room TV", deviceType: "linux", connection: "unavailable", ipAddress: "192.168.0.140", wsPort: 8080, autoConnect: false },
-  { fingerprint: "aa11bb22cc33dd44ee66", name: "Study Mac Mini", deviceType: "macos", connection: "disconnected", ipAddress: "192.168.0.152", wsPort: 8080, autoConnect: true },
-  { fingerprint: "bb22cc33dd44ee5511aa", name: "Bedroom NAS", deviceType: "linux", connection: "unavailable", ipAddress: "192.168.0.160", wsPort: 8080, autoConnect: false },
-  { fingerprint: "cc33dd44ee5511aabb22", name: "Garage Pi", deviceType: "linux", connection: "unavailable", ipAddress: "192.168.0.170", wsPort: 8080, autoConnect: false },
-];
+const PAIRED_POLL_MS = 4000;
 
-const MOCK_AVAILABLE: AvailableDevice[] = [
-  { fingerprint: "9f21caccbe0912ff3310637e2f33323f34faf3f3a3f322323", name: "Unknown Laptop", deviceType: "windows", pairing: "idle" },
-];
+const MOCK_PAIRED: PairedDevice[] = [];
+
+const MOCK_AVAILABLE: AvailableDevice[] = [];
 
 const MOCK_HISTORY: ClipItem[] = [
   { id: "h1", content: "https://github.com/godiegh/clipx", sourceDevice: "samsung SM-G970U", receivedAt: Date.now() - 1000 * 60 * 2 },
@@ -492,94 +485,125 @@ function App() {
 
   useEffect(() => subscribeToast(setToast), []);
 
+  const refreshPaired = useCallback(async () => {
+    try {
+      const result: PairedDevice[] = await invoke("get_paired_devices");
+      setPaired(result);
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    }
+  }, []);
+
+  const refreshAvailable = useCallback(async () => {
+    try {
+      const result: { fingerprint: string; name: string; deviceType: DeviceType }[] =
+        await invoke("get_available_devices");
+      setAvailable((prev) => {
+        const requesting = new Set(prev.filter((d) => d.pairing === "requesting").map((d) => d.fingerprint));
+        return result.map((d) => ({ ...d, pairing: requesting.has(d.fingerprint) ? "requesting" : "idle" }));
+      });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    }
+  }, []);
+
   useEffect(() => {
     async function getThisDeviceIdenty() {
       try {
-        let result: OwnIdentity = await invoke("get_this_device_identity");
-        setOwnIdentity(result)
+        const result: OwnIdentity = await invoke("get_this_device_identity");
+        setOwnIdentity(result);
       } catch (e) {
         showToast(`${e}`, {
           variant: "error",
-          onOk: () => {
-            appWindow.close()
-          },
-          okLabel: "Close App"
-        })
+          onOk: () => appWindow.close(),
+          okLabel: "Close App",
+        });
       }
     }
 
     async function positionAppWindow() {
       const monitor = await currentMonitor();
       if (!monitor) return;
-
       const windowSize = await appWindow.outerSize();
       const workArea = monitor.workArea;
       const margin = 30;
-
       const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
       const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
-
       await appWindow.setPosition(new PhysicalPosition(x, y));
       appWindow.show();
       handleScan();
     }
+
     getThisDeviceIdenty();
+    refreshPaired();
     positionAppWindow();
+
+    // Sync mechanism: poll paired devices on an interval. Good enough for now —
+    // a push-based version (core broadcasting state changes) can replace this later
+    // without changing anything downstream of refreshPaired().
+    const interval = setInterval(refreshPaired, PAIRED_POLL_MS);
+    return () => clearInterval(interval);
   }, []);
 
   function handleScan() {
     setScanning(true);
-    setTimeout(() => {
-      setScanning(false);
-      setAvailable((prev) =>
-        prev.some((d) => d.fingerprint === "aa11bb22cc33dd44ee55")
-          ? prev
-          : [...prev, { fingerprint: "aa11bb22cc33dd44ee55", name: "Kitchen iPad", deviceType: "ios", pairing: "idle" }]
-      );
-    }, 1200);
+    refreshAvailable().finally(() => setScanning(false));
   }
 
-  function handleConnect(fingerprint: string) {
+  async function handleConnect(fingerprint: string) {
     setPaired((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, connection: "connecting" } : d)));
-    setTimeout(() => {
-      setPaired((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, connection: "connected" } : d)));
-    }, 1500);
+    try {
+      await invoke("connect_device", { deviceId: fingerprint });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    } finally {
+      refreshPaired();
+    }
   }
 
-  function handleDisconnect(fingerprint: string) {
-    setPaired((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, connection: "disconnected" } : d)));
+  async function handleDisconnect(fingerprint: string) {
     setDetailFingerprint(null);
+    try {
+      await invoke("disconnect_device", { deviceId: fingerprint });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    } finally {
+      refreshPaired();
+    }
   }
 
-  function handleForget(fingerprint: string) {
-    setPaired((prev) => prev.filter((d) => d.fingerprint !== fingerprint));
+  async function handleForget(fingerprint: string) {
     setDetailFingerprint(null);
+    setPaired((prev) => prev.filter((d) => d.fingerprint !== fingerprint)); // optimistic
+    try {
+      await invoke("forget_device", { deviceId: fingerprint });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+      refreshPaired(); // roll back the optimistic removal on failure
+    }
   }
 
-  function handleToggleAutoConnect(fingerprint: string, value: boolean) {
+  async function handleToggleAutoConnect(fingerprint: string, value: boolean) {
     setPaired((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, autoConnect: value } : d)));
+    try {
+      await invoke("set_auto_connect", { deviceId: fingerprint, autoConnect: value });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+      refreshPaired();
+    }
   }
 
-  function handlePair(fingerprint: string) {
+  async function handlePair(fingerprint: string) {
     setAvailable((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, pairing: "requesting" } : d)));
-    setTimeout(() => {
-      setAvailable((prevAvail) => {
-        const device = prevAvail.find((d) => d.fingerprint === fingerprint);
-        if (device) {
-          setPaired((prevPaired) => [
-            ...prevPaired,
-            {
-              ...device,
-              connection: "connected",
-              ipAddress: "192.168.0.—",
-              wsPort: 8080,
-              autoConnect: true,
-            },
-          ]);
-        }
-        return prevAvail.filter((d) => d.fingerprint !== fingerprint);
-      });
-    }, 1800);
+    try {
+      await invoke("pair_device", { deviceId: fingerprint });
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+      setAvailable((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, pairing: "idle" } : d)));
+    }
+    // Note: pairing here only sends the *request* — approval happens elsewhere
+    // (handle_approve_pairing on the core side). Once that's wired to a UI action,
+    // refreshPaired()/refreshAvailable() here will pick up the result.
   }
 
   function handleCopy(content: string) {

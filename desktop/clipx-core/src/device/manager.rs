@@ -4,8 +4,8 @@ use super::types::{IdentitySnapshot, SeenDevice};
 use crate::device::identity::DeviceIdentity;
 use crate::device::pairing;
 use crate::message::proto;
-use crate::net::transport::TransportCommand;
-use std::collections::HashMap;
+use crate::net::transport::{ConnectedDevice, TransportCommand};
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,31 +27,18 @@ pub enum SeenMode {
 }
 
 pub enum DeviceCommands {
-    GetSeen {
-        mode: SeenMode,
-        reply_to: oneshot::Sender<Vec<SeenDevice>>,
-    },
-    Pair {
-        device_id: String,
-        reply_to: oneshot::Sender<String>,
-    },
-    PendingPairings {
-        reply_to: oneshot::Sender<Vec<(String, String)>>,
-    },
-    ApprovePairing {
-        device_id: String,
-        reply_to: oneshot::Sender<String>,
-    },
-    Connect {
-        device_id: String,
-        reply_to: oneshot::Sender<String>,
-    },
-    Connected {
-        reply_to: oneshot::Sender<Vec<SeenDevice>>,
-    },
-    GetIdentity {
-        reply_to: oneshot::Sender<IdentitySnapshot>,
-    },
+    GetSeen { mode: SeenMode, reply_to: oneshot::Sender<Vec<SeenDevice>> },
+    Pair { device_id: String, reply_to: oneshot::Sender<String> },
+    PendingPairings { reply_to: oneshot::Sender<Vec<(String, String)>> },
+    ApprovePairing { device_id: String, reply_to: oneshot::Sender<String> },
+    Connect { device_id: String, reply_to: oneshot::Sender<String> },
+    Connected { reply_to: oneshot::Sender<Vec<SeenDevice>> },
+    GetIdentity { reply_to: oneshot::Sender<IdentitySnapshot> },
+    // --- new ---
+    GetPaired { reply_to: oneshot::Sender<Vec<proto::DeviceInfo>> },
+    Disconnect { device_id: String, reply_to: oneshot::Sender<String> },
+    SetAutoConnect { device_id: String, auto_connect: bool, reply_to: oneshot::Sender<bool> },
+    ForgetDevice { device_id: String, reply_to: oneshot::Sender<String> },
 }
 
 impl DeviceManager {
@@ -74,7 +61,7 @@ impl DeviceManager {
         mut self,
         mut shutdown_rx: watch::Receiver<bool>,
         mut discovered_rx: mpsc::UnboundedReceiver<(proto::Announce, SocketAddr)>,
-        mut device_rx: mpsc::UnboundedReceiver<DeviceCommands>
+        mut device_rx: mpsc::UnboundedReceiver<DeviceCommands>,
     ) {
         let mut prune_interval = tokio::time::interval(Duration::from_secs(10));
 
@@ -89,8 +76,9 @@ impl DeviceManager {
                 _ = prune_interval.tick() => {
                     self.seen.prune_stale(Duration::from_secs(30));
                 }
+                // now .await — handle_device_command is async (queries transport for GetPaired/Disconnect)
                 Some(cmd) = device_rx.recv() => {
-                    self.handle_device_command(cmd);
+                    self.handle_device_command(cmd).await;
                 }
             }
         }
@@ -98,19 +86,13 @@ impl DeviceManager {
         tracing::info!("device manager stopped");
     }
 
-    fn handle_announce(
-        &mut self,
-        announce: proto::Announce,
-        addr: SocketAddr,
-    ) {
+    fn handle_announce(&mut self, announce: proto::Announce, addr: SocketAddr) {
         let Ok(device_type) = proto::DeviceType::try_from(announce.device_type) else {
             tracing::warn!("Unknown device_type {} from {addr}", announce.device_type);
             return;
         };
 
-        let Ok(pub_key_fingerprint): Result<[u8; 32], _> =
-            announce.fingerprint.as_slice().try_into()
-        else {
+        let Ok(pub_key_fingerprint): Result<[u8; 32], _> = announce.fingerprint.as_slice().try_into() else {
             tracing::warn!("malformed public key fingerprint from {addr}, ignoring announce");
             return;
         };
@@ -121,14 +103,12 @@ impl DeviceManager {
             name: announce.device_name.clone(),
             device_type,
             addr,
+            ws_port: announce.ws_port, // was previously dropped — now carried through
             last_seen: Instant::now(),
         });
 
-        match self.trusted.get(&device_id) {
-            Some(_trusted_device) => {
-                // if the device is in the trusted store then is trusted no need to pair
-            }
-            None => {}
+        if self.trusted.get(&device_id).is_some() {
+            // already trusted, no pairing needed
         }
     }
 
@@ -146,7 +126,6 @@ impl DeviceManager {
         if self.trusted.is_trusted(device_id) {
             return "already trusted".to_string();
         }
-
         if let Some(_device) = self.seen.get(device_id) {
             let challenge = pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
             let response = pairing::respond_to_challenge(&self.identity, &challenge);
@@ -154,7 +133,6 @@ impl DeviceManager {
             self.pending_pairings.insert(device_id.to_string(), code.clone());
             return format!("pairing requested for {device_id}; code {code}");
         }
-
         "device not found".to_string()
     }
 
@@ -164,9 +142,10 @@ impl DeviceManager {
                 self.trusted.trust(super::types::TrustedDevice {
                     id: device_id.to_string(),
                     name: device_id.to_string(),
-                    device_type: crate::message::proto::DeviceType::Unspecified,
+                    device_type: proto::DeviceType::Unspecified,
                     paired_at: std::time::SystemTime::now(),
                     public_key: [0u8; 32],
+                    auto_connect: true, // default: connect automatically right after pairing
                 });
                 self.connected.insert(device_id.to_string(), code.clone());
                 self.request_transport_connect(device_id);
@@ -180,10 +159,66 @@ impl DeviceManager {
         if !self.trusted.is_trusted(device_id) {
             return "device is not trusted".to_string();
         }
-
         self.connected.insert(device_id.to_string(), "connected".to_string());
         self.request_transport_connect(device_id);
         "connected".to_string()
+    }
+
+    async fn handle_disconnect(&mut self, device_id: &str) -> String {
+        let Some(tx) = self.transport_tx.as_ref() else {
+            return "transport unavailable".to_string();
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let _ = tx.send(TransportCommand::Disconnect {
+            device_id: device_id.to_string(),
+            reply_to: reply_tx,
+        });
+        let removed = reply_rx.await.unwrap_or(false);
+        self.connected.remove(device_id);
+        if removed { "disconnected".to_string() } else { "was not connected".to_string() }
+    }
+
+    /// Trusted devices, enriched with live address/port from `seen` and live
+    /// connection status from `Transport` — this is the "Paired Devices" list.
+    async fn build_paired_devices(&self) -> Vec<proto::DeviceInfo> {
+        let live: Vec<ConnectedDevice> = match self.transport_tx.as_ref() {
+            Some(tx) => {
+                let (reply_tx, reply_rx) = oneshot::channel();
+                if tx.send(TransportCommand::ListConnections { reply_to: reply_tx }).is_ok() {
+                    reply_rx.await.unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            }
+            None => Vec::new(),
+        };
+        let connected_ids: HashSet<&String> = live.iter().map(|c| &c.id).collect();
+
+        self.trusted
+            .list()
+            .map(|trusted_device| {
+                let seen = self.seen.get(&trusted_device.id);
+                let connection = if connected_ids.contains(&trusted_device.id) {
+                    proto::ConnectionState::Connected
+                } else if seen.is_some() {
+                    proto::ConnectionState::Disconnected
+                } else {
+                    proto::ConnectionState::Unavailable
+                };
+
+                proto::DeviceInfo {
+                    id: trusted_device.id.clone(),
+                    name: trusted_device.name.clone(),
+                    device_type: trusted_device.device_type as i32,
+                    address: seen.map(|s| s.addr.ip().to_string()).unwrap_or_default(),
+                    last_seen_ms: seen.map(|s| s.last_seen.elapsed().as_millis() as u64).unwrap_or_default(),
+                    ws_port: seen.map(|s| s.ws_port).unwrap_or_default(),
+                    connection: connection as i32,
+                    auto_connect: trusted_device.auto_connect,
+                    trusted: true,
+                }
+            })
+            .collect()
     }
 }
 
@@ -208,10 +243,9 @@ mod tests {
     }
 }
 
-
 // external device handling
 impl DeviceManager {
-    fn handle_device_command(&mut self, cmd: DeviceCommands) {
+    async fn handle_device_command(&mut self, cmd: DeviceCommands) {
         match cmd {
             DeviceCommands::GetSeen { mode, reply_to } => {
                 let devices = self
@@ -254,16 +288,24 @@ impl DeviceManager {
                     public_key_hex: hex::encode(self.identity.public_key_bytes()),
                     ws_port: crate::device::config::get_ws_port(),
                     device_type: crate::device::config::get_current_device_type(),
-                    // the device manager should ask the network component for what addr this device is bound
-                    // for now since this is prototype the device is bound to 0.0.0.0 all interfaces as long as they send to the bound ws_port
-                    // so we're going to hardcode it, but later we'll need a way to dynamically/progamatically decide what interfaces to bind
-                    // it is also going to be determined through wifi-direct routing or hotsport routing when these features are built
-                    // Or if not, the network service will find a suitable Ip address to bind to, maybe that one in an active Wifi network
-                    // Or if not, we can just leave binding to all interface (0.0.0.0) to ensure any kind of packet meant to reach this core is delivered no matter what interface gave it
-                    // it could be a wifi, hotsport, or a VPN networks, or mobile networks but for the ip_addr field in the snapshot, We find it dynamically/progamatically the code should figure out what is the active Interface by now
-                    // and this is best design than binding to a specific addr
-                    ip_addr: "0.0.0.0".into()
+                    ip_addr: "0.0.0.0".into(),
                 });
+            }
+            DeviceCommands::GetPaired { reply_to } => {
+                let devices = self.build_paired_devices().await;
+                let _ = reply_to.send(devices);
+            }
+            DeviceCommands::Disconnect { device_id, reply_to } => {
+                let _ = reply_to.send(self.handle_disconnect(&device_id).await);
+            }
+            DeviceCommands::SetAutoConnect { device_id, auto_connect, reply_to } => {
+                let ok = self.trusted.set_auto_connect(&device_id, auto_connect);
+                let _ = reply_to.send(ok);
+            }
+            DeviceCommands::ForgetDevice { device_id, reply_to } => {
+                self.trusted.revoke(&device_id);
+                self.connected.remove(&device_id);
+                let _ = reply_to.send("ok".to_string());
             }
         }
     }

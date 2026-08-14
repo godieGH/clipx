@@ -54,4 +54,16 @@ impl TrustedDeviceStore {
             tracing::error!("failed to persist trusted devices: {e}");
         }
     }
+    
+    pub fn set_auto_connect(&mut self, device_id: &str, auto_connect: bool) -> bool {
+        if let Some(device) = self.devices.get_mut(device_id) {
+            device.auto_connect = auto_connect;
+            if let Err(e) = self.save() {
+                tracing::error!("failed to persist trusted devices: {e}");
+            }
+            true
+        } else {
+            false
+        }
+    }
 }

@@ -62,6 +62,10 @@ message IpcRequest {
     PairApproveRequest pair_approve = 6;
     ConnectRequest connect = 7;
     ConnectedRequest connected = 8;
+    GetPairedRequest get_paired = 9;
+    DisconnectRequest disconnect = 10;
+    SetAutoConnectRequest set_auto_connect = 11;
+    ForgetDeviceRequest forget_device = 12;
   }
 }
 
@@ -76,6 +80,10 @@ message IpcResponse {
     ConnectResponse connect = 7;
     ConnectedResponse connected = 8;
     ErrorResponse error = 9;
+    GetPairedResponse get_paired = 10;
+    DisconnectResponse disconnect = 11;
+    SetAutoConnectResponse set_auto_connect = 12;
+    ForgetDeviceResponse forget_device = 13;
   }
 }
 
@@ -164,10 +172,48 @@ message ConnectedResponse {
   repeated DeviceInfo devices = 1;
 }
 
+enum ConnectionState {
+  DISCONNECTED = 0;
+  CONNECTING = 1;
+  CONNECTED = 2;
+  UNAVAILABLE = 3;
+}
+
 message DeviceInfo {
   string id = 1;
   string name = 2;
   DeviceType device_type = 3;
   string address = 4;
   uint64 last_seen_ms = 5;
+  uint32 ws_port = 6;
+  ConnectionState connection = 7;
+  bool auto_connect = 8;
+  bool trusted = 9;
+}
+
+message GetPairedRequest {}
+message GetPairedResponse {
+  repeated DeviceInfo devices = 1;
+}
+
+message DisconnectRequest { string device_id = 1; }
+message DisconnectResponse {
+  string device_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message SetAutoConnectRequest {
+  string device_id = 1;
+  bool auto_connect = 2;
+}
+message SetAutoConnectResponse {
+  string device_id = 1;
+  bool auto_connect = 2;
+}
+
+message ForgetDeviceRequest { string device_id = 1; }
+message ForgetDeviceResponse {
+  string device_id = 1;
+  string status = 2;
 }

@@ -67,6 +67,7 @@ pub fn approve(seen: &SeenDevice, trusted: &mut TrustedDeviceStore) {
         device_type: seen.device_type,
         paired_at: SystemTime::now(),
         public_key: [0u8; 32],
+        auto_connect: false,
     });
 }
 
