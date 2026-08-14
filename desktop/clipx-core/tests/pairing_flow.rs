@@ -1,5 +1,5 @@
 use clipx_core::device::{identity::DeviceIdentity, pairing};
-use std::{env, path::PathBuf};
+use std::{env};
 
 #[test]
 fn pairing_handshake_generates_six_digit_code() {
