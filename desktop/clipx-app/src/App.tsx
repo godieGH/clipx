@@ -722,7 +722,7 @@ function App() {
         </div>
         <div className="window-controls">
           <button className={`icon-button titlebar-icon ${showIdentityDisabled ? "button-disable" : ""}`} title="Device identity" onClick={() => {
-              refreshAvailable().finally(() => {
+              getThisDeviceIdenty().finally(() => {
                 if (showIdentityDisabled) return;
                 setShowIdentity(true);
               });

@@ -74,7 +74,6 @@ pub fn local_ipv4_candidates() -> Vec<(String, std::net::Ipv4Addr)> {
 
 pub fn preferred_local_ip() -> Option<std::net::Ipv4Addr> {
     let mut candidates = local_ipv4_candidates();
-    println!("{:?}", candidates);
     // Rank: prefer wired-sounding names over Wi-Fi/virtual-sounding ones.
     // Cheap heuristic, not perfect — good enough until this is observed to pick wrong.
     candidates.sort_by_key(|(name, _)| {
