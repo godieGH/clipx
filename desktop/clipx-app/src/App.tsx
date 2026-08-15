@@ -321,6 +321,7 @@ function DeviceDetail({
 }) {
   const grouped = device.fingerprint.match(/.{1,4}/g)?.slice(0, 7).join("-") ?? device.fingerprint;
   const isConnected = device.connection === "connected" || device.connection === "connecting";
+  const deviceAvalable = device.connection != "unavailable";
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -342,16 +343,20 @@ function DeviceDetail({
           </div>
         </div>
 
-        <div className="identity-grid">
-          <div className="identity-cell">
-            <label>IP Address</label>
-            <div className="identity-value">{device.ipAddress}</div>
+        {/* If device connection state state says unavalable hence no need to display port + addr */}
+        { 
+          deviceAvalable &&
+          <div className="identity-grid">
+            <div className="identity-cell">
+              <label>IP Address</label>
+              <div className="identity-value">{device.ipAddress}</div>
+            </div>
+            <div className="identity-cell">
+              <label>WS Port</label>
+              <div className="identity-value">{device.wsPort}</div>
+            </div>
           </div>
-          <div className="identity-cell">
-            <label>WS Port</label>
-            <div className="identity-value">{device.wsPort}</div>
-          </div>
-        </div>
+        }
 
         <div className="identity-field">
           <label>Fingerprint</label>
@@ -758,7 +763,7 @@ function App() {
         />
       )}
 
-      <Toast toast={toast}/>
+      <Toast toast={toast} />
     </>
   );
 }

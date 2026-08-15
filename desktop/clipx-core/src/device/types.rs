@@ -12,8 +12,13 @@ pub struct TrustedDevice {
     pub id: String,
     pub name: String,
     pub device_type: DeviceType,
+
+    #[serde(with = "humantime_serde")]
     pub paired_at: SystemTime,
+
+    #[serde(with = "hex::serde")]
     pub public_key: [u8; 32],
+
     #[serde(default)]
     pub auto_connect: bool,
 }

@@ -9,7 +9,7 @@ pub mod types {
     pub struct OwnIdentity {
         pub name: String,
         pub fingerprint: String,
-        pub device_type: crate::clipx::DeviceType,
+        pub device_type: String,
         pub ws_port: u32,
         pub ip_address: String,
     }
@@ -56,6 +56,12 @@ pub mod types {
             Unavailable => "unavailable",
         }
         .to_string()
+    }
+
+    impl From<crate::clipx::DeviceType> for String {
+        fn from(t: crate::clipx::DeviceType) -> String {
+            device_type_str(t as i32)
+        }
     }
 
     impl From<crate::clipx::DeviceInfo> for PairedDevice {
@@ -110,7 +116,7 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
                 Ok(types::OwnIdentity {
                     name: response.device_name,
                     fingerprint: response.device_id,
-                    device_type: device_type,
+                    device_type: String::from(device_type),
                     ws_port: response.ws_port,
                     ip_address: response.ip_address,
                 })
