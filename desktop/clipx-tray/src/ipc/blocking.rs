@@ -50,7 +50,11 @@ impl Client {
         _msg.encode(&mut buf)?;
 
         let ws = self.ws.as_mut().unwrap();
-        ws.send(tungstenite::Message::binary(buf))?;
+        if let Err(e) = ws.send(tungstenite::Message::binary(buf)) {
+            self.state = State::Down;
+            self.ws = None;
+            return Err(e.into());
+        }
 
         loop {
             let msg = ws.read();
@@ -58,7 +62,11 @@ impl Client {
                 Ok(tungstenite::Message::Binary(bytes)) => {
                     return Ok(clipx::IpcResponse::decode(bytes.as_slice())?);
                 }
-                Ok(tungstenite::Message::Close(_)) => break,
+                Ok(tungstenite::Message::Close(_)) => {
+                    self.state =  State::Down;
+                    self.ws = None;
+                    break;
+                }
                 Ok(_) => continue,
                 Err(_) => {
                     self.state = State::Down;

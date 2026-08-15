@@ -25,6 +25,7 @@ interprocess = { version = "2.4.2", features = ["tokio"] }
 anyhow = "1.0.104"
 tokio-util = { version = "0.7.19", features = ["full"] }
 humantime-serde = "1.1.1"
+if-addrs = "0.15.0"
 
 [build-dependencies]
 prost-build = "0.14.4"

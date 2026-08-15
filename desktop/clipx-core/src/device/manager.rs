@@ -2,11 +2,11 @@ use super::seen::SeenDeviceRegistry;
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice};
 use crate::device::identity::DeviceIdentity;
-use crate::device::pairing;
+use crate::device::{config, pairing};
 use crate::message::proto;
 use crate::net::transport::{ConnectedDevice, TransportCommand};
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch, oneshot};
@@ -281,13 +281,16 @@ impl DeviceManager {
                 let _ = reply_to.send(devices);
             }
             DeviceCommands::GetIdentity { reply_to } => {
+                let addr = config::preferred_local_ip()
+                    .unwrap_or(Ipv4Addr::UNSPECIFIED);
+
                 let _ = reply_to.send(IdentitySnapshot {
                     device_id: hex::encode(self.identity.get_this_device_fingerprint()),
                     device_name: crate::device::config::get_hostname(),
                     public_key_hex: hex::encode(self.identity.public_key_bytes()),
                     ws_port: crate::device::config::get_ws_port(),
                     device_type: crate::device::config::get_current_device_type(),
-                    ip_addr: "0.0.0.0".into(),
+                    ip_addr: addr.to_string(),
                 });
             }
             DeviceCommands::GetPaired { reply_to } => {

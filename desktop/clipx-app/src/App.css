@@ -635,6 +635,15 @@ button.device-hit:active {
   color: #e81123;
 }
 
+.icon-button.button-disable {
+  opacity: 0.3;
+}
+
+.icon-button.button-disable:hover {
+  background: none;
+  opacity: 0.3;
+}
+
 /* ---- empty state ---- */
 
 .empty-state {
@@ -1057,4 +1066,4 @@ button.device-hit:active {
 }
 .toast-container.warning .toast-ok:hover {
   background: #d8910d;
-} 
+}

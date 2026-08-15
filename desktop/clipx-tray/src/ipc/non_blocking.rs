@@ -69,14 +69,25 @@ impl Client {
         _msg.encode(&mut buf)?;
 
         let ws = self.ws.as_mut().unwrap();
-        ws.send(WsMessage::binary(buf)).await?;
+        if let Err(e) = ws.send(WsMessage::binary(buf)).await {
+            // the write itself failed — connection is dead mark state to down 
+            self.state = State::Down;
+            self.ws = None;
+            return Err(e.into());
+        };
 
         while let Some(msg) = ws.next().await {
             match msg {
                 Ok(WsMessage::Binary(bytes)) => {
                     return Ok(clipx::IpcResponse::decode(bytes)?);
                 }
-                Ok(WsMessage::Close(_)) => break,
+                Ok(WsMessage::Close(_)) => {
+                    // Peer closes connection without a response Mark state to down
+                    // and break the loop so send returns a no response
+                    self.state =  State::Down;
+                    self.ws = None;
+                    break;
+                }
                 Ok(_) => continue, // ping/pong/text — ignore, keep waiting
                 Err(_) => {
                     // Connection is broken, not just quiet. Mark down so callers

@@ -483,6 +483,7 @@ function App() {
   const [history, setHistory] = useState<ClipItem[]>(MOCK_HISTORY);
   const [scanning, setScanning] = useState(false);
   const [showIdentity, setShowIdentity] = useState(false);
+  const [showIdentityDisabled, setshowIdentityDisabled] = useState(true);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -504,28 +505,30 @@ function App() {
       const result: { fingerprint: string; name: string; deviceType: DeviceType }[] =
         await invoke("get_available_devices");
       setAvailable((prev) => {
+        setshowIdentityDisabled(false);
         const requesting = new Set(prev.filter((d) => d.pairing === "requesting").map((d) => d.fingerprint));
         return result.map((d) => ({ ...d, pairing: requesting.has(d.fingerprint) ? "requesting" : "idle" }));
       });
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
+      setshowIdentityDisabled(true);
     }
   }, []);
 
-  useEffect(() => {
-    async function getThisDeviceIdenty() {
-      try {
-        const result: OwnIdentity = await invoke("get_this_device_identity");
-        setOwnIdentity(result);
-      } catch (e) {
-        showToast(`${e}`, {
-          variant: "error",
-          onOk: () => appWindow.close(),
-          okLabel: "Close App",
-        });
-      }
+  const getThisDeviceIdenty = useCallback(async() => {
+    try {
+      const result: OwnIdentity = await invoke("get_this_device_identity");
+      setOwnIdentity(result);
+    } catch (e) {
+      showToast(`${e}`, {
+        variant: "error",
+        onOk: () => appWindow.close(),
+        okLabel: "Close App",
+      });
     }
+  }, [])
 
+  useEffect(() => {
     async function positionAppWindow() {
       const monitor = await currentMonitor();
       if (!monitor) return;
@@ -539,7 +542,7 @@ function App() {
       handleScan();
     }
 
-    getThisDeviceIdenty();
+    getThisDeviceIdenty(); // fetch at app startup
     refreshPaired();
     positionAppWindow();
 
@@ -718,7 +721,12 @@ function App() {
           <img src="/clipx-icon.png" alt="clipx logo" />
         </div>
         <div className="window-controls">
-          <button className="icon-button titlebar-icon" title="Device identity" onClick={() => setShowIdentity(true)}>
+          <button className={`icon-button titlebar-icon ${showIdentityDisabled ? "button-disable" : ""}`} title="Device identity" onClick={() => {
+              refreshAvailable().finally(() => {
+                if (showIdentityDisabled) return;
+                setShowIdentity(true);
+              });
+            }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

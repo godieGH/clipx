@@ -59,3 +59,30 @@ pub fn get_current_device_type() -> DeviceType {
     )))]
     return DeviceType::Unspecified;
 }
+
+pub fn local_ipv4_candidates() -> Vec<(String, std::net::Ipv4Addr)> {
+    if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|iface| !iface.is_loopback())
+        .filter_map(|iface| match iface.addr.ip() {
+            std::net::IpAddr::V4(v4) if v4.is_private() => Some((iface.name, v4)),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn preferred_local_ip() -> Option<std::net::Ipv4Addr> {
+    let mut candidates = local_ipv4_candidates();
+    println!("{:?}", candidates);
+    // Rank: prefer wired-sounding names over Wi-Fi/virtual-sounding ones.
+    // Cheap heuristic, not perfect — good enough until this is observed to pick wrong.
+    candidates.sort_by_key(|(name, _)| {
+        let n = name.to_lowercase();
+        if n.contains("eth") || n.contains("ethernet") { 0 }
+        else if n.contains("wl") || n.contains("wifi") || n.contains("wi-fi") { 1 }
+        else if n.contains("vmnet") || n.contains("vboxnet") || n.contains("docker") || n.contains("tun") || n.contains("veth") { 3 }
+        else { 2 }
+    });
+    candidates.into_iter().next().map(|(_, ip)| ip)
+}
