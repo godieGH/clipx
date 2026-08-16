@@ -57,9 +57,19 @@ async fn main() {
     println!("type 'help' for commands\n");
 
     tokio::spawn(async move {
+        use std::io::Write as _;
         loop {
             match printer_rx.recv().await {
-                Ok(ev) => commands::print_event(ev),
+                Ok(ev) => {
+                    // Background events (a discovery, an inbound connection, a
+                    // received message) can land between keystrokes at any
+                    // time — reprint the prompt after each one so it doesn't
+                    // look like the REPL swallowed your input.
+                    println!();
+                    commands::print_event(ev);
+                    print!("> ");
+                    let _ = std::io::stdout().flush();
+                }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => break,
             }

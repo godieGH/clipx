@@ -42,12 +42,17 @@ pub async fn run_broadcaster(mut shutdown_rx: watch::Receiver<bool>, state: Arc<
     announce.encode(&mut buf).unwrap();
     let target = format!("255.255.255.255:{port}");
 
+    // Announce once at start, then stay quiet — not once per send. At the
+    // default 2s interval that would otherwise print ~30x/minute and bury
+    // the prompt. `disco seen` and the sent-once notice below are enough to
+    // confirm it's alive; use that instead of watching a scrolling log.
+    state.emit(Event::Info(format!("broadcasting to {target} every {interval_secs}s (until 'disco broadcast off')")));
+
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => { if *shutdown_rx.borrow() { break; } }
             _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
                 let _ = socket.send_to(&buf, &target).await;
-                state.emit(Event::Info(format!("broadcast: sent Announce ({} bytes) to {target}", buf.len())));
             }
         }
     }
@@ -76,8 +81,19 @@ pub async fn run_listener(mut shutdown_rx: watch::Receiver<bool>, state: Arc<App
                 };
                 if announce.fingerprint == self_fp { continue; }
                 let device_id = hex::encode(&announce.fingerprint);
-                state.discovered.lock().await.insert(device_id.clone(), (announce.clone(), src));
-                state.emit(Event::Discovered { device_id, name: announce.device_name, addr: src });
+                let is_new = {
+                    let mut d = state.discovered.lock().await;
+                    let is_new = !d.contains_key(&device_id);
+                    d.insert(device_id.clone(), (announce.clone(), src));
+                    is_new
+                };
+                // Peers re-announce every ~2s, same as this tool's own
+                // broadcaster — printing every repeat would flood the
+                // terminal just like the broadcast-spam fix above. Print
+                // once on first sight; re-run 'disco seen' to check on it.
+                if is_new {
+                    state.emit(Event::Discovered { device_id, name: announce.device_name, addr: src });
+                }
             }
         }
     }

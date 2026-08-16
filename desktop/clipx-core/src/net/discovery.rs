@@ -1,8 +1,8 @@
 use crate::device::identity::DeviceIdentity;
 use crate::message::proto;
 use prost::Message;
+use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
-use std::net::UdpSocket as StdUdpSocket;
 use std::sync::Arc;
 use tokio::{
     net::UdpSocket,
@@ -39,11 +39,20 @@ pub fn spawn(
     Ok(vec![broadcast_task, listen_task])
 }
 
+/// SO_REUSEADDR (+ SO_REUSEPORT on unix) so a second local process — another
+/// clipx-core instance, or the tests/emulator tool — can bind this same port
+/// on the same machine instead of failing outright. Self-discovery is still
+/// safe: the listener below filters by identity fingerprint, not by IP/port,
+/// so a second local instance is just seen as another (real) peer.
 fn make_shared_socket() -> std::io::Result<UdpSocket> {
-    let std_socket = StdUdpSocket::bind("0.0.0.0:9999")?;
-    std_socket.set_broadcast(true)?;
-    std_socket.set_nonblocking(true)?;
-    UdpSocket::from_std(std_socket)
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, None)?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    let _ = socket.set_reuse_port(true);
+    socket.set_broadcast(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&"0.0.0.0:9999".parse::<SocketAddr>().unwrap().into())?;
+    UdpSocket::from_std(socket.into())
 }
 
 async fn broadcast_presence(
