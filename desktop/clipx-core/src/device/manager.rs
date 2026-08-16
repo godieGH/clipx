@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, watch, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[allow(unused)]
 pub struct DeviceManager {
@@ -29,17 +29,47 @@ pub enum SeenMode {
 }
 
 pub enum DeviceCommands {
-    GetSeen { mode: SeenMode, reply_to: oneshot::Sender<Vec<SeenDevice>> },
-    Pair { device_id: String, reply_to: oneshot::Sender<String> },
-    PendingPairings { reply_to: oneshot::Sender<Vec<(String, String)>> },
-    ApprovePairing { device_id: String, reply_to: oneshot::Sender<String> },
-    Connect { device_id: String, reply_to: oneshot::Sender<String> },
-    Connected { reply_to: oneshot::Sender<Vec<SeenDevice>> },
-    GetIdentity { reply_to: oneshot::Sender<IdentitySnapshot> },
-    GetPaired { reply_to: oneshot::Sender<Vec<proto::DeviceInfo>> },
-    Disconnect { device_id: String, reply_to: oneshot::Sender<String> },
-    SetAutoConnect { device_id: String, auto_connect: bool, reply_to: oneshot::Sender<bool> },
-    ForgetDevice { device_id: String, reply_to: oneshot::Sender<String> },
+    GetSeen {
+        mode: SeenMode,
+        reply_to: oneshot::Sender<Vec<SeenDevice>>,
+    },
+    Pair {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    PendingPairings {
+        reply_to: oneshot::Sender<Vec<(String, String)>>,
+    },
+    ApprovePairing {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    Connect {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    Connected {
+        reply_to: oneshot::Sender<Vec<SeenDevice>>,
+    },
+    GetIdentity {
+        reply_to: oneshot::Sender<IdentitySnapshot>,
+    },
+    GetPaired {
+        reply_to: oneshot::Sender<Vec<proto::DeviceInfo>>,
+    },
+    Disconnect {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
+    SetAutoConnect {
+        device_id: String,
+        auto_connect: bool,
+        reply_to: oneshot::Sender<bool>,
+    },
+    ForgetDevice {
+        device_id: String,
+        reply_to: oneshot::Sender<String>,
+    },
 }
 
 impl DeviceManager {
@@ -95,14 +125,20 @@ impl DeviceManager {
             return;
         };
 
-        let Ok(pub_key_fingerprint): Result<[u8; 32], _> = announce.fingerprint.as_slice().try_into() else {
+        let Ok(pub_key_fingerprint): Result<[u8; 32], _> =
+            announce.fingerprint.as_slice().try_into()
+        else {
             tracing::warn!("malformed public key fingerprint from {addr}, ignoring announce");
             return;
         };
         let device_id = hex::encode(pub_key_fingerprint);
 
         if !self.seen.already_seen(&device_id) {
-             tracing::info!("New {} device discovered: {}({addr})", String::from(proto::DeviceType::try_from(announce.device_type).unwrap()), announce.device_name);
+            tracing::info!(
+                "New {} device discovered: {}({addr})",
+                String::from(proto::DeviceType::try_from(announce.device_type).unwrap()),
+                announce.device_name
+            );
         }
 
         self.seen.upsert(SeenDevice {
@@ -123,10 +159,14 @@ impl DeviceManager {
 
     fn request_transport_connect(&self, device_id: &str) {
         // this ensures that a non trusted device can not be connected musted paired first
-        if !self.trusted.is_trusted(&device_id) {return;}
+        if !self.trusted.is_trusted(&device_id) {
+            return;
+        }
 
         // can't connect on unseen devices
-        if !self.seen.already_seen(&device_id) {return;}
+        if !self.seen.already_seen(&device_id) {
+            return;
+        }
 
         if let Some(tx) = self.transport_tx.as_ref() {
             let (reply_tx, _reply_rx) = oneshot::channel();
@@ -143,11 +183,12 @@ impl DeviceManager {
         }
 
         if let Some(_device) = self.seen.get(device_id) {
-            
-            let challenge = pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
+            let challenge =
+                pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
             let response = pairing::respond_to_challenge(&self.identity, &challenge);
             let code = pairing::pairing_code(&challenge, &response);
-            self.pending_pairings.insert(device_id.to_string(), code.clone());
+            self.pending_pairings
+                .insert(device_id.to_string(), code.clone());
             return format!("pairing requested for {device_id}; code {code}");
         }
         "device not found".to_string()
@@ -176,7 +217,8 @@ impl DeviceManager {
         if !self.trusted.is_trusted(device_id) {
             return "device is not trusted".to_string();
         }
-        self.connected.insert(device_id.to_string(), "connected".to_string());
+        self.connected
+            .insert(device_id.to_string(), "connected".to_string());
         self.request_transport_connect(device_id);
         "connected".to_string()
     }
@@ -192,7 +234,11 @@ impl DeviceManager {
         });
         let removed = reply_rx.await.unwrap_or(false);
         self.connected.remove(device_id);
-        if removed { "disconnected".to_string() } else { "was not connected".to_string() }
+        if removed {
+            "disconnected".to_string()
+        } else {
+            "was not connected".to_string()
+        }
     }
 
     /// Trusted devices, enriched with live address/port from `seen` and live
@@ -201,7 +247,10 @@ impl DeviceManager {
         let live: Vec<ConnectedDevice> = match self.transport_tx.as_ref() {
             Some(tx) => {
                 let (reply_tx, reply_rx) = oneshot::channel();
-                if tx.send(TransportCommand::ListConnections { reply_to: reply_tx }).is_ok() {
+                if tx
+                    .send(TransportCommand::ListConnections { reply_to: reply_tx })
+                    .is_ok()
+                {
                     reply_rx.await.unwrap_or_default()
                 } else {
                     Vec::new()
@@ -228,7 +277,9 @@ impl DeviceManager {
                     name: trusted_device.name.clone(),
                     device_type: trusted_device.device_type as i32,
                     address: seen.map(|s| s.addr.ip().to_string()).unwrap_or_default(),
-                    last_seen_ms: seen.map(|s| s.last_seen.elapsed().as_millis() as u64).unwrap_or_default(),
+                    last_seen_ms: seen
+                        .map(|s| s.last_seen.elapsed().as_millis() as u64)
+                        .unwrap_or_default(),
                     ws_port: seen.map(|s| s.ws_port).unwrap_or_default(),
                     connection: connection as i32,
                     auto_connect: trusted_device.auto_connect,
@@ -243,7 +294,7 @@ impl DeviceManager {
 mod tests {
     use crate::notification;
 
-use super::*;
+    use super::*;
 
     #[test]
     fn connect_requests_transport_for_trusted_device() {
@@ -251,11 +302,18 @@ use super::*;
         let identity = Arc::new(DeviceIdentity::load_or_create(temp_dir.join("identity")));
         let (transport_tx, mut transport_rx) = mpsc::unbounded_channel();
         let notification = notification::NotificationEngine::new();
-        let manager = DeviceManager::new(temp_dir.join("trusted.json"), identity, Some(transport_tx), notification);
+        let manager = DeviceManager::new(
+            temp_dir.join("trusted.json"),
+            identity,
+            Some(transport_tx),
+            notification,
+        );
 
         manager.request_transport_connect("device-1");
 
-        let command = transport_rx.blocking_recv().expect("transport command should be sent");
+        let command = transport_rx
+            .blocking_recv()
+            .expect("transport command should be sent");
         match command {
             TransportCommand::Connect { device_id, .. } => assert_eq!(device_id, "device-1"),
             other => panic!("expected connect command, got {other:?}"),
@@ -280,17 +338,30 @@ impl DeviceManager {
                     .collect::<Vec<SeenDevice>>();
                 let _ = reply_to.send(devices);
             }
-            DeviceCommands::Pair { device_id, reply_to } => {
+            DeviceCommands::Pair {
+                device_id,
+                reply_to,
+            } => {
                 let _ = reply_to.send(self.handle_pair_request(&device_id));
             }
             DeviceCommands::PendingPairings { reply_to } => {
-                let pending = self.pending_pairings.iter().map(|(id, code)| (id.clone(), code.clone())).collect();
+                let pending = self
+                    .pending_pairings
+                    .iter()
+                    .map(|(id, code)| (id.clone(), code.clone()))
+                    .collect();
                 let _ = reply_to.send(pending);
             }
-            DeviceCommands::ApprovePairing { device_id, reply_to } => {
+            DeviceCommands::ApprovePairing {
+                device_id,
+                reply_to,
+            } => {
                 let _ = reply_to.send(self.handle_approve_pairing(&device_id));
             }
-            DeviceCommands::Connect { device_id, reply_to } => {
+            DeviceCommands::Connect {
+                device_id,
+                reply_to,
+            } => {
                 let _ = reply_to.send(self.handle_connect(&device_id));
             }
             DeviceCommands::Connected { reply_to } => {
@@ -302,8 +373,7 @@ impl DeviceManager {
                 let _ = reply_to.send(devices);
             }
             DeviceCommands::GetIdentity { reply_to } => {
-                let addr = config::preferred_local_ip()
-                    .unwrap_or(Ipv4Addr::UNSPECIFIED);
+                let addr = config::preferred_local_ip().unwrap_or(Ipv4Addr::UNSPECIFIED);
 
                 let _ = reply_to.send(IdentitySnapshot {
                     device_id: hex::encode(self.identity.get_this_device_fingerprint()),
@@ -318,14 +388,24 @@ impl DeviceManager {
                 let devices = self.build_paired_devices().await;
                 let _ = reply_to.send(devices);
             }
-            DeviceCommands::Disconnect { device_id, reply_to } => {
+            DeviceCommands::Disconnect {
+                device_id,
+                reply_to,
+            } => {
                 let _ = reply_to.send(self.handle_disconnect(&device_id).await);
             }
-            DeviceCommands::SetAutoConnect { device_id, auto_connect, reply_to } => {
+            DeviceCommands::SetAutoConnect {
+                device_id,
+                auto_connect,
+                reply_to,
+            } => {
                 let ok = self.trusted.set_auto_connect(&device_id, auto_connect);
                 let _ = reply_to.send(ok);
             }
-            DeviceCommands::ForgetDevice { device_id, reply_to } => {
+            DeviceCommands::ForgetDevice {
+                device_id,
+                reply_to,
+            } => {
                 self.trusted.revoke(&device_id);
                 self.connected.remove(&device_id);
                 let _ = reply_to.send("ok".to_string());
