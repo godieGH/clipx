@@ -1,6 +1,6 @@
 mod error_dialog;
 
-use clipx_tray_lib::{ipc, message::types, message::IpcCmddBridge};
+use clipx_lib::{ipc, message::types, message::IpcCmddBridge};
 use tauri::{async_runtime::Mutex, Manager, State};
 
 pub struct AppState {

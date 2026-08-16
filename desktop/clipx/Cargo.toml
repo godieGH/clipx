@@ -1,11 +1,11 @@
 [package]
-name = "clipx-tray"
+name = "clipx"
 version = "0.1.0"
 edition = "2021"
 
 
 [lib]
-name = "clipx_tray_lib"
+name = "clipx_lib"
 
 [dependencies]
 interprocess = { version = "2.4.2", features = ["tokio"] }

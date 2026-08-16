@@ -1,6 +1,3 @@
-//! This is the tray core library
-//! It provides APIs like commands and IPC to the core
-
 pub mod message;
 pub mod ipc;
 pub mod clipx {

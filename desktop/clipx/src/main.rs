@@ -1,6 +1,6 @@
 mod commands;
-use clipx_tray_lib::ipc;
-use clipx_tray_lib::clipx;
+use clipx_lib::ipc;
+use clipx_lib::clipx;
 use clap::{Parser, Subcommand};
 use commands::{seen::SeenArgs, trusted::TrustedArgs, identity::IdentityArgs, pair::PairArgs, connect::ConnectArgs};
 

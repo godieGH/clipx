@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["clipx-app/src-tauri", "clipx-core", "clipx-tray"]
+members = ["clipx-app/src-tauri", "clipx-core", "clipx"]
 
 [workspace.dependencies]
-clipx-tray = {path = "./clipx-tray"}
+clipx = {path = "./clipx"}

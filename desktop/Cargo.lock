@@ -606,10 +606,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "clipx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures-util",
+ "interprocess",
+ "prost",
+ "prost-build",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
 name = "clipx-app"
 version = "0.1.0"
 dependencies = [
- "clipx-tray",
+ "clipx",
  "serde",
  "serde_json",
  "tauri",
@@ -645,23 +662,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "clipx-tray"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "futures-util",
- "interprocess",
- "prost",
- "prost-build",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tungstenite 0.24.0",
 ]
 
 [[package]]
