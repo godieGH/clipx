@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch, oneshot};
 
+#[allow(unused)]
 pub struct DeviceManager {
     seen: SeenDeviceRegistry,
     trusted: TrustedDeviceStore,
@@ -18,6 +19,7 @@ pub struct DeviceManager {
     pending_pairings: HashMap<String, String>,
     connected: HashMap<String, String>,
     transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
+    notification: crate::notification::NotificationEngine,
 }
 
 pub enum SeenMode {
@@ -45,6 +47,7 @@ impl DeviceManager {
         trusted_store_path: std::path::PathBuf,
         identity: Arc<DeviceIdentity>,
         transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
+        notification: crate::notification::NotificationEngine,
     ) -> Self {
         Self {
             seen: SeenDeviceRegistry::new(),
@@ -53,6 +56,7 @@ impl DeviceManager {
             pending_pairings: HashMap::new(),
             connected: HashMap::new(),
             transport_tx,
+            notification,
         }
     }
 
@@ -73,7 +77,7 @@ impl DeviceManager {
                     self.handle_announce(announce, addr);
                 }
                 _ = prune_interval.tick() => {
-                    self.seen.prune_stale(Duration::from_secs(30));
+                    self.seen.prune_stale(Duration::from_secs(10));
                 }
                 // now .await — handle_device_command is async (queries transport for GetPaired/Disconnect)
                 Some(cmd) = device_rx.recv() => {
@@ -97,21 +101,33 @@ impl DeviceManager {
         };
         let device_id = hex::encode(pub_key_fingerprint);
 
+        if !self.seen.already_seen(&device_id) {
+             tracing::info!("New {} device discovered: {}({addr})", String::from(proto::DeviceType::try_from(announce.device_type).unwrap()), announce.device_name);
+        }
+
         self.seen.upsert(SeenDevice {
             id: device_id.clone(),
             name: announce.device_name.clone(),
             device_type,
             addr,
-            ws_port: announce.ws_port, // was previously dropped — now carried through
+            ws_port: announce.ws_port,
             last_seen: Instant::now(),
         });
 
         if self.trusted.get(&device_id).is_some() {
             // already trusted, no pairing needed
+            // here is wear we handle auto connect later for already trusted seen device
+            // so we look for devices that is trusted + auto_connect = true + is not connected yet
         }
     }
 
     fn request_transport_connect(&self, device_id: &str) {
+        // this ensures that a non trusted device can not be connected musted paired first
+        if !self.trusted.is_trusted(&device_id) {return;}
+
+        // can't connect on unseen devices
+        if !self.seen.already_seen(&device_id) {return;}
+
         if let Some(tx) = self.transport_tx.as_ref() {
             let (reply_tx, _reply_rx) = oneshot::channel();
             let _ = tx.send(TransportCommand::Connect {
@@ -125,7 +141,9 @@ impl DeviceManager {
         if self.trusted.is_trusted(device_id) {
             return "already trusted".to_string();
         }
+
         if let Some(_device) = self.seen.get(device_id) {
+            
             let challenge = pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
             let response = pairing::respond_to_challenge(&self.identity, &challenge);
             let code = pairing::pairing_code(&challenge, &response);
@@ -223,14 +241,17 @@ impl DeviceManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::notification;
+
+use super::*;
 
     #[test]
     fn connect_requests_transport_for_trusted_device() {
         let temp_dir = std::env::temp_dir().join("clipx-test-device-manager");
         let identity = Arc::new(DeviceIdentity::load_or_create(temp_dir.join("identity")));
         let (transport_tx, mut transport_rx) = mpsc::unbounded_channel();
-        let manager = DeviceManager::new(temp_dir.join("trusted.json"), identity, Some(transport_tx));
+        let notification = notification::NotificationEngine::new();
+        let manager = DeviceManager::new(temp_dir.join("trusted.json"), identity, Some(transport_tx), notification);
 
         manager.request_transport_connect("device-1");
 

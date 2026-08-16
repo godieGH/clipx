@@ -21,6 +21,10 @@ impl SeenDeviceRegistry {
         self.devices.get(device_id)
     }
 
+    pub fn already_seen(&self, device_id: &str) -> bool {
+        self.devices.contains_key(device_id)
+    }
+
     pub fn list(&self) -> impl Iterator<Item = &SeenDevice> {
         self.devices.values()
     }

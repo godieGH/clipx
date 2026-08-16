@@ -61,6 +61,8 @@ impl CoreService {
             device::config::identity_key_path(),
         ));
 
+        let notification_engine = crate::notification::NotificationEngine::new();
+
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         self.shutdown_tx = Some(shutdown_tx);
 
@@ -99,6 +101,7 @@ impl CoreService {
             device::config::trusted_devices_path(),
             identity.clone(),
             Some(transport_tx),
+            notification_engine.clone(),
         );
         let device_manager_task = tokio::spawn(async move {
             device_manager

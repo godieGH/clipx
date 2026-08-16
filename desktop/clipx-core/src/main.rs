@@ -4,6 +4,7 @@ mod logging;
 mod message;
 mod net;
 mod service;
+mod notification;
 
 use service::CoreService;
 
