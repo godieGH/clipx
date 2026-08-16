@@ -2,7 +2,7 @@ mod clipboard;
 mod device;
 mod logging;
 mod message;
-mod net;
+mod netio;
 mod service;
 mod notification;
 

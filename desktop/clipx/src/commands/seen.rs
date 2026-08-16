@@ -33,7 +33,16 @@ impl SeenArgs {
         if let Ok(res) = ipc.send(ipcreq) {
             if let Some(clipx::ipc_response::Response::Seen(response)) = res.response {
                 for device in response.devices {
-                    println!("{} ({}) - {}", device.name, device.id, device.address);
+                    if !args.verbose {
+                        println!("{} ({}) - {}", device.name, device.id, device.address);
+                    } else {
+                        println!("Id: {}", device.id);
+                        println!("  name: {}", device.name);
+                        println!("  adrress: {}", device.address);
+                        println!("  ws_port: {}", device.ws_port);
+                        println!("  type: {:?}", device.device_type());
+                        println!("  auto-connect: {:?}", device.auto_connect);
+                    }
                 }
             }
         }

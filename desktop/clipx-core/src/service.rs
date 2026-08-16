@@ -1,4 +1,4 @@
-use crate::{clipboard::watcher, device, net};
+use crate::{clipboard::watcher, device, netio};
 use device::identity::DeviceIdentity;
 use std::sync::Arc;
 use tokio::{
@@ -74,7 +74,7 @@ impl CoreService {
 
         let shutdown_for_transport = shutdown_rx.clone();
         let transport_task = tokio::spawn(async move {
-            let transport = crate::net::transport::Transport::create_transport(
+            let transport = crate::netio::transport::Transport::create_transport(
                 shutdown_for_transport,
                 transport_rx,
                 peer_event_tx,
@@ -95,7 +95,7 @@ impl CoreService {
         self.tasks.push(watcher_task);
 
         let discovery_tasks =
-            net::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx)
+            netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx)
                 .expect("failed to start discovery");
         self.tasks.extend(discovery_tasks);
 
@@ -118,7 +118,7 @@ impl CoreService {
         self.tasks.push(device_manager_task);
 
         let mut ipc_service =
-            net::ipc::IpcService::new("clipx", shutdown_for_ipc, device_tx.clone());
+            netio::ipc::IpcService::new("clipx", shutdown_for_ipc, device_tx.clone());
         let ipc_task = tokio::spawn(async move { ipc_service.start().await });
         self.tasks.push(ipc_task);
 

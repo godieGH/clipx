@@ -5,7 +5,7 @@ use crate::device::identity::{self, DeviceIdentity};
 use crate::device::{config, pairing};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::message::proto::{self, peer_message::Body};
-use crate::net::transport::{ConnectedDevice, TransportCommand, TransportEvent};
+use crate::netio::transport::{ConnectedDevice, TransportCommand, TransportEvent};
 use crate::notification::{NotificationEngine, PairDecision, Prompt};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

@@ -2,6 +2,6 @@ pub mod clipboard;
 pub mod device;
 pub mod logging;
 pub mod message;
-pub mod net;
+pub mod netio;
 pub mod service;
 pub mod notification;
