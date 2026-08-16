@@ -4,9 +4,13 @@ pub mod watcher;
 
 #[cfg(target_os = "android")]
 pub mod watcher {
+    use tokio::{
+        sync::{mpsc, watch},
+    };
+
     pub async fn watch_clipboard(
-        mut shutdown_rx: watch::Receiver<bool>,
-        tx: mpsc::UnboundedSender<String>,
+        mut _shutdown_rx: watch::Receiver<bool>,
+        _tx: mpsc::UnboundedSender<String>,
     ) {
         // A stub if this is build for android os which arboard is not functional
         // For testing on termux environments

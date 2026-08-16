@@ -23,4 +23,4 @@ anyhow = "1.0.104"
 # Needed for SO_REUSEADDR on the discovery UDP socket, so this tool can run
 # alongside a real clipx-core instance on the same machine without a bind
 # conflict on port 9999.
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }

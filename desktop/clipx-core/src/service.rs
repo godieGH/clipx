@@ -117,13 +117,10 @@ impl CoreService {
         });
         self.tasks.push(device_manager_task);
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            let mut ipc_service =
-                net::ipc::IpcService::new("clipx", shutdown_for_ipc, device_tx.clone());
-            let ipc_task = tokio::spawn(async move { ipc_service.start().await });
-            self.tasks.push(ipc_task);
-        }
+        let mut ipc_service =
+            net::ipc::IpcService::new("clipx", shutdown_for_ipc, device_tx.clone());
+        let ipc_task = tokio::spawn(async move { ipc_service.start().await });
+        self.tasks.push(ipc_task);
 
         signal::ctrl_c().await?;
 
