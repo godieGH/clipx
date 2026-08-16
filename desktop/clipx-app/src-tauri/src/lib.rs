@@ -1,3 +1,5 @@
+mod error_dialog;
+
 use clipx_tray_lib::{ipc, message::types, message::IpcCmddBridge};
 use tauri::{async_runtime::Mutex, Manager, State};
 
@@ -8,8 +10,14 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut client = ipc::non_blocking::Client::new("clipx");
-    tauri::async_runtime::block_on(client.start())
-        .unwrap_or_else(|e| panic!("Failed to start IPC: {e}"));
+    if let Err(e) = tauri::async_runtime::block_on(client.start()) {
+        #[cfg(windows)]
+        error_dialog::show_core_error(&e);
+
+        #[cfg(not(windows))]
+        eprintln!("Failed to start IPC: {e}");
+        return;
+    };
 
     let state = AppState { ipc: Mutex::new(client) };
 
