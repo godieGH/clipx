@@ -37,17 +37,24 @@ enum DeviceType {
 // -----------------------------
 // Device pairing and Connection
 // -----------------------------
-message PairChallenge {
-  bytes request_id = 1;
-  bytes nonce = 2;
-  bytes initiator_public = 3;
+message PeerPairChallenge {
+  bytes nonce = 1;
 }
 
-message PairChallengeResponse {
-  bytes request_id = 1;
-  bytes signature = 2;
-  bytes responder_public = 3;
+message PeerPairChallengeResponse {
+  bytes signature = 1;
 }
+
+message PeerPairRequest {
+  string name = 2;
+  bytes public_key = 3;
+}
+
+message PeerPairResponse {
+  bytes public_key = 1;
+}
+
+message PairAck {}
 
 // --------------------------------------------------------------
 // IPC based types - will split them later into different package

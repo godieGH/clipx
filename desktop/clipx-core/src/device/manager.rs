@@ -16,7 +16,7 @@ pub struct DeviceManager {
     seen: SeenDeviceRegistry,
     trusted: TrustedDeviceStore,
     identity: Arc<DeviceIdentity>,
-    pending_pairings: HashMap<String, String>,
+    pair_sessions: HashMap<String, pairing::PairSession>,
     connected: HashMap<String, String>,
     transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
     notification: crate::notification::NotificationEngine,
@@ -83,7 +83,7 @@ impl DeviceManager {
             seen: SeenDeviceRegistry::new(),
             trusted: TrustedDeviceStore::load(trusted_store_path),
             identity,
-            pending_pairings: HashMap::new(),
+            pair_sessions: HashMap::new(),
             connected: HashMap::new(),
             transport_tx,
             notification,
@@ -183,34 +183,14 @@ impl DeviceManager {
         }
 
         if let Some(_device) = self.seen.get(device_id) {
-            let challenge =
-                pairing::create_challenge(&self.identity, &self.identity.public_key_bytes());
-            let response = pairing::respond_to_challenge(&self.identity, &challenge);
-            let code = pairing::pairing_code(&challenge, &response);
-            self.pending_pairings
-                .insert(device_id.to_string(), code.clone());
-            return format!("pairing requested for {device_id}; code {code}");
+            let sess = pairing::PairSession::new("192.168.0.1".parse().unwrap());
+            println!("{:?}", sess);
         }
         "device not found".to_string()
     }
 
-    fn handle_approve_pairing(&mut self, device_id: &str) -> String {
-        match self.pending_pairings.remove(device_id) {
-            Some(code) => {
-                self.trusted.trust(super::types::TrustedDevice {
-                    id: device_id.to_string(),
-                    name: device_id.to_string(),
-                    device_type: proto::DeviceType::Unspecified,
-                    paired_at: std::time::SystemTime::now(),
-                    public_key: [0u8; 32],
-                    auto_connect: true, // default: connect automatically right after pairing
-                });
-                self.connected.insert(device_id.to_string(), code.clone());
-                self.request_transport_connect(device_id);
-                format!("pairing approved; code {code}")
-            }
-            None => "no pending pairing".to_string(),
-        }
+    fn handle_approve_pairing(&mut self, _device_id: &str) -> String {
+        todo!("Not Implemented yet!")
     }
 
     fn handle_connect(&mut self, device_id: &str) -> String {
@@ -345,12 +325,8 @@ impl DeviceManager {
                 let _ = reply_to.send(self.handle_pair_request(&device_id));
             }
             DeviceCommands::PendingPairings { reply_to } => {
-                let pending = self
-                    .pending_pairings
-                    .iter()
-                    .map(|(id, code)| (id.clone(), code.clone()))
-                    .collect();
-                let _ = reply_to.send(pending);
+                let _ = reply_to.send(Vec::new());
+                todo!("Not Implemented yet")
             }
             DeviceCommands::ApprovePairing {
                 device_id,
@@ -413,3 +389,10 @@ impl DeviceManager {
         }
     }
 }
+
+
+/// Isolated implels and bookeeping of the pair sessions
+/// This is where things like prune_stale for session and timeout logic stay
+/// To avoid MIMT, ensure no simulteneous pair request
+/// Adjust stages, handle all device related pairing bookkeeping
+impl DeviceManager {}

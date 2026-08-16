@@ -1,90 +1,40 @@
-use super::identity::{self, DeviceIdentity};
-use super::trusted::TrustedDeviceStore;
-use super::types::{SeenDevice, TrustedDevice};
-use sha2::{Digest, Sha256};
-use std::time::SystemTime;
+#![allow(unused)]
+use std::{net::SocketAddr, time::Instant};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairingChallenge {
-    pub request_id: String,
-    pub nonce: Vec<u8>,
-    pub initiator_public: Vec<u8>,
+#[derive(Debug)]
+pub struct PairSession {
+    started_at: Instant,
+    stage: PairStage,
+    nounce: Option<[u8; 32]>,
+    code: Option<u32>,
+    addr: SocketAddr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairingChallengeResponse {
-    pub request_id: String,
-    pub signature: Vec<u8>,
-    pub responder_public: Vec<u8>,
+/// This is an alternating stage for both peer and initiator
+/// If initiatore starts with Requesting then the next stage will be Challanging
+/// While the peer will be take Responding — Signing — 
+#[derive(Debug)]
+pub enum PairStage {
+    Starting, // first default stage
+    Requesting,
+    Responding,
+    Challanging,
+    Signing,
+    Verifying, // this is final stag of the initiator
+    Acknowledged // This is the final stage of the peer
 }
 
-pub fn create_challenge(identity: &DeviceIdentity, initiator_public: &[u8]) -> PairingChallenge {
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let nonce = identity.random_nonce();
-    PairingChallenge {
-        request_id: request_id.clone(),
-        nonce: nonce.clone(),
-        initiator_public: initiator_public.to_vec(),
+impl PairSession {
+    pub fn new(addr: SocketAddr) -> Self {
+        Self {
+            started_at: Instant::now(),
+            stage: PairStage::Starting,
+            nounce: None,
+            code: None,
+            addr,
+        }
     }
-}
 
-pub fn respond_to_challenge(
-    identity: &DeviceIdentity,
-    challenge: &PairingChallenge,
-) -> PairingChallengeResponse {
-    let signature = identity.sign(&challenge.nonce);
-    PairingChallengeResponse {
-        request_id: challenge.request_id.clone(),
-        signature: signature.to_vec(),
-        responder_public: identity.public_key_bytes().to_vec(),
-    }
-}
-
-#[allow(unused)]
-pub fn verify_response(
-    challenge: &PairingChallenge,
-    response: &PairingChallengeResponse,
-    peer_public: &[u8],
-) -> bool {
-    identity::verify(peer_public, &challenge.nonce, &response.signature)
-}
-
-pub fn pairing_code(challenge: &PairingChallenge, response: &PairingChallengeResponse) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(&challenge.initiator_public);
-    hasher.update(&response.responder_public);
-    hasher.update(&challenge.nonce);
-    let digest = hasher.finalize();
-    let code = u32::from_be_bytes(digest[..4].try_into().unwrap()) % 1000000;
-    format!("{code:06}")
-}
-
-#[allow(unused)]
-pub fn approve(seen: &SeenDevice, trusted: &mut TrustedDeviceStore) {
-    trusted.trust(TrustedDevice {
-        id: seen.id.clone(),
-        name: seen.name.clone(),
-        device_type: seen.device_type,
-        paired_at: SystemTime::now(),
-        public_key: [0u8; 32],
-        auto_connect: false,
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn challenge_response_and_code_are_consistent() {
-        let initiator = DeviceIdentity::load_or_create(std::env::temp_dir().join("clipx_test_pairing_initiator"));
-        let responder = DeviceIdentity::load_or_create(std::env::temp_dir().join("clipx_test_pairing_responder"));
-        let challenge = create_challenge(&initiator, &initiator.public_key_bytes());
-        let response = respond_to_challenge(&responder, &challenge);
-
-        assert!(verify_response(&challenge, &response, &responder.public_key_bytes()));
-        let code = pairing_code(&challenge, &response);
-        assert_eq!(code.len(), 6);
-        assert!(code.chars().all(|c| c.is_ascii_digit()));
-    }
+    // other related methods 
+    // this should be responsible for also creating message
 }
