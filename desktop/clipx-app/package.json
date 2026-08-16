@@ -8,8 +8,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "pretauri": "node manage-tauri.mjs --sync-icons",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "pretauri:dev": "node manage-tauri.mjs --sync-icons",
+    "tauri:dev": "tauri dev",
+    "pretauri:build": "node manage-tauri.mjs --sync-icons",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
