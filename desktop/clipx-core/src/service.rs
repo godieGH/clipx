@@ -70,12 +70,14 @@ impl CoreService {
         let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
         let (device_tx, device_rx) = mpsc::unbounded_channel();
         let (transport_tx, transport_rx) = mpsc::unbounded_channel();
+        let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
 
         let shutdown_for_transport = shutdown_rx.clone();
         let transport_task = tokio::spawn(async move {
             let transport = crate::net::transport::Transport::create_transport(
                 shutdown_for_transport,
                 transport_rx,
+                peer_event_tx,
             )
             .await;
             transport.run().await;
@@ -105,7 +107,7 @@ impl CoreService {
         );
         let device_manager_task = tokio::spawn(async move {
             device_manager
-                .run(shutdown_for_device_manager, discovered_rx, device_rx)
+                .run(shutdown_for_device_manager, discovered_rx, device_rx, peer_event_rx)
                 .await;
         });
         self.tasks.push(device_manager_task);

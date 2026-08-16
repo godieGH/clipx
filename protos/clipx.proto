@@ -37,6 +37,17 @@ enum DeviceType {
 // -----------------------------
 // Device pairing and Connection
 // -----------------------------
+message PeerPairRequest {
+  string name = 1;
+  bytes public_key = 2;
+  bytes fingerprint = 3; // lets an inbound responder key its connection without recomputing
+}
+
+message PeerPairResponse {
+  bytes public_key = 1;
+  string name = 2;
+}
+
 message PeerPairChallenge {
   bytes nonce = 1;
 }
@@ -45,16 +56,42 @@ message PeerPairChallengeResponse {
   bytes signature = 1;
 }
 
-message PeerPairRequest {
-  string name = 2;
-  bytes public_key = 3;
-}
-
-message PeerPairResponse {
-  bytes public_key = 1;
-}
-
 message PairAck {}
+
+// ---- Connect: 3-way, already-trusted devices only ----
+message PeerConnectChallenge {
+  bytes nonce = 1;
+  bytes initiator_fingerprint = 2; // lets an inbound responder look up who's calling
+}
+
+message PeerConnectChallengeResponse {
+  bytes signature = 1;
+}
+
+message ConnectAck {}
+
+// ---- Shared pre-transport control (4xxx fixed codes — see pairing::control) ----
+message PreTransportControl {
+  uint32 code = 1;
+  string message = 2;
+}
+
+// Single wire envelope for the peer TCP+WS transport. Pre-transport variants
+// are handled today; Clipboard is defined but not yet routed anywhere.
+message PeerMessage {
+  oneof body {
+    PeerPairRequest pair_request = 1;
+    PeerPairResponse pair_response = 2;
+    PeerPairChallenge pair_challenge = 3;
+    PeerPairChallengeResponse pair_challenge_response = 4;
+    PairAck pair_ack = 5;
+    PeerConnectChallenge connect_challenge = 6;
+    PeerConnectChallengeResponse connect_challenge_response = 7;
+    ConnectAck connect_ack = 8;
+    PreTransportControl control = 9;
+    ClipboardMessage clipboard = 10;
+  }
+}
 
 // --------------------------------------------------------------
 // IPC based types - will split them later into different package
@@ -141,26 +178,24 @@ message PairResponse {
 }
 
 message PairPendingRequest {}
-
 message PairPendingResponse {
-  repeated PairPendingDevice pending = 1;
+  repeated PairPendingSession pending = 1;
 }
-
-message PairPendingDevice {
+message PairPendingSession {
   string device_id = 1;
   string device_name = 2;
-  string status = 3;
+  string stage = 3; // "awaiting_approval" | "awaiting_code_confirm"
+  string code = 4;  // set only when stage == awaiting_code_confirm
 }
 
 message PairApproveRequest {
   string device_id = 1;
+  bool approve = 2;
 }
-
 message PairApproveResponse {
   string device_id = 1;
   string status = 2;
   string message = 3;
-  string pairing_code = 4;
 }
 
 message ConnectRequest {

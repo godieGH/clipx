@@ -1,40 +1,126 @@
-#![allow(unused)]
-use std::{net::SocketAddr, time::Instant};
+use sha2::{Digest, Sha256};
+use std::{net::SocketAddr, time::{Duration, Instant}};
+
+/// Fixed 4xxx codes carried in PreTransportControl — the only vocabulary
+/// either side needs to explain why a pair/connect attempt stopped.
+pub mod control {
+    pub const USER_DENIED: u32 = 4001;
+    pub const CODE_MISMATCH: u32 = 4002;
+    pub const SIGNATURE_INVALID: u32 = 4003;
+    pub const TIMEOUT: u32 = 4004;
+    pub const ALREADY_TRUSTED: u32 = 4005;
+    pub const UNKNOWN_DEVICE: u32 = 4006;
+    pub const PROTOCOL_ERROR: u32 = 4007;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Initiator,
+    Responder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairStage {
+    Dialing,               // initiator only: Connect sent, waiting for the socket
+    AwaitingPeerResponse,  // initiator: Request sent, waiting Response
+    AwaitingLocalApproval, // responder: Request received, waiting user's allow/deny
+    AwaitingChallenge,     // responder: Response sent, waiting Challenge
+    AwaitingSignature,     // initiator: Challenge sent, waiting ChallengeResponse
+    AwaitingCodeConfirm,   // both: waiting local user to confirm the displayed code
+    AwaitingAck,           // responder: signed + confirmed, waiting Ack
+}
 
 #[derive(Debug)]
 pub struct PairSession {
-    started_at: Instant,
-    stage: PairStage,
-    nounce: Option<[u8; 32]>,
-    code: Option<u32>,
-    addr: SocketAddr,
-}
-
-/// This is an alternating stage for both peer and initiator
-/// If initiatore starts with Requesting then the next stage will be Challanging
-/// While the peer will be take Responding — Signing — 
-#[derive(Debug)]
-pub enum PairStage {
-    Starting, // first default stage
-    Requesting,
-    Responding,
-    Challanging,
-    Signing,
-    Verifying, // this is final stag of the initiator
-    Acknowledged // This is the final stage of the peer
+    pub role: Role,
+    pub stage: PairStage,
+    pub started_at: Instant,
+    pub _peer_addr: SocketAddr,
+    pub peer_public_key: Option<[u8; 32]>,
+    pub peer_name: Option<String>,
+    pub nonce: Option<[u8; 32]>,
+    pub code: Option<u32>,
+    /// Held between "we signed" and "user confirmed the code" — released
+    /// (sent) only on confirmation, per the design: nothing crosses the
+    /// wire until the local user approves what they're looking at.
+    pub pending_signature: Option<[u8; 64]>,
 }
 
 impl PairSession {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new_initiator(addr: SocketAddr) -> Self {
         Self {
+            role: Role::Initiator,
+            stage: PairStage::Dialing,
             started_at: Instant::now(),
-            stage: PairStage::Starting,
-            nounce: None,
+            _peer_addr: addr,
+            peer_public_key: None,
+            peer_name: None,
+            nonce: None,
             code: None,
-            addr,
+            pending_signature: None,
         }
     }
 
-    // other related methods 
-    // this should be responsible for also creating message
+    pub fn new_responder(addr: SocketAddr, peer_public_key: [u8; 32], peer_name: String) -> Self {
+        Self {
+            role: Role::Responder,
+            stage: PairStage::AwaitingLocalApproval,
+            started_at: Instant::now(),
+            _peer_addr: addr,
+            peer_public_key: Some(peer_public_key),
+            peer_name: Some(peer_name),
+            nonce: None,
+            code: None,
+            pending_signature: None,
+        }
+    }
+
+    pub fn is_expired(&self, ttl: Duration) -> bool {
+        self.started_at.elapsed() > ttl
+    }
+
+    /// Order-independent so both sides compute the same code regardless of
+    /// who's initiator — sorts the two public keys before hashing.
+    pub fn compute_code(nonce: &[u8], pk_a: &[u8; 32], pk_b: &[u8; 32]) -> u32 {
+        let (first, second) = if pk_a <= pk_b { (pk_a, pk_b) } else { (pk_b, pk_a) };
+        let mut hasher = Sha256::new();
+        hasher.update(nonce);
+        hasher.update(first);
+        hasher.update(second);
+        let digest = hasher.finalize();
+        u32::from_be_bytes(digest[0..4].try_into().unwrap()) % 1_000_000
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectStage {
+    Dialing,           // initiator only
+    AwaitingSignature, // initiator: Challenge sent, waiting ChallengeResponse
+    AwaitingAck,       // responder: signed, waiting Ack
+}
+
+#[derive(Debug)]
+pub struct ConnectSession {
+    pub role: Role,
+    pub stage: ConnectStage,
+    pub started_at: Instant,
+    pub peer_addr: SocketAddr,
+    pub nonce: Option<[u8; 32]>,
+    pub retry_count: u8,
+}
+
+impl ConnectSession {
+    pub const MAX_RETRIES: u8 = 2;
+
+    pub fn new_initiator(addr: SocketAddr) -> Self {
+        Self { role: Role::Initiator, stage: ConnectStage::Dialing, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0 }
+    }
+
+    pub fn new_responder(addr: SocketAddr) -> Self {
+        Self { role: Role::Responder, stage: ConnectStage::AwaitingAck, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0 }
+    }
+
+    pub fn is_expired(&self, ttl: Duration) -> bool {
+        self.started_at.elapsed() > ttl
+    }
 }

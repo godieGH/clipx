@@ -226,19 +226,18 @@ impl IpcService {
             }
             clipx::ipc_request::Request::PairPending(_) => {
                 let (cmdres_tx, cmdres_rx) = oneshot::channel();
-                let _ = device_tx.send(DeviceCommands::PendingPairings {
-                    reply_to: cmdres_tx,
-                });
+                let _ = device_tx.send(DeviceCommands::PendingPairings { reply_to: cmdres_tx });
                 let pending = cmdres_rx.await?;
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::PairPending(
                         clipx::PairPendingResponse {
                             pending: pending
                                 .into_iter()
-                                .map(|(device_id, code)| clipx::PairPendingDevice {
-                                    device_id,
-                                    device_name: "pending".to_string(),
-                                    status: code,
+                                .map(|p| clipx::PairPendingSession {
+                                    device_id: p.device_id,
+                                    device_name: p.device_name,
+                                    stage: p.stage.to_string(),
+                                    code: p.code.unwrap_or_default(),
                                 })
                                 .collect(),
                         },
@@ -250,17 +249,13 @@ impl IpcService {
                 let (cmdres_tx, cmdres_rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::ApprovePairing {
                     device_id: device_id.clone(),
+                    approve: req.approve,
                     reply_to: cmdres_tx,
                 });
                 let message = cmdres_rx.await?;
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::PairApprove(
-                        clipx::PairApproveResponse {
-                            device_id,
-                            status: "ok".to_string(),
-                            message,
-                            pairing_code: String::new(),
-                        },
+                        clipx::PairApproveResponse { device_id, status: "ok".to_string(), message },
                     )),
                 }
             }

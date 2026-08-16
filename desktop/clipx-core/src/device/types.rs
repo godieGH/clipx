@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::time::{Instant, SystemTime};
 
 // just reuse from the protobuf def.
@@ -30,7 +30,7 @@ pub struct SeenDevice {
     pub id: String,
     pub name: String,
     pub device_type: DeviceType,
-    pub addr: SocketAddr,
+    pub addr: IpAddr,
     pub ws_port: u32,
     pub last_seen: Instant,
 }

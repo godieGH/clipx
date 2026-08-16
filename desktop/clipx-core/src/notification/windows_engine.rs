@@ -25,6 +25,15 @@ impl NotificationEngine {
         self.show_allow_deny(&title, &body, timeout).await
     }
 
+    //no buttons, no waiting on a decision
+    pub async fn notify_info(&self, title: &str, body: impl Into<String>) {
+        let title = title.to_string();
+        let body = body.into();
+        tokio::task::block_in_place(|| {
+            let _ = Toast::new(APP_ID).title(&title).text1(&body).show();
+        });
+    }
+
     async fn show_allow_deny(&self, title: &str, body: &str, timeout: Duration) -> PairDecision {
         let (tx, rx) = oneshot::channel::<PairDecision>();
         let tx = Arc::new(Mutex::new(Some(tx)));
