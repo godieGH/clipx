@@ -19,7 +19,7 @@ async fn main() {
             "--name" => { if let Some(v) = args.next() { name = v; } }
             "--id-path" => { if let Some(v) = args.next() { id_path = v.into(); } }
             "-h" | "--help" => {
-                println!("usage: clipx-protocol-emulator [--name NAME] [--id-path PATH]");
+                println!("usage: emulator [--name NAME] [--id-path PATH]");
                 println!("  --name NAME     display name this emulator announces/pairs as (default: emulator)");
                 println!("  --id-path PATH  where to persist this emulator's keypair, so its identity");
                 println!("                  is stable across restarts (default: a per-name temp file)");

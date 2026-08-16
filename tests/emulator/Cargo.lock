@@ -149,20 +149,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clipx-protocol-emulator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clipx-core",
- "futures-util",
- "hex",
- "prost",
- "socket2 0.5.10",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -357,6 +343,20 @@ name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+
+[[package]]
+name = "emulator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clipx-core",
+ "futures-util",
+ "hex",
+ "prost",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-tungstenite",
+]
 
 [[package]]
 name = "equivalent"
