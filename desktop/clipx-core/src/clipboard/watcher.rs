@@ -8,6 +8,7 @@ pub async fn watch_clipboard(
     mut shutdown_rx: watch::Receiver<bool>,
     tx: mpsc::UnboundedSender<String>,
 ) {
+
     let mut clipboard = match Clipboard::new() {
         Ok(c) => c,
         Err(e) => {

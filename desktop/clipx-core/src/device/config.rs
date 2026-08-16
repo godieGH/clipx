@@ -78,10 +78,20 @@ pub fn preferred_local_ip() -> Option<std::net::Ipv4Addr> {
     // Cheap heuristic, not perfect — good enough until this is observed to pick wrong.
     candidates.sort_by_key(|(name, _)| {
         let n = name.to_lowercase();
-        if n.contains("eth") || n.contains("ethernet") { 0 }
-        else if n.contains("wl") || n.contains("wifi") || n.contains("wi-fi") { 1 }
-        else if n.contains("vmnet") || n.contains("vboxnet") || n.contains("docker") || n.contains("tun") || n.contains("veth") { 3 }
-        else { 2 }
+        if n.contains("eth") || n.contains("ethernet") {
+            0
+        } else if n.contains("wl") || n.contains("wifi") || n.contains("wi-fi") {
+            1
+        } else if n.contains("vmnet")
+            || n.contains("vboxnet")
+            || n.contains("docker")
+            || n.contains("tun")
+            || n.contains("veth")
+        {
+            3
+        } else {
+            2
+        }
     });
     candidates.into_iter().next().map(|(_, ip)| ip)
 }
