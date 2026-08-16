@@ -1,0 +1,26 @@
+[package]
+name = "clipx-protocol-emulator"
+version = "0.1.0"
+edition = "2024"
+
+# Deliberately NOT a member of desktop/Cargo.toml's [workspace]. This is a
+# project-wide test/dev tool, not part of the shipped app — see /tests/README.md.
+# Build it directly: `cargo run --manifest-path tests/emulator/Cargo.toml`
+
+[dependencies]
+# Path dependency on the real crate — reuses the exact same identity/crypto,
+# protobuf message types, and pairing/connect stage definitions the real
+# clipx-core uses. Nothing here is reimplemented or guessed at; if the wire
+# format changes, this crate fails to compile until it's updated too.
+clipx-core = { path = "../../desktop/clipx-core" }
+
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.31"
+prost = "0.14.4"
+hex = "0.4.3"
+anyhow = "1.0.104"
+# Needed for SO_REUSEADDR on the discovery UDP socket, so this tool can run
+# alongside a real clipx-core instance on the same machine without a bind
+# conflict on port 9999.
+socket2 = "0.5"
