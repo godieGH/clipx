@@ -39,6 +39,8 @@ pub enum Event {
 pub struct AppState {
     pub identity: Arc<DeviceIdentity>,
     pub device_name: String,
+    pub device_type: proto::DeviceType,
+    pub ws_port: u32,
     pub discovered: Mutex<HashMap<String, (proto::Announce, SocketAddr)>>,
     pub conns: Mutex<HashMap<String, Arc<ConnHandle>>>,
     pub events_tx: broadcast::Sender<Event>,

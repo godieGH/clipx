@@ -35,8 +35,8 @@ pub async fn run_broadcaster(mut shutdown_rx: watch::Receiver<bool>, state: Arc<
     let announce = proto::Announce {
         fingerprint: state.identity.get_this_device_fingerprint().to_vec(),
         device_name: state.device_name.clone(),
-        device_type: proto::DeviceType::Unspecified as i32,
-        ws_port: 0,
+        device_type: state.device_type as i32,
+        ws_port: state.ws_port,
     };
     let mut buf = Vec::new();
     announce.encode(&mut buf).unwrap();

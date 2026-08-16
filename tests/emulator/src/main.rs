@@ -7,22 +7,46 @@ use state::AppState;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+use clipx_core::message::proto::DeviceType;
 
 #[tokio::main]
 async fn main() {
-    let mut name = "emulator".to_string();
+    let mut name = "Emulator".to_string();
     let mut id_path = std::env::temp_dir().join("clipx_emulator_identity_default");
+    let mut ws_port = 8081;
+    let mut device_type = "unknown".to_string();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--name" => { if let Some(v) = args.next() { name = v; } }
             "--id-path" => { if let Some(v) = args.next() { id_path = v.into(); } }
+            "--port" => {
+                if let Some(v) = args.next() {
+                    ws_port = v.parse::<u32>()
+                        .expect("Failed to parse port")
+                }
+            }
+            "--device-type" => {
+                if let Some(v) = args.next() {
+                    match v.as_str() {
+                       "windows" | "linux" | "macos" | "android" | "ios" | "unknown" => {
+                           device_type = v;
+                       }
+                       _ => {
+                        panic!("Invalid device types specified")
+                       }
+                    }
+                }
+            }
             "-h" | "--help" => {
                 println!("usage: emulator [--name NAME] [--id-path PATH]");
-                println!("  --name NAME     display name this emulator announces/pairs as (default: emulator)");
-                println!("  --id-path PATH  where to persist this emulator's keypair, so its identity");
-                println!("                  is stable across restarts (default: a per-name temp file)");
+                println!("  --name NAME            display name this emulator announces/pairs as (default: emulator)");
+                println!("  --id-path PATH         where to persist this emulator's keypair, so its identity");
+                println!("                         is stable across restarts (default: a per-name temp file)");
+                println!("  --port PORT            specify a different transport socket port (default=8081)");
+                println!("  --device-type TYPE     specify the device type (default to unknown)");
+                println!("                         valid values (windows|linux|macos|android|ios|unknown)");
                 return;
             }
             other => { eprintln!("unrecognized flag: {other} (try --help)"); return; }
@@ -35,12 +59,24 @@ async fn main() {
         id_path = std::env::temp_dir().join(format!("clipx_emulator_identity_{name}"));
     }
 
+    let device_type = match device_type.as_str() {
+        "windows" => DeviceType::Windows,
+        "linux" => DeviceType::Linux,
+        "macos" => DeviceType::Macos,
+        "android" => DeviceType::Android,
+        "ios" => DeviceType::Ios,
+        "unknown" => DeviceType::Unspecified,
+        _ => DeviceType::Unspecified
+    };
+
     let identity = Arc::new(DeviceIdentity::load_or_create(id_path.clone()));
     let (events_tx, mut printer_rx) = broadcast::channel(1024);
 
     let state = Arc::new(AppState {
         identity: identity.clone(),
         device_name: name.clone(),
+        device_type,
+        ws_port,
         discovered: Mutex::new(Default::default()),
         conns: Mutex::new(Default::default()),
         events_tx,
