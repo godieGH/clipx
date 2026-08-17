@@ -44,7 +44,7 @@ impl IpcService {
         let listener = ListenerOptions::new().name(name).create_tokio().unwrap();
         self.listener = Some(listener);
 
-        tracing::info!("IPC service started");
+        tracing::info!("IPC services started");
 
         loop {
             tokio::select! {
@@ -103,7 +103,6 @@ impl IpcService {
                         WsMessage::Close(_) => break,
                         WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                         WsMessage::Binary(bytes) => {
-                            tracing::info!("Ipc request made");
                             let ipcreq = IpcService::decode_ipc_req(bytes.to_vec())?;
                             IpcService::handle_ipc_request(&device_tx, ipcreq, &mut ws).await?;
                         }

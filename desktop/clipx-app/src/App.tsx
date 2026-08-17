@@ -555,7 +555,12 @@ function App() {
 
   function handleScan() {
     setScanning(true);
-    refreshAvailable().finally(() => setScanning(false));
+    refreshAvailable().finally(() => {
+      /// give a little delay to make UI feel real
+      setTimeout(() => {
+        setScanning(false)
+      }, 3000)
+    });
   }
 
   async function handleConnect(fingerprint: string) {
@@ -749,7 +754,7 @@ function App() {
               </svg>
             )}
           </button>
-          <button className="closing-button" onClick={() => appWindow.close()}>
+          <button className="closing-button" onClick={() => appWindow.hide()}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>

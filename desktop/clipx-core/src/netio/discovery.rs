@@ -71,6 +71,7 @@ async fn broadcast_presence(
     let mut message: Vec<u8> = vec![];
     announce.encode(&mut message).unwrap();
 
+    tracing::info!("Upd broadcasting to 255.255.255.255:9999 after each 2 sec");
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
@@ -78,7 +79,6 @@ async fn broadcast_presence(
             }
             _ = tokio::time::sleep(Duration::from_secs(2)) => {
                 let _ = socket.send_to(&message, "255.255.255.255:9999").await;
-                tracing::info!("broadcasting...");
             }
         }
     }
@@ -93,6 +93,7 @@ async fn listen_for_devices(
 ) {
     let mut buf = [0u8; 1024];
 
+    tracing::info!("Upd listening to peer broadcasts/announces");
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {

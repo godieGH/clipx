@@ -18,12 +18,9 @@ pub async fn watch_clipboard(
     };
 
     let mut last_content = clipboard.get_text().unwrap_or_default();
-    let last_char_count = last_content.chars().count();
-    let last_snippet: String = last_content.chars().take(50).collect();
     tracing::info!(
-        "clipboard watcher started initial content: {:?}{}",
-        last_snippet,
-        if last_char_count > 50 { "..." } else { "" }
+        "clipboard watcher started initial content: size={:?}",
+        last_content.len()
     );
 
     loop {
