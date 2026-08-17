@@ -148,21 +148,53 @@ function ScrollFade({ className, children }: { className?: string; children: Rea
 /* ---------------------------------------------------------------------- */
 
 function DeviceIcon({ type }: { type: DeviceType }) {
+  const desktop = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+
+  const mobile = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="6" y="3" width="12" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="9" y1="19" x2="9" y2="19.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+
+  const linux = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Terminal window */}
+      <rect x="3" y="4" width="18" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      {/* Prompt chevron */}
+      <path d="M6.5 9.5 9.5 12l-3 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Cursor line */}
+      <line x1="11.5" y1="14.5" x2="15.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+
+  const ios = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Phone body */}
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
+      {/* Dynamic Island */}
+      <rect x="10" y="4.3" width="4" height="1.6" rx="0.8" fill="currentColor" />
+      {/* Home indicator */}
+      <line x1="9.5" y1="19.3" x2="14.5" y2="19.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+
   switch (type) {
     case "windows":
-      return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      );
+      return desktop;
+    case "macos":
+      return desktop;
+    case "linux":
+      return linux;
     case "android":
-      return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="6" y="3" width="12" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="9" y1="19" x2="9" y2="19.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      );
+      return mobile;
+    case "ios":
+      return ios;
     default:
       return (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -344,7 +376,7 @@ function DeviceDetail({
         </div>
 
         {/* If device connection state state says unavalable hence no need to display port + addr */}
-        { 
+        {
           deviceAvalable &&
           <div className="identity-grid">
             <div className="identity-cell">
@@ -495,6 +527,10 @@ function App() {
     try {
       const result: PairedDevice[] = await invoke("get_paired_devices");
       setPaired(result);
+      setAvailable((prev) => {
+        const pairedIds = new Set(result.map((d) => d.fingerprint));
+        return prev.filter(d => !pairedIds.has(d.fingerprint))
+      });
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
     }
@@ -515,7 +551,7 @@ function App() {
     }
   }, []);
 
-  const getThisDeviceIdenty = useCallback(async() => {
+  const getThisDeviceIdenty = useCallback(async () => {
     try {
       const result: OwnIdentity = await invoke("get_this_device_identity");
       setOwnIdentity(result);
@@ -556,8 +592,9 @@ function App() {
   function handleScan() {
     setScanning(true);
     refreshAvailable().finally(() => {
-      /// give a little delay to make UI feel real
-      setTimeout(() => {
+      /// give a little delay to make UI feel real then call refreshAvalable again if any changes
+      setTimeout(async () => {
+        await refreshAvailable()
         setScanning(false)
       }, 3000)
     });
@@ -569,9 +606,11 @@ function App() {
       await invoke("connect_device", { deviceId: fingerprint });
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
-    } finally {
-      refreshPaired();
     }
+    // do not refresh wait the poll will pick it
+    // since connect device respond doesnt mean the connect it means the connectins req was succecefully made 
+    // the poll refresh might pick if done connected
+    // this gives it time to show connecting
   }
 
   async function handleDisconnect(fingerprint: string) {
@@ -613,10 +652,19 @@ function App() {
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
       setAvailable((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, pairing: "idle" } : d)));
+      return;
     }
-    // Note: pairing here only sends the *request* — approval happens elsewhere
-    // (handle_approve_pairing on the core side). Once that's wired to a UI action,
-    // refreshPaired()/refreshAvailable() here will pick up the result.
+    // Core's own pair session TTL is 90s. If it succeeded, refreshPaired's
+    // reconciliation will have already removed this fingerprint from `available`
+    // by the time this fires — so this only resets requests that were rejected,
+    // timed out, or otherwise never resolved.
+    setTimeout(() => {
+      setAvailable((prev) => prev.map((d) =>
+        d.fingerprint === fingerprint && d.pairing === "requesting"
+          ? { ...d, pairing: "idle" }
+          : d
+      ));
+    }, 95_000);
   }
 
   function handleCopy(content: string) {
@@ -727,11 +775,11 @@ function App() {
         </div>
         <div className="window-controls">
           <button className={`icon-button titlebar-icon ${showIdentityDisabled ? "button-disable" : ""}`} title="Device identity" onClick={() => {
-              getThisDeviceIdenty().finally(() => {
-                if (showIdentityDisabled) return;
-                setShowIdentity(true);
-              });
-            }}>
+            getThisDeviceIdenty().finally(() => {
+              if (showIdentityDisabled) return;
+              setShowIdentity(true);
+            });
+          }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
