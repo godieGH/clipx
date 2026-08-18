@@ -1,8 +1,9 @@
 //! Notification engine: the one place in core that knows how to ask the
-//! user a yes/no question via a native OS prompt. Callers (DeviceManager,
-//! and anything else later) only ever see `Prompt`/`PairDecision` — no
-//! platform-specific vocabulary (toast XML, button ids, WinRT quirks)
-//! crosses this module's boundary in either direction.
+//! user a question via a native OS prompt.
+//
+//! Callers use domain-specific decisions such as `PairDecision` or
+//! `IncomingClipboardDecision`. Platform-specific details stay inside
+//! the platform notification engine.
 
 #[cfg(target_os = "windows")]
 mod windows_engine;
@@ -14,23 +15,63 @@ mod stub_engine;
 #[cfg(not(target_os = "windows"))]
 pub use stub_engine::NotificationEngine;
 
-#[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairDecision {
     Allow,
     Deny,
-    /// Timed out, dismissed without a button click, or the prompt couldn't
-    /// be shown at all (unsupported platform, OS-level failure).
+
+    /// Timed out, dismissed without a button click, or the prompt
+    /// could not be shown.
     NoResponse,
 }
 
-/// Closed set of things this module knows how to ask the user. Add a
-/// variant (and its match arm in each platform engine) when a genuinely new
-/// use case shows up — resist a fully generic "caller builds the prompt"
-/// escape hatch, since that would leak platform detail back out of here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncomingClipboardDecision {
+    Copy,
+    Ignore,
+}
+
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum Prompt {
-    PairRequest { peer_name: String },
-    ConfirmCode { peer_name: String, code: String },
+    PairRequest {
+        peer_name: String,
+    },
+
+    ConfirmCode {
+        peer_name: String,
+        code: String,
+    },
+
+    IncomingClipboard {
+        peer_name: String,
+        content: String, // later will be use to for image url,
+        // clipboard_type: ClipboardType, // Text, Image, File, RichText
+    },
+}
+
+impl Prompt {
+    pub fn render(&self) -> (String, String) {
+        match self {
+            Prompt::PairRequest { peer_name } => (
+                "Pairing request".to_string(),
+                format!("{peer_name} wants to pair with this device."),
+            ),
+
+            Prompt::ConfirmCode { peer_name, code } => (
+                "Confirm pairing code".to_string(),
+                format!(
+                    "Code from {peer_name}: {code}\nDoes this match on both devices?"
+                ),
+            ),
+
+            Prompt::IncomingClipboard { peer_name, .. } => (
+                "Clipboard received".to_string(),
+                format!(
+                    "Received clipboard from {peer_name}. \
+                     Would you like to copy it to your clipboard?"
+                ),
+            ),
+        }
+    }
 }

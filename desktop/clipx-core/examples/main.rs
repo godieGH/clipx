@@ -1,30 +1,26 @@
-use tauri_winrt_notification::{Duration, Toast};
+use std::time::Duration;
 
-fn main() {
-    let toast = Toast::new(Toast::POWERSHELL_APP_ID);
-    let main = std::thread::current();
+use clipx_core::notification::{IncomingClipboardDecision, NotificationEngine, Prompt};
 
-    toast
-        .text1("Hello, World")
-        .duration(Duration::Short)
-        .add_button("Copy To Clipboard", "copy")
-        .add_button("Ignore", "ignore")
-        .sound(None)
-        .image(
-            std::path::Path::new("C:/Users/Admin/Downloads/vault_launcher_ic.png"),
-            "The image",
-        )
-        .on_activated(move |action| {
-            println!("user clicked: {}", action.unwrap());
-            main.unpark();
-            Ok(())
-        })
-        .on_dismissed(|reason| {
-            println!("User cancelled {:?}", reason.unwrap());
-            Ok(())
-        })
-        .show()
-        .unwrap();
+#[tokio::main]
+async fn main() {
 
-    std::thread::park();
+    let a = NotificationEngine;
+
+    let b = a.ask_clipboard(
+        Prompt::IncomingClipboard {
+            peer_name: String::from("Joan PC"),
+            content: String::default()
+        },
+        Duration::from_secs(10)
+    ).await;
+
+    match b {
+      IncomingClipboardDecision::Copy => {
+        println!("Copied")
+      }
+      IncomingClipboardDecision::Ignore => {
+        println!("Ignored")
+      }
+    }
 }
