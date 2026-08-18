@@ -140,6 +140,7 @@ impl Transport {
                 reply_to,
             } => {
                 if self.connections.contains_key(&device_id) {
+                    tracing::warn!("dial requested for {device_id} which is already registered; ignoring (state caller)");
                     let _ = reply_to.send(true);
                     return;
                 }

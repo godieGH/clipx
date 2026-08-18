@@ -1069,9 +1069,15 @@ impl DeviceManager {
                 device_id,
                 reply_to,
             } => {
+                // connected or mid connecting — tear the transport connection
+                // down and wait for it same as manual Disconnect
+                // before wiping trust — other the socket (and any other background dial task)
+                // leaks and block repairing later
+                if self.connected.contains_key(&device_id) {
+                    let _ = self.handle_disconnect(&device_id).await;
+                }
                 self.trusted.revoke(&device_id);
-                self.connected.remove(&device_id);
-                let _ = reply_to.send("ok".to_string());
+                let _ = reply_to.send("ok".to_string());              
             }
             DeviceCommands::PendingPairings { reply_to } => {
                 let _ = reply_to.send(self.list_pending_pairings());
