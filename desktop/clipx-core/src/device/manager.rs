@@ -742,7 +742,7 @@ impl DeviceManager {
                 self.finalize_pair_trusted(&device_id);
                 self.send_peer(&device_id, Body::PairAck(proto::PairAck {}));
                 self.pair_sessions.remove(&device_id);
-                self.notify_info("Pair successfully", format!("Successfully paired with {peer_name}\nFingerprint: {}", get_formated_fp(&device_id)));
+                self.notify_info("Paired successfully", format!("Successfully paired with {peer_name}\nFingerprint: {}", get_formated_fp(&device_id)));
             }
         }
     }
