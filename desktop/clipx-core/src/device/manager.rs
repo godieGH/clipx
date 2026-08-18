@@ -738,10 +738,11 @@ impl DeviceManager {
                     );
                     return;
                 }
+                let peer_name = sess.peer_name.clone().unwrap_or_else(|| device_id.clone());
                 self.finalize_pair_trusted(&device_id);
                 self.send_peer(&device_id, Body::PairAck(proto::PairAck {}));
                 self.pair_sessions.remove(&device_id);
-                self.notify_info("Paired", format!("Successfully paired with {device_id}"));
+                self.notify_info("Pair successfully", format!("Successfully paired with {peer_name}\nFingerprint: {}", get_formated_fp(&device_id)));
             }
         }
     }
@@ -987,6 +988,16 @@ fn connection_rank(state: i32) -> u8 {
         proto::ConnectionState::Disconnected => 2,
         proto::ConnectionState::Unavailable => 3,
     }
+}
+
+fn get_formated_fp(device_id: &str) -> String {
+    device_id.chars()
+        .collect::<Vec<_>>()
+        .chunks(4)
+        .take(7)
+        .map(|group| group.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 impl DeviceManager {
