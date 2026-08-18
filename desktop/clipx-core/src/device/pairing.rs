@@ -1,3 +1,4 @@
+use crate::message::proto::DeviceType;
 use sha2::{Digest, Sha256};
 use std::{net::SocketAddr, time::{Duration, Instant}};
 
@@ -30,6 +31,7 @@ pub enum PairStage {
     AwaitingAck,           // responder: signed + confirmed, waiting Ack
 }
 
+
 #[derive(Debug)]
 pub struct PairSession {
     pub role: Role,
@@ -38,6 +40,7 @@ pub struct PairSession {
     pub _peer_addr: SocketAddr,
     pub peer_public_key: Option<[u8; 32]>,
     pub peer_name: Option<String>,
+    pub peer_device_type: DeviceType,
     pub nonce: Option<[u8; 32]>,
     pub code: Option<u32>,
     /// Held between "we signed" and "user confirmed the code" — released
@@ -47,7 +50,7 @@ pub struct PairSession {
 }
 
 impl PairSession {
-    pub fn new_initiator(addr: SocketAddr) -> Self {
+    pub fn new_initiator(addr: SocketAddr, peer_device_type: DeviceType) -> Self {
         Self {
             role: Role::Initiator,
             stage: PairStage::Dialing,
@@ -55,13 +58,14 @@ impl PairSession {
             _peer_addr: addr,
             peer_public_key: None,
             peer_name: None,
+            peer_device_type,
             nonce: None,
             code: None,
             pending_signature: None,
         }
     }
 
-    pub fn new_responder(addr: SocketAddr, peer_public_key: [u8; 32], peer_name: String) -> Self {
+    pub fn new_responder(addr: SocketAddr, peer_public_key: [u8; 32], peer_name: String, peer_device_type: DeviceType) -> Self {
         Self {
             role: Role::Responder,
             stage: PairStage::AwaitingLocalApproval,
@@ -69,6 +73,7 @@ impl PairSession {
             _peer_addr: addr,
             peer_public_key: Some(peer_public_key),
             peer_name: Some(peer_name),
+            peer_device_type,
             nonce: None,
             code: None,
             pending_signature: None,

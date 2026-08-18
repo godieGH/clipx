@@ -5,7 +5,9 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, watch},
 };
-use tokio_tungstenite::{accept_async, client_async, tungstenite::Message as WsMessage, WebSocketStream};
+use tokio_tungstenite::{
+    WebSocketStream, accept_async, client_async, tungstenite::Message as WsMessage,
+};
 
 use crate::message::proto::{self, peer_message::Body};
 
@@ -21,25 +23,52 @@ pub struct ConnectedDevice {
 pub enum TransportEvent {
     Connected(ConnectedDevice),
     Disconnected(String),
+    ConnectFailed(String),
     /// A decoded PeerMessage from an identified device. Pre-transport
     /// variants are consumed by DeviceManager; Body::Clipboard is defined
     /// but not routed anywhere yet.
-    PeerMessage { device_id: String, message: proto::PeerMessage },
+    PeerMessage {
+        device_id: String,
+        message: proto::PeerMessage,
+    },
 }
 
 #[allow(unused)]
 #[derive(Debug)]
 pub enum TransportCommand {
-    Connect { device_id: String, addr: SocketAddr, reply_to: oneshot::Sender<bool> },
-    Disconnect { device_id: String, reply_to: oneshot::Sender<bool> },
-    SendPeerMessage { device_id: String, message: proto::PeerMessage, reply_to: oneshot::Sender<bool> },
-    ListConnections { reply_to: oneshot::Sender<Vec<ConnectedDevice>> },
+    Connect {
+        device_id: String,
+        addr: SocketAddr,
+        reply_to: oneshot::Sender<bool>,
+    },
+    Disconnect {
+        device_id: String,
+        reply_to: oneshot::Sender<bool>,
+    },
+    SendPeerMessage {
+        device_id: String,
+        message: proto::PeerMessage,
+        reply_to: oneshot::Sender<bool>,
+    },
+    ListConnections {
+        reply_to: oneshot::Sender<Vec<ConnectedDevice>>,
+    },
 }
 
 enum Registration {
-    Ok { device_id: String, addr: SocketAddr, outbound_tx: mpsc::UnboundedSender<WsMessage>, reply_to: Option<oneshot::Sender<bool>> },
-    Failed { reply_to: Option<oneshot::Sender<bool>> },
-    Closed {device_id: String},
+    Ok {
+        device_id: String,
+        addr: SocketAddr,
+        outbound_tx: mpsc::UnboundedSender<WsMessage>,
+        reply_to: Option<oneshot::Sender<bool>>,
+    },
+    Failed {
+        device_id: String,
+        reply_to: Option<oneshot::Sender<bool>>,
+    },
+    Closed {
+        device_id: String,
+    },
 }
 
 struct Conn {
@@ -64,10 +93,20 @@ impl Transport {
         event_tx: mpsc::UnboundedSender<TransportEvent>,
     ) -> Self {
         let ws_port = crate::device::config::get_ws_port();
-        let listener = TcpListener::bind(format!("0.0.0.0:{ws_port}")).await.expect("websocket listener failed bind");
+        let listener = TcpListener::bind(format!("0.0.0.0:{ws_port}"))
+            .await
+            .expect("websocket listener failed bind");
         tracing::info!("WS server running on port={ws_port} ...");
         let (register_tx, register_rx) = mpsc::unbounded_channel();
-        Self { listener, connections: HashMap::new(), shutdown_rx, command_rx, event_tx, register_tx, register_rx }
+        Self {
+            listener,
+            connections: HashMap::new(),
+            shutdown_rx,
+            command_rx,
+            event_tx,
+            register_tx,
+            register_rx,
+        }
     }
 
     pub async fn run(mut self) {
@@ -95,33 +134,51 @@ impl Transport {
 
     fn handle_command(&mut self, cmd: TransportCommand) {
         match cmd {
-            TransportCommand::Connect { device_id, addr, reply_to } => {
+            TransportCommand::Connect {
+                device_id,
+                addr,
+                reply_to,
+            } => {
                 if self.connections.contains_key(&device_id) {
                     let _ = reply_to.send(true);
                     return;
                 }
                 self.spawn_outbound(device_id, addr, reply_to);
             }
-            TransportCommand::Disconnect { device_id, reply_to } => {
+            TransportCommand::Disconnect {
+                device_id,
+                reply_to,
+            } => {
                 // Dropping outbound_tx is what tells the connection's task
                 // to stop and close the socket — see run_connection.
                 let removed = self.connections.remove(&device_id).is_some();
                 let _ = reply_to.send(removed);
             }
-            TransportCommand::SendPeerMessage { device_id, message, reply_to } => {
+            TransportCommand::SendPeerMessage {
+                device_id,
+                message,
+                reply_to,
+            } => {
                 let mut buf = Vec::new();
                 if message.encode(&mut buf).is_err() {
                     let _ = reply_to.send(false);
                     return;
                 }
-                let ok = self.connections.get(&device_id)
+                let ok = self
+                    .connections
+                    .get(&device_id)
                     .map(|c| c.outbound_tx.send(WsMessage::binary(buf)).is_ok())
                     .unwrap_or(false);
                 let _ = reply_to.send(ok);
             }
             TransportCommand::ListConnections { reply_to } => {
-                let devices = self.connections.iter()
-                    .map(|(id, c)| ConnectedDevice { id: id.clone(), addr: c.addr })
+                let devices = self
+                    .connections
+                    .iter()
+                    .map(|(id, c)| ConnectedDevice {
+                        id: id.clone(),
+                        addr: c.addr,
+                    })
                     .collect();
                 let _ = reply_to.send(devices);
             }
@@ -130,13 +187,32 @@ impl Transport {
 
     fn handle_registration(&mut self, reg: Registration) {
         match reg {
-            Registration::Ok { device_id, addr, outbound_tx, reply_to } => {
-                self.connections.insert(device_id.clone(), Conn { addr, outbound_tx });
-                if let Some(r) = reply_to { let _ = r.send(true); }
-                let _ = self.event_tx.send(TransportEvent::Connected(ConnectedDevice { id: device_id, addr }));
+            Registration::Ok {
+                device_id,
+                addr,
+                outbound_tx,
+                reply_to,
+            } => {
+                self.connections
+                    .insert(device_id.clone(), Conn { addr, outbound_tx });
+                if let Some(r) = reply_to {
+                    let _ = r.send(true);
+                }
+                let _ = self
+                    .event_tx
+                    .send(TransportEvent::Connected(ConnectedDevice {
+                        id: device_id,
+                        addr,
+                    }));
             }
-            Registration::Failed { reply_to } => {
-                if let Some(r) = reply_to { let _ = r.send(false); }
+            Registration::Failed {
+                device_id,
+                reply_to,
+            } => {
+                if let Some(r) = reply_to {
+                    let _ = r.send(false);
+                }
+                let _ = self.event_tx.send(TransportEvent::ConnectFailed(device_id));
             }
             Registration::Closed { device_id } => {
                 self.connections.remove(&device_id);
@@ -149,11 +225,27 @@ impl Transport {
         let event_tx = self.event_tx.clone();
 
         tokio::spawn(async move {
-            let stream = match TcpStream::connect(addr).await {
-                Ok(s) => s,
-                Err(e) => {
+            let stream = match tokio::time::timeout(
+                Duration::from_secs(8),
+                TcpStream::connect(addr),
+            )
+            .await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
                     tracing::warn!("connect to {device_id} at {addr} failed: {e}");
-                    let _ = register_tx.send(Registration::Failed { reply_to: Some(reply_to) });
+                    let _ = register_tx.send(Registration::Failed {
+                        device_id,
+                        reply_to: Some(reply_to),
+                    });
+                    return;
+                }
+                Err(_) => {
+                    tracing::warn!("connect to {device_id} at {addr} timed out");
+                    let _ = register_tx.send(Registration::Failed {
+                        device_id,
+                        reply_to: Some(reply_to),
+                    });
                     return;
                 }
             };
@@ -161,13 +253,19 @@ impl Transport {
                 Ok((ws, _resp)) => ws,
                 Err(e) => {
                     tracing::warn!("ws handshake with {device_id} failed: {e}");
-                    let _ = register_tx.send(Registration::Failed { reply_to: Some(reply_to) });
+                    let _ = register_tx.send(Registration::Failed {
+                        device_id,
+                        reply_to: Some(reply_to),
+                    });
                     return;
                 }
             };
             let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
             let _ = register_tx.send(Registration::Ok {
-                device_id: device_id.clone(), addr, outbound_tx, reply_to: Some(reply_to),
+                device_id: device_id.clone(),
+                addr,
+                outbound_tx,
+                reply_to: Some(reply_to),
             });
             run_connection(ws, device_id, outbound_rx, event_tx, register_tx.clone()).await;
         });
@@ -180,7 +278,10 @@ impl Transport {
         tokio::spawn(async move {
             let mut ws = match accept_async(stream).await {
                 Ok(ws) => ws,
-                Err(e) => { tracing::warn!("inbound ws handshake failed from {addr}: {e}"); return; }
+                Err(e) => {
+                    tracing::warn!("inbound ws handshake failed from {addr}: {e}");
+                    return;
+                }
             };
 
             // First frame must self-identify — a fresh PairRequest (carries
@@ -189,23 +290,42 @@ impl Transport {
             // brand-new connection is a protocol violation.
             let first_bytes = match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
                 Ok(Some(Ok(WsMessage::Binary(bytes)))) => bytes,
-                _ => { tracing::warn!("inbound connection from {addr} did not identify itself in time"); return; }
+                _ => {
+                    tracing::warn!(
+                        "inbound connection from {addr} did not identify itself in time"
+                    );
+                    return;
+                }
             };
             let message = match proto::PeerMessage::decode(first_bytes.as_ref()) {
                 Ok(m) => m,
-                Err(e) => { tracing::warn!("inbound connection from {addr} sent an undecodable first frame: {e}"); return; }
+                Err(e) => {
+                    tracing::warn!(
+                        "inbound connection from {addr} sent an undecodable first frame: {e}"
+                    );
+                    return;
+                }
             };
             let device_id = match &message.body {
                 Some(Body::PairRequest(req)) => hex::encode(&req.fingerprint),
                 Some(Body::ConnectChallenge(c)) => hex::encode(&c.initiator_fingerprint),
-                _ => { tracing::warn!("inbound connection from {addr} sent unexpected first message"); return; }
+                _ => {
+                    tracing::warn!("inbound connection from {addr} sent unexpected first message");
+                    return;
+                }
             };
 
             let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
             let _ = register_tx.send(Registration::Ok {
-                device_id: device_id.clone(), addr, outbound_tx, reply_to: None,
+                device_id: device_id.clone(),
+                addr,
+                outbound_tx,
+                reply_to: None,
             });
-            let _ = event_tx.send(TransportEvent::PeerMessage { device_id: device_id.clone(), message });
+            let _ = event_tx.send(TransportEvent::PeerMessage {
+                device_id: device_id.clone(),
+                message,
+            });
 
             run_connection(ws, device_id, outbound_rx, event_tx, register_tx.clone()).await;
         });
@@ -245,6 +365,8 @@ async fn run_connection(
         }
     }
     let _ = ws.close(None).await;
-    let _ = register_tx.send(Registration::Closed { device_id: device_id.clone() });
+    let _ = register_tx.send(Registration::Closed {
+        device_id: device_id.clone(),
+    });
     let _ = event_tx.send(TransportEvent::Disconnected(device_id));
 }
