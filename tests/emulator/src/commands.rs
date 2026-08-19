@@ -2,7 +2,7 @@ use crate::netio;
 use crate::state::{AppState, Event};
 use clipx_core::device::identity;
 use clipx_core::device::pairing::PairSession;
-use clipx_core::message::proto::{self, peer_message::Body};
+use clipx_core::message::proto::{self, clipboard_message, peer_message::Body};
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -32,7 +32,10 @@ fn describe(m: &proto::PeerMessage) -> String {
         Some(Body::ConnectChallengeResponse(r)) => format!("ConnectChallengeResponse{{sig={}}}", hex::encode(&r.signature)),
         Some(Body::ConnectAck(_)) => "ConnectAck{}".to_string(),
         Some(Body::Control(c)) => format!("Control{{code={}, message={}}}", c.code, c.message),
-        Some(Body::Clipboard(_)) => "Clipboard{..}".to_string(),
+        Some(Body::Clipboard(c)) => match &c.content {
+            Some(clipboard_message::Content::Text(t)) => format!("Clipboard{{text={t:?}}}"),
+            None => "Clipboard{empty}".to_string(),
+        },
         None => "EMPTY".to_string(),
     }
 }
@@ -162,6 +165,14 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
             let Ok(code) = code.parse::<u32>() else { println!("bad code"); return; };
             let msg = rest.join(" ");
             report(netio::send_body(state, label, Body::Control(proto::PreTransportControl { code, message: msg })).await);
+        }
+
+        ["send", label, "clip", rest @ ..] => {
+            let text = rest.join(" ");
+            let body = Body::Clipboard(proto::ClipboardMessage {
+                content: Some(clipboard_message::Content::Text(text)),
+            });
+            report(netio::send_body(state, label, body).await);
         }
 
         ["pair", "auto", label] => {
@@ -375,6 +386,9 @@ raw staged sends — test any single stage in isolation, in any order
   send <label> connect-challenge-response
   send <label> connect-ack
   send <label> control <code> <message>
+
+clipboard
+  send <label> clip <text...>                    send a Clipboard{{text}} frame — no pairing/history required
 
 automated end-to-end flows
   pair auto <label>                   run the full initiator pairing flow against <label>
