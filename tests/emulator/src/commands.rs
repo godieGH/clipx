@@ -167,6 +167,16 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
             report(netio::send_body(state, label, Body::Control(proto::PreTransportControl { code, message: msg })).await);
         }
 
+        ["send", "*", "clip", rest @ ..] => {
+            let text = rest.join(" ");
+            let labels: Vec<String> = state.conns.lock().await.keys().cloned().collect();
+            for label in labels {
+                let body = Body::Clipboard(proto::ClipboardMessage {
+                    content: Some(clipboard_message::Content::Text(text.clone())),
+                });
+                report(netio::send_body(state, &label, body).await);
+            }
+        }
         ["send", label, "clip", rest @ ..] => {
             let text = rest.join(" ");
             let body = Body::Clipboard(proto::ClipboardMessage {

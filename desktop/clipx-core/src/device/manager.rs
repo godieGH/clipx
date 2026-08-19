@@ -6,9 +6,9 @@ use crate::device::identity::{self, DeviceIdentity};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::device::{config, pairing};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
-use crate::netio::transport::{ConnectedDevice, TransportCommand, TransportEvent};
+use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{NotificationEngine, PairDecision, Prompt};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -985,30 +985,13 @@ impl DeviceManager {
     }
 
     /// Trusted devices enriched with live address/port from `seen` and live
-    /// connection status from `Transport` — the "Paired Devices" list.
     async fn build_paired_devices(&self) -> Vec<proto::DeviceInfo> {
-        let live: Vec<ConnectedDevice> = match self.transport_tx.as_ref() {
-            Some(tx) => {
-                let (reply_tx, reply_rx) = oneshot::channel();
-                if tx
-                    .send(TransportCommand::ListConnections { reply_to: reply_tx })
-                    .is_ok()
-                {
-                    reply_rx.await.unwrap_or_default()
-                } else {
-                    Vec::new()
-                }
-            }
-            None => Vec::new(),
-        };
-        let connected_ids: HashSet<&String> = live.iter().map(|c| &c.id).collect();
-
         let mut devices: Vec<proto::DeviceInfo> = self
             .trusted
             .list()
             .map(|trusted_device| {
                 let seen = self.seen.get(&trusted_device.id);
-                let connection = if connected_ids.contains(&trusted_device.id) {
+                let connection = if self.connected.contains_key(&trusted_device.id) {
                     proto::ConnectionState::Connected
                 } else if self.connect_sessions.contains_key(&trusted_device.id) {
                     proto::ConnectionState::Connecting

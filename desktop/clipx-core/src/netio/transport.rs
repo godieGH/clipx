@@ -342,8 +342,12 @@ async fn run_connection(
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
 ) {
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(15));
     loop {
         tokio::select! {
+            _ = ping_interval.tick() => {
+                if ws.send(WsMessage::Ping(Vec::new().into())).await.is_err() { break; }
+            }
             outbound = outbound_rx.recv() => {
                 match outbound {
                     Some(msg) => { if ws.send(msg).await.is_err() { break; } }
