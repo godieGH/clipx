@@ -71,6 +71,10 @@ interface ScrollFadeState {
 
 function useScrollFade<T extends HTMLDivElement>() {
   const ref = useRef<T | null>(null);
+  const isDraggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startScrollTopRef = useRef(0);
+
   const [state, setState] = useState<ScrollFadeState>({
     canUp: false,
     canDown: false,
@@ -105,7 +109,61 @@ function useScrollFade<T extends HTMLDivElement>() {
     return () => ro.disconnect();
   }, [measure]);
 
-  return { ref, state, onScroll: measure };
+  // Handle dragging the scrollbar thumb
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const el = ref.current;
+    if (!el) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    isDraggingRef.current = true;
+    startYRef.current = e.clientY;
+    startScrollTopRef.current = el.scrollTop;
+
+    // Capture pointer events even if cursor moves outside the thumb during drag
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || !ref.current) return;
+
+    const el = ref.current;
+    const { scrollHeight, clientHeight } = el;
+    const maxScroll = scrollHeight - clientHeight;
+    
+    // Calculate ratio of scrollable height to track area
+    const thumbHeightPx = Math.max((clientHeight / scrollHeight) * clientHeight, (clientHeight * 10) / 100);
+    const trackSpacePx = clientHeight - thumbHeightPx;
+
+    if (trackSpacePx <= 0) return;
+
+    const deltaY = e.clientY - startYRef.current;
+    const scrollDelta = (deltaY / trackSpacePx) * maxScroll;
+
+    el.scrollTop = startScrollTopRef.current + scrollDelta;
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    }
+  }, []);
+
+  return {
+    ref,
+    state,
+    onScroll: measure,
+    thumbProps: {
+      onPointerDown: handlePointerDown,
+      onPointerMove: handlePointerMove,
+      onPointerUp: handlePointerUp,
+      onPointerCancel: handlePointerUp,
+    },
+  };
 }
 
 /**
@@ -116,7 +174,7 @@ function useScrollFade<T extends HTMLDivElement>() {
  * `className` controls the sizing behavior per context (see App.css).
  */
 function ScrollFade({ className, children }: { className?: string; children: React.ReactNode }) {
-  const { ref, state, onScroll } = useScrollFade<HTMLDivElement>();
+  const { ref, state, onScroll, thumbProps } = useScrollFade<HTMLDivElement>();
 
   return (
     <div className={`scroll-fade-wrap ${className ?? ""}`}>
@@ -129,6 +187,7 @@ function ScrollFade({ className, children }: { className?: string; children: Rea
         <div
           className="scroll-fade-thumb"
           style={{ top: `${state.thumbTop}%`, height: `${state.thumbHeight}%` }}
+          {...thumbProps}
         />
       )}
     </div>

@@ -145,16 +145,38 @@ button {
 .scroll-fade-thumb {
   position: absolute;
   right: -6px;
-  width: 3px;
-  border-radius: 1px;
-  background: rgba(0, 0, 0, 0.18);
-  pointer-events: none;
+  width: 2px; /* Slightly wider for easier target grabbing */
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: auto; /* Enable mouse/touch drag */
+  cursor: grab;
+  touch-action: none;
+  transition: background 0.15s ease, width 0.15s ease;
+  z-index: 2;
 }
+
+.scroll-fade-thumb:hover {
+  width: 4px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.scroll-fade-thumb:active {
+  cursor: grabbing;
+  background: #396cd8; /* Accent color when dragging */
+}
+
 @media (prefers-color-scheme: dark) {
   .scroll-fade-thumb {
-    background: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.28);
+  }
+  .scroll-fade-thumb:hover {
+    background: rgba(255, 255, 255, 0.5);
+  }
+  .scroll-fade-thumb:active {
+    background: #396cd8;
   }
 }
+
 
 /* Mobile: the whole devices panel (both sections) scrolls as one box */
 .devices-panel-scroll {
