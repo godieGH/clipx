@@ -110,6 +110,9 @@ message IpcRequest {
     DisconnectRequest disconnect = 10;
     SetAutoConnectRequest set_auto_connect = 11;
     ForgetDeviceRequest forget_device = 12;
+    ClipboardHistoryRequest clipboard_history = 13;
+    ClipboardRemoveRequest clipboard_remove = 14;
+    ClipboardClearRequest clipboard_clear = 15;
   }
 }
 
@@ -128,6 +131,9 @@ message IpcResponse {
     DisconnectResponse disconnect = 11;
     SetAutoConnectResponse set_auto_connect = 12;
     ForgetDeviceResponse forget_device = 13;
+    ClipboardHistoryResponse clipboard_history = 14;
+    ClipboardRemoveResponse clipboard_remove = 15;
+    ClipboardClearResponse clipboard_clear = 16;
   }
 }
 
@@ -259,3 +265,26 @@ message ForgetDeviceResponse {
   string device_id = 1;
   string status = 2;
 }
+
+// -----------------------------
+// Clipboard history (IPC-only — not sent over the peer wire)
+// -----------------------------
+message ClipHistoryEntry {
+  string id = 1;
+  string content = 2;
+  string source_device_name = 3;
+  uint64 received_at_ms = 4;
+}
+
+message ClipboardHistoryRequest {
+  uint32 limit = 1; // 0 = no limit
+}
+message ClipboardHistoryResponse {
+  repeated ClipHistoryEntry entries = 1;
+}
+
+message ClipboardRemoveRequest { string id = 1; }
+message ClipboardRemoveResponse { bool removed = 1; }
+
+message ClipboardClearRequest {}
+message ClipboardClearResponse {}

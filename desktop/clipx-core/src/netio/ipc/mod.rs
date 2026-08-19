@@ -1,24 +1,25 @@
+use crate::{
+    clipboard::manager::ClipboardCommand,
+    device::manager::{DeviceCommands, SeenMode},
+    message::proto::clipx,
+};
 use futures_util::{SinkExt, StreamExt};
 use interprocess::local_socket::{
     GenericNamespaced, ListenerOptions, Name, ToNsName,
     tokio::{Listener, Stream as LocalStream},
     traits::tokio::Listener as ListenerTrait,
 };
+use prost::Message;
 use tokio::sync::{mpsc::UnboundedSender, oneshot, watch};
 use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message as WsMessage};
 use tokio_util::task::TaskTracker;
-
-use crate::{
-    device::manager::{DeviceCommands, SeenMode},
-    message::proto::clipx,
-};
-use prost::Message;
 
 pub struct IpcService {
     name: String,
     listener: Option<Listener>,
     core_service_shutdown_rx: watch::Receiver<bool>,
     device_tx: UnboundedSender<DeviceCommands>,
+    clipboard_tx: UnboundedSender<ClipboardCommand>,
     tracker: TaskTracker,
 }
 
@@ -27,12 +28,14 @@ impl IpcService {
         name: impl Into<String>,
         shutdown_rx: watch::Receiver<bool>,
         device_tx: UnboundedSender<DeviceCommands>,
+        clipboard_tx: UnboundedSender<ClipboardCommand>,
     ) -> Self {
         Self {
             name: name.into(),
             listener: None,
             core_service_shutdown_rx: shutdown_rx,
             device_tx,
+            clipboard_tx,
             tracker: TaskTracker::new(),
         }
     }
@@ -48,29 +51,30 @@ impl IpcService {
 
         loop {
             tokio::select! {
-                _ = self.core_service_shutdown_rx.changed() => {
-                    if *self.core_service_shutdown_rx.borrow() {
-                        tracing::info!("IPC service stopping — closing client connections");
-                        break;
-                    }
-                }
-                conn = self.listener.as_ref().unwrap().accept() => {
-                    match conn {
-                        Ok(stream) => {
-                            let device_tx = self.device_tx.clone();
-                            let client_shutdown_rx = self.core_service_shutdown_rx.clone();
-                            self.tracker.spawn(async move {
-                                if let Err(err) =
-                                    IpcService::handle_client(stream, device_tx, client_shutdown_rx).await
-                                {
-                                    tracing::error!(error = %err, "IPC client handler failed");
+                            _ = self.core_service_shutdown_rx.changed() => {
+                                if *self.core_service_shutdown_rx.borrow() {
+                                    tracing::info!("IPC service stopping — closing client connections");
+                                    break;
                                 }
-                            });
-                        }
-                        Err(e) => tracing::error!("Accept error: {e:?}"),
+                            }
+                            conn = self.listener.as_ref().unwrap().accept() => {
+                match conn {
+                    Ok(stream) => {
+                        let device_tx = self.device_tx.clone();
+                        let clipboard_tx = self.clipboard_tx.clone();
+                        let client_shutdown_rx = self.core_service_shutdown_rx.clone();
+                        self.tracker.spawn(async move {
+                            if let Err(err) =
+                                IpcService::handle_client(stream, device_tx, clipboard_tx, client_shutdown_rx).await
+                            {
+                                tracing::error!(error = %err, "IPC client handler failed");
+                            }
+                        });
                     }
+                    Err(e) => tracing::error!("Accept error: {e:?}"),
                 }
             }
+                        }
         }
 
         // Stop accepting new tasks into the tracker, then wait for every
@@ -84,6 +88,7 @@ impl IpcService {
     async fn handle_client(
         conn: LocalStream,
         device_tx: UnboundedSender<DeviceCommands>,
+        clipboard_tx: UnboundedSender<ClipboardCommand>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
         let mut ws = accept_async(conn).await?;
@@ -104,7 +109,7 @@ impl IpcService {
                         WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                         WsMessage::Binary(bytes) => {
                             let ipcreq = IpcService::decode_ipc_req(bytes.to_vec())?;
-                            IpcService::handle_ipc_request(&device_tx, ipcreq, &mut ws).await?;
+                            IpcService::handle_ipc_request(&device_tx, &clipboard_tx, ipcreq, &mut ws).await?;
                         }
                         _ => break,
                     }
@@ -117,6 +122,7 @@ impl IpcService {
 
     async fn handle_ipc_request(
         device_tx: &UnboundedSender<DeviceCommands>,
+        clipboard_tx: &UnboundedSender<ClipboardCommand>,
         ipcreq: clipx::IpcRequest,
         ws: &mut WebSocketStream<LocalStream>,
     ) -> anyhow::Result<()> {
@@ -225,7 +231,9 @@ impl IpcService {
             }
             clipx::ipc_request::Request::PairPending(_) => {
                 let (cmdres_tx, cmdres_rx) = oneshot::channel();
-                let _ = device_tx.send(DeviceCommands::PendingPairings { reply_to: cmdres_tx });
+                let _ = device_tx.send(DeviceCommands::PendingPairings {
+                    reply_to: cmdres_tx,
+                });
                 let pending = cmdres_rx.await?;
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::PairPending(
@@ -254,7 +262,11 @@ impl IpcService {
                 let message = cmdres_rx.await?;
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::PairApprove(
-                        clipx::PairApproveResponse { device_id, status: "ok".to_string(), message },
+                        clipx::PairApproveResponse {
+                            device_id,
+                            status: "ok".to_string(),
+                            message,
+                        },
                     )),
                 }
             }
@@ -363,6 +375,59 @@ impl IpcService {
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::ForgetDevice(
                         clipx::ForgetDeviceResponse { device_id, status },
+                    )),
+                }
+            }
+            clipx::ipc_request::Request::ClipboardHistory(req) => {
+                let limit = if req.limit == 0 {
+                    None
+                } else {
+                    Some(req.limit as usize)
+                };
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = clipboard_tx.send(ClipboardCommand::GetHistory {
+                    limit,
+                    reply_to: cmdres_tx,
+                });
+                let items = cmdres_rx.await?;
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::ClipboardHistory(
+                        clipx::ClipboardHistoryResponse {
+                            entries: items
+                                .into_iter()
+                                .map(|item| clipx::ClipHistoryEntry {
+                                    id: item.id,
+                                    content: item.content,
+                                    source_device_name: item.source_device,
+                                    received_at_ms: item.received_at_ms,
+                                })
+                                .collect(),
+                        },
+                    )),
+                }
+            }
+            clipx::ipc_request::Request::ClipboardRemove(req) => {
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = clipboard_tx.send(ClipboardCommand::RemoveEntry {
+                    id: req.id,
+                    reply_to: cmdres_tx,
+                });
+                let removed = cmdres_rx.await?;
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::ClipboardRemove(
+                        clipx::ClipboardRemoveResponse { removed },
+                    )),
+                }
+            }
+            clipx::ipc_request::Request::ClipboardClear(_) => {
+                let (cmdres_tx, cmdres_rx) = oneshot::channel();
+                let _ = clipboard_tx.send(ClipboardCommand::ClearHistory {
+                    reply_to: cmdres_tx,
+                });
+                let _ = cmdres_rx.await?;
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::ClipboardClear(
+                        clipx::ClipboardClearResponse {},
                     )),
                 }
             }

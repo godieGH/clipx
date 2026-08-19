@@ -34,6 +34,26 @@ pub mod types {
         pub device_type: String,
     }
 
+    #[derive(Debug, Serialize, Deserialize, Clone)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ClipHistoryEntry {
+        pub id: String,
+        pub content: String,
+        pub source_device: String,
+        pub received_at: u64,
+    }
+
+    impl From<crate::clipx::ClipHistoryEntry> for ClipHistoryEntry {
+        fn from(e: crate::clipx::ClipHistoryEntry) -> Self {
+            Self {
+                id: e.id,
+                content: e.content,
+                source_device: e.source_device_name,
+                received_at: e.received_at_ms,
+            }
+        }
+    }
+
     pub(super) fn device_type_str(t: i32) -> String {
         use crate::clipx::DeviceType::*;
         match crate::clipx::DeviceType::try_from(t).unwrap_or(Unspecified) {
@@ -90,14 +110,47 @@ pub mod types {
 }
 
 pub trait IpcCmddBridge {
-    fn get_this_device_identity(&mut self) -> impl std::future::Future<Output = Result<types::OwnIdentity, String>> + Send;
-    fn get_paired_devices(&mut self) -> impl std::future::Future<Output = Result<Vec<types::PairedDevice>, String>> + Send;
-    fn get_available_devices(&mut self) -> impl std::future::Future<Output = Result<Vec<types::AvailableDevice>, String>> + Send;
-    fn connect_device(&mut self, device_id: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
-    fn disconnect_device(&mut self, device_id: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
-    fn pair_device(&mut self, device_id: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
-    fn set_auto_connect(&mut self, device_id: String, auto_connect: bool) -> impl std::future::Future<Output = Result<bool, String>> + Send;
-    fn forget_device(&mut self, device_id: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn get_this_device_identity(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<types::OwnIdentity, String>> + Send;
+    fn get_paired_devices(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Vec<types::PairedDevice>, String>> + Send;
+    fn get_available_devices(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Vec<types::AvailableDevice>, String>> + Send;
+    fn connect_device(
+        &mut self,
+        device_id: String,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn disconnect_device(
+        &mut self,
+        device_id: String,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn pair_device(
+        &mut self,
+        device_id: String,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn set_auto_connect(
+        &mut self,
+        device_id: String,
+        auto_connect: bool,
+    ) -> impl std::future::Future<Output = Result<bool, String>> + Send;
+    fn forget_device(
+        &mut self,
+        device_id: String,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn get_clipboard_history(
+        &mut self,
+        limit: Option<u32>,
+    ) -> impl std::future::Future<Output = Result<Vec<types::ClipHistoryEntry>, String>> + Send;
+    fn remove_clipboard_entry(
+        &mut self,
+        id: String,
+    ) -> impl std::future::Future<Output = Result<bool, String>> + Send;
+    fn clear_clipboard_history(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
 }
 
 impl IpcCmddBridge for crate::ipc::non_blocking::Client {
@@ -106,9 +159,14 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Identity(clipx::IdentityRequest {})),
+            request: Some(clipx::ipc_request::Request::Identity(
+                clipx::IdentityRequest {},
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to fetch device Identity: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to fetch device Identity: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::Identity(response)) => {
                 let device_type = clipx::DeviceType::try_from(response.device_type)
@@ -130,13 +188,20 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::GetPaired(clipx::GetPairedRequest {})),
+            request: Some(clipx::ipc_request::Request::GetPaired(
+                clipx::GetPairedRequest {},
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to fetch paired devices: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to fetch paired devices: {}", e))?;
         match res.response {
-            Some(clipx::ipc_response::Response::GetPaired(r)) => {
-                Ok(r.devices.into_iter().map(types::PairedDevice::from).collect())
-            }
+            Some(clipx::ipc_response::Response::GetPaired(r)) => Ok(r
+                .devices
+                .into_iter()
+                .map(types::PairedDevice::from)
+                .collect()),
             _ => Err("Failed to fetch paired devices: unexpected response variant".into()),
         }
     }
@@ -150,11 +215,16 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
                 mode: clipx::seen_request::Mode::Untrusted as i32,
             })),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to fetch available devices: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to fetch available devices: {}", e))?;
         match res.response {
-            Some(clipx::ipc_response::Response::Seen(r)) => {
-                Ok(r.devices.into_iter().map(types::AvailableDevice::from).collect())
-            }
+            Some(clipx::ipc_response::Response::Seen(r)) => Ok(r
+                .devices
+                .into_iter()
+                .map(types::AvailableDevice::from)
+                .collect()),
             _ => Err("Failed to fetch available devices: unexpected response variant".into()),
         }
     }
@@ -164,9 +234,14 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Connect(clipx::ConnectRequest { device_id })),
+            request: Some(clipx::ipc_request::Request::Connect(
+                clipx::ConnectRequest { device_id },
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to connect device: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to connect device: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::Connect(r)) => Ok(r.message),
             _ => Err("Failed to connect device: unexpected response variant".into()),
@@ -178,9 +253,14 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Disconnect(clipx::DisconnectRequest { device_id })),
+            request: Some(clipx::ipc_request::Request::Disconnect(
+                clipx::DisconnectRequest { device_id },
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to disconnect device: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to disconnect device: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::Disconnect(r)) => Ok(r.message),
             _ => Err("Failed to disconnect device: unexpected response variant".into()),
@@ -192,25 +272,40 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Pair(clipx::PairRequest { device_id })),
+            request: Some(clipx::ipc_request::Request::Pair(clipx::PairRequest {
+                device_id,
+            })),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to pair device: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to pair device: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::Pair(r)) => Ok(r.message),
             _ => Err("Failed to pair device: unexpected response variant".into()),
         }
     }
 
-    async fn set_auto_connect(&mut self, device_id: String, auto_connect: bool) -> Result<bool, String> {
+    async fn set_auto_connect(
+        &mut self,
+        device_id: String,
+        auto_connect: bool,
+    ) -> Result<bool, String> {
         if !self.is_running() {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::SetAutoConnect(clipx::SetAutoConnectRequest {
-                device_id, auto_connect,
-            })),
+            request: Some(clipx::ipc_request::Request::SetAutoConnect(
+                clipx::SetAutoConnectRequest {
+                    device_id,
+                    auto_connect,
+                },
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to update auto-connect: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to update auto-connect: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::SetAutoConnect(r)) => Ok(r.auto_connect),
             _ => Err("Failed to update auto-connect: unexpected response variant".into()),
@@ -222,12 +317,62 @@ impl IpcCmddBridge for crate::ipc::non_blocking::Client {
             self.start().await?;
         }
         let req = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::ForgetDevice(clipx::ForgetDeviceRequest { device_id })),
+            request: Some(clipx::ipc_request::Request::ForgetDevice(
+                clipx::ForgetDeviceRequest { device_id },
+            )),
         };
-        let res = self.send(req).await.map_err(|e| format!("Failed to forget device: {}", e))?;
+        let res = self
+            .send(req)
+            .await
+            .map_err(|e| format!("Failed to forget device: {}", e))?;
         match res.response {
             Some(clipx::ipc_response::Response::ForgetDevice(r)) => Ok(r.status),
             _ => Err("Failed to forget device: unexpected response variant".into()),
         }
     }
+    async fn get_clipboard_history(&mut self, limit: Option<u32>) -> Result<Vec<types::ClipHistoryEntry>, String> {
+    if !self.is_running() {
+        self.start().await?;
+    }
+    let req = clipx::IpcRequest {
+        request: Some(clipx::ipc_request::Request::ClipboardHistory(clipx::ClipboardHistoryRequest {
+            limit: limit.unwrap_or(0),
+        })),
+    };
+    let res = self.send(req).await.map_err(|e| format!("Failed to fetch clipboard history: {}", e))?;
+    match res.response {
+        Some(clipx::ipc_response::Response::ClipboardHistory(r)) => {
+            Ok(r.entries.into_iter().map(types::ClipHistoryEntry::from).collect())
+        }
+        _ => Err("Failed to fetch clipboard history: unexpected response variant".into()),
+    }
+}
+
+async fn remove_clipboard_entry(&mut self, id: String) -> Result<bool, String> {
+    if !self.is_running() {
+        self.start().await?;
+    }
+    let req = clipx::IpcRequest {
+        request: Some(clipx::ipc_request::Request::ClipboardRemove(clipx::ClipboardRemoveRequest { id })),
+    };
+    let res = self.send(req).await.map_err(|e| format!("Failed to remove clipboard entry: {}", e))?;
+    match res.response {
+        Some(clipx::ipc_response::Response::ClipboardRemove(r)) => Ok(r.removed),
+        _ => Err("Failed to remove clipboard entry: unexpected response variant".into()),
+    }
+}
+
+async fn clear_clipboard_history(&mut self) -> Result<(), String> {
+    if !self.is_running() {
+        self.start().await?;
+    }
+    let req = clipx::IpcRequest {
+        request: Some(clipx::ipc_request::Request::ClipboardClear(clipx::ClipboardClearRequest {})),
+    };
+    let res = self.send(req).await.map_err(|e| format!("Failed to clear clipboard history: {}", e))?;
+    match res.response {
+        Some(clipx::ipc_response::Response::ClipboardClear(_)) => Ok(()),
+        _ => Err("Failed to clear clipboard history: unexpected response variant".into()),
+    }
+}
 }

@@ -1,10 +1,11 @@
 use super::seen::SeenDeviceRegistry;
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice, TrustedDevice};
+use crate::clipboard::manager::ClipboardCommand;
 use crate::device::identity::{self, DeviceIdentity};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::device::{config, pairing};
-use crate::message::proto::{self, peer_message::Body};
+use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{ConnectedDevice, TransportCommand, TransportEvent};
 use crate::notification::{NotificationEngine, PairDecision, Prompt};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,10 @@ pub struct DeviceManager {
     notification: NotificationEngine,
     notify_tx: mpsc::UnboundedSender<NotifyResult>,
     notify_rx: mpsc::UnboundedReceiver<NotifyResult>,
+    /// Where inbound clipboard content gets handed off. The clipboard
+    /// component owns what happens to it from here — this manager only
+    /// knows it needs to deliver "this text came from this device".
+    clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -106,6 +111,7 @@ impl DeviceManager {
         identity: Arc<DeviceIdentity>,
         transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
         notification: NotificationEngine,
+        clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
     ) -> Self {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         Self {
@@ -119,6 +125,7 @@ impl DeviceManager {
             notification,
             notify_tx,
             notify_rx,
+            clipboard_tx,
         }
     }
 
@@ -128,6 +135,7 @@ impl DeviceManager {
         mut discovered_rx: mpsc::UnboundedReceiver<(proto::Announce, SocketAddr)>,
         mut device_rx: mpsc::UnboundedReceiver<DeviceCommands>,
         mut peer_event_rx: mpsc::UnboundedReceiver<TransportEvent>,
+        mut clipboard_out_rx: mpsc::UnboundedReceiver<String>,
     ) {
         let mut prune_interval = tokio::time::interval(Duration::from_secs(10));
         let notify_tx = self.notify_tx.clone();
@@ -143,9 +151,31 @@ impl DeviceManager {
                 Some(cmd) = device_rx.recv() => { self.handle_device_command(cmd).await; }
                 Some(event) = peer_event_rx.recv() => { self.handle_transport_event(event, &notify_tx); }
                 Some(result) = self.notify_rx.recv() => { self.handle_notify_result(result); }
+                // The clipboard component decided its content changed and
+                // handed us plain text — dispatch is entirely our call, it
+                // never knows this happened.
+                Some(text) = clipboard_out_rx.recv() => { self.broadcast_clipboard(text); }
             }
         }
         tracing::info!("device manager stopped");
+    }
+
+    /// Fans a local clipboard change out to every currently connected,
+    /// trusted device. This is the *only* place that decides "who gets the
+    /// clipboard" — the clipboard component has no say in it.
+    fn broadcast_clipboard(&self, text: String) {
+        if self.connected.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = self.connected.keys().cloned().collect();
+        for device_id in ids {
+            self.send_peer(
+                &device_id,
+                Body::Clipboard(proto::ClipboardMessage {
+                    content: Some(clipboard_message::Content::Text(text.clone())),
+                }),
+            );
+        }
     }
 
     fn handle_announce(&mut self, announce: proto::Announce, addr: IpAddr) {
@@ -205,7 +235,10 @@ impl DeviceManager {
         };
         let addr = SocketAddr::new(seen.addr, seen.ws_port as u16);
 
-        self.pair_sessions.insert(device_id.to_string(), PairSession::new_initiator(addr, seen.device_type));
+        self.pair_sessions.insert(
+            device_id.to_string(),
+            PairSession::new_initiator(addr, seen.device_type),
+        );
         self.dial(device_id, addr);
         "pairing started".to_string()
     }
@@ -402,9 +435,7 @@ impl DeviceManager {
             }
             Some(Body::ConnectAck(_)) => self.on_connect_ack(device_id),
             Some(Body::Control(ctrl)) => self.on_control(device_id, ctrl),
-            Some(Body::Clipboard(_)) => {
-                tracing::debug!("clip-transport not wired yet, dropping frame from {device_id}")
-            }
+            Some(Body::Clipboard(msg)) => self.on_clipboard_message(device_id, msg),
             None => tracing::warn!("empty PeerMessage from {device_id}"),
         }
     }
@@ -742,7 +773,13 @@ impl DeviceManager {
                 self.finalize_pair_trusted(&device_id);
                 self.send_peer(&device_id, Body::PairAck(proto::PairAck {}));
                 self.pair_sessions.remove(&device_id);
-                self.notify_info("Paired successfully", format!("Successfully paired with {peer_name}\nFingerprint: {}", get_formated_fp(&device_id)));
+                self.notify_info(
+                    "Paired successfully",
+                    format!(
+                        "Successfully paired with {peer_name}\nFingerprint: {}",
+                        get_formated_fp(&device_id)
+                    ),
+                );
             }
         }
     }
@@ -857,6 +894,30 @@ impl DeviceManager {
         self.pair_sessions.remove(&device_id);
         self.connect_sessions.remove(&device_id);
         self.notify_info("Pairing/connect failed", ctrl.message);
+    }
+
+    /// Hands clipboard content off to the clipboard component. This manager
+    /// only resolves *who* it came from (name lookup is a device concern);
+    /// deciding whether/how to apply it to the local clipboard and history
+    /// is entirely the clipboard component's job.
+    fn on_clipboard_message(&mut self, device_id: String, msg: proto::ClipboardMessage) {
+        if !self.trusted.is_trusted(&device_id) {
+            tracing::warn!("dropping clipboard content from untrusted device {device_id}");
+            return;
+        }
+        let Some(clipboard_message::Content::Text(text)) = msg.content else {
+            tracing::warn!("empty/unsupported clipboard message from {device_id}");
+            return;
+        };
+        let device_name = self
+            .trusted
+            .get(&device_id)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| device_id.clone());
+        let _ = self.clipboard_tx.send(ClipboardCommand::IncomingRemote {
+            content: text,
+            source_device_name: device_name,
+        });
     }
 
     fn send_peer(&self, device_id: &str, body: Body) {
@@ -991,7 +1052,8 @@ fn connection_rank(state: i32) -> u8 {
 }
 
 fn get_formated_fp(device_id: &str) -> String {
-    device_id.chars()
+    device_id
+        .chars()
         .collect::<Vec<_>>()
         .chunks(4)
         .take(7)
@@ -1077,7 +1139,7 @@ impl DeviceManager {
                     let _ = self.handle_disconnect(&device_id).await;
                 }
                 self.trusted.revoke(&device_id);
-                let _ = reply_to.send("ok".to_string());              
+                let _ = reply_to.send("ok".to_string());
             }
             DeviceCommands::PendingPairings { reply_to } => {
                 let _ = reply_to.send(self.list_pending_pairings());

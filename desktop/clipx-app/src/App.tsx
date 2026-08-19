@@ -53,17 +53,7 @@ const OWN_IDENTITY: OwnIdentity = {
 
 const PAIRED_POLL_MS = 4000;
 
-const MOCK_PAIRED: PairedDevice[] = [];
-
-const MOCK_AVAILABLE: AvailableDevice[] = [];
-
-const MOCK_HISTORY: ClipItem[] = [
-  { id: "h1", content: "https://github.com/godiegh/clipx", sourceDevice: "samsung SM-G970U", receivedAt: Date.now() - 1000 * 60 * 2 },
-  { id: "h2", content: "cargo run --bin clipx-core", sourceDevice: "samsung SM-G970U", receivedAt: Date.now() - 1000 * 60 * 40 },
-  { id: "h3", content: "The quick brown fox jumps over the lazy dog. This is a longer clipboard entry to check how wrapping looks.", sourceDevice: "Office Laptop", receivedAt: Date.now() - 1000 * 60 * 60 * 3 },
-  { id: "h4", content: "npm run tauri dev", sourceDevice: "Study Mac Mini", receivedAt: Date.now() - 1000 * 60 * 60 * 5 },
-  { id: "h5", content: "192.168.0.181:8080", sourceDevice: "Office Laptop", receivedAt: Date.now() - 1000 * 60 * 60 * 8 },
-];
+const HISTORY_POLL_MS = 4000;
 
 const COLLAPSE_THRESHOLD = 4;
 
@@ -424,14 +414,41 @@ function DeviceDetail({
   );
 }
 
-function timeAgo(ts: number) {
-  const diffMin = Math.round((Date.now() - ts) / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  return `${Math.round(diffHr / 24)}d ago`;
+function timeAgo(ts: number, locale = "en-US"): string {
+  const now = new Date();
+  const date = new Date(ts);
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffSec < 60) return "just now";
+
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return rtf.format(-diffMin, "minute");
+
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return rtf.format(-diffHr, "hour");
+
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 7) return rtf.format(-diffDays, "day");
+
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks < 4) return rtf.format(-diffWeeks, "week");
+
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths <= 3) return rtf.format(-diffMonths, "month");
+
+  // Fallback to Intl.DateTimeFormat for older dates
+  const isSameYear = date.getFullYear() === now.getFullYear();
+  const options: Intl.DateTimeFormatOptions = {
+    day: "numeric",
+    month: "long",
+    ...(isSameYear ? {} : { year: "numeric" }),
+  };
+
+  return new Intl.DateTimeFormat(locale, options).format(date);
 }
+
 
 function ClipRow({ item, onCopy, onRemove }: { item: ClipItem; onCopy: (content: string) => void; onRemove: (id: string) => void }) {
   return (
@@ -510,9 +527,9 @@ function CollapsibleList<T>({
 function App() {
   const appWindow = getCurrentWindow();
   const [screen, setScreen] = useState<Screen>("devices");
-  const [paired, setPaired] = useState<PairedDevice[]>(MOCK_PAIRED);
-  const [available, setAvailable] = useState<AvailableDevice[]>(MOCK_AVAILABLE);
-  const [history, setHistory] = useState<ClipItem[]>(MOCK_HISTORY);
+  const [paired, setPaired] = useState<PairedDevice[]>([]);
+  const [available, setAvailable] = useState<AvailableDevice[]>([]);
+  const [history, setHistory] = useState<ClipItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [showIdentity, setShowIdentity] = useState(false);
   const [showIdentityDisabled, setshowIdentityDisabled] = useState(true);
@@ -551,6 +568,15 @@ function App() {
     }
   }, []);
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      const result: ClipItem[] = await invoke("get_clipboard_history", { limit: null });
+      setHistory(result);
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    }
+  }, []);
+
   const getThisDeviceIdenty = useCallback(async () => {
     try {
       const result: OwnIdentity = await invoke("get_this_device_identity");
@@ -577,16 +603,20 @@ function App() {
       appWindow.show();
       handleScan();
     }
-
-    getThisDeviceIdenty(); // fetch at app startup
+    getThisDeviceIdenty();
+    getThisDeviceIdenty();
     refreshPaired();
     positionAppWindow();
 
-    // Sync mechanism: poll paired devices on an interval. Good enough for now —
+    // Sync mechanism: poll paired devices/history on an interval. Good enough for now —
     // a push-based version (core broadcasting state changes) can replace this later
     // without changing anything downstream of refreshPaired().
     const interval = setInterval(refreshPaired, PAIRED_POLL_MS);
-    return () => clearInterval(interval);
+    const historyInterval = setInterval(refreshHistory, HISTORY_POLL_MS);
+    return () => {
+      clearInterval(interval);
+      clearInterval(historyInterval);
+    };
   }, []);
 
   function handleScan() {
@@ -673,10 +703,12 @@ function App() {
 
   function handleRemoveHistory(id: string) {
     setHistory((prev) => prev.filter((item) => item.id !== id));
+    invoke("remove_clipboard_entry", { id }).catch((e) => showToast(`${e}`, { variant: "error" }));
   }
 
   function handleClearAll() {
     setHistory([]);
+    invoke("clear_clipboard_history").catch((e) => showToast(`${e}`, { variant: "error" }));
   }
 
   const detailDevice = paired.find((d) => d.fingerprint === detailFingerprint) ?? null;

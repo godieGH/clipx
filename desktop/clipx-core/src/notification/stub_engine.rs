@@ -1,4 +1,4 @@
-use super::{PairDecision, Prompt};
+use super::{IncomingClipboardDecision, PairDecision, Prompt};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -15,6 +15,18 @@ impl NotificationEngine {
         );
         PairDecision::NoResponse
     }
+
+    pub async fn ask_clipboard(
+        &self,
+        prompt: Prompt,
+        _timeout: Duration,
+    ) -> IncomingClipboardDecision {
+        tracing::warn!(
+            "notification engine not implemented on this platform — auto-ignoring: {prompt:?}"
+        );
+        IncomingClipboardDecision::Ignore
+    }
+
     // stub_engine.rs
     pub async fn notify_info(&self, title: &str, body: impl Into<String>) {
         tracing::info!("[{title}] {}", body.into());

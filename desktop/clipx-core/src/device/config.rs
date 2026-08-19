@@ -6,6 +6,7 @@ const MACHINE_DEVICE_ID_FILE: &str = "device_id";
 const TRUSTED_DEVICES_FILE: &str = "trusted_devices.json";
 const IDENTITY_KEY_FILE: &str = "identity_key";
 const WEBSOCKET_SERVER_PORT: u32 = 8080;
+const CLIPBOARD_HISTORY_FILE: &str = "clipboard_history.json";
 
 pub fn get_hostname() -> String {
     hostname::get().unwrap().to_string_lossy().into_owned()
@@ -28,6 +29,10 @@ pub fn trusted_devices_path() -> PathBuf {
 
 pub fn identity_key_path() -> PathBuf {
     config_dir().join(IDENTITY_KEY_FILE)
+}
+
+pub fn clipboard_history_path() -> PathBuf {
+    config_dir().join(CLIPBOARD_HISTORY_FILE)
 }
 
 pub fn get_ws_port() -> u32 {

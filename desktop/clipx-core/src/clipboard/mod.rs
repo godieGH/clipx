@@ -1,12 +1,13 @@
+pub mod clipstore;
+pub mod manager;
+
 // built for windows, linux and macos only
 #[cfg(not(target_os = "android"))]
 pub mod watcher;
 
 #[cfg(target_os = "android")]
 pub mod watcher {
-    use tokio::{
-        sync::{mpsc, watch},
-    };
+    use tokio::sync::{mpsc, watch};
 
     pub async fn watch_clipboard(
         mut _shutdown_rx: watch::Receiver<bool>,
