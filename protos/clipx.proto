@@ -288,3 +288,32 @@ message ClipboardRemoveResponse { bool removed = 1; }
 
 message ClipboardClearRequest {}
 message ClipboardClearResponse {}
+
+
+// -----------------------------------------------------------
+// Push events (server -> client, unsolicited — not a reply to
+// any IpcRequest). Payload-free by design: each is a "something
+// changed, go re-fetch" ping, not a snapshot, so it can never go
+// stale relative to what GetPaired/ClipboardHistory would return.
+// -----------------------------------------------------------
+message DevicesChangedEvent {}
+message ClipboardChangedEvent {}
+
+message IpcEvent {
+  oneof event {
+    DevicesChangedEvent devices_changed = 1;
+    ClipboardChangedEvent clipboard_changed = 2;
+  }
+}
+
+// Every server->client frame is one of these now, not a bare
+// IpcResponse. `response` answers the request that was just sent;
+// `event` is unsolicited and can arrive at any time, including
+// while a request is in flight. The client must decode frames as
+// IpcServerMessage at the top level, not as IpcResponse directly.
+message IpcServerMessage {
+  oneof payload {
+    IpcResponse response = 1;
+    IpcEvent event = 2;
+  }
+}

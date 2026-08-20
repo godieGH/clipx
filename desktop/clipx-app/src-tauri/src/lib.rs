@@ -1,11 +1,11 @@
 mod error_dialog;
 
-use clipx_lib::{ipc, message::types, message::IpcCmddBridge};
+use clipx_lib::{clipx, ipc, message::types, message::IpcCmddBridge};
 use tauri::{
     async_runtime::Mutex,
     menu::{Menu, MenuItem},
     tray::{self, MouseButton, MouseButtonState},
-    Manager, State,
+    Emitter, Manager, State,
 };
 
 pub struct AppState {
@@ -24,6 +24,8 @@ pub fn run() {
         return;
     };
 
+    let events_rx = client.take_events();
+
     let state = AppState {
         ipc: Mutex::new(client),
     };
@@ -31,6 +33,25 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state)
         .setup(|app| {
+            // Forward every push from the core onto the webview as a plain
+            // Tauri event. The frontend swaps its setInterval polling for
+            // `listen("devices-changed" | "clipboard-changed", ...)` and
+            // re-fetches on demand — same invoke commands as before, just
+            // triggered by a push instead of a timer.
+            if let Some(mut events_rx) = events_rx {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    while let Some(event) = events_rx.recv().await {
+                        let event_name = match event.event {
+                            Some(clipx::ipc_event::Event::DevicesChanged(_)) => "devices-changed",
+                            Some(clipx::ipc_event::Event::ClipboardChanged(_)) => "clipboard-changed",
+                            None => continue,
+                        };
+                        let _ = app_handle.emit(event_name, ());
+                    }
+                });
+            }
+
             let show_item = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

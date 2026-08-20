@@ -60,7 +60,15 @@ impl Client {
             let msg = ws.read();
             match msg {
                 Ok(tungstenite::Message::Binary(bytes)) => {
-                    return Ok(clipx::IpcResponse::decode(bytes.as_slice())?);
+                    let envelope = clipx::IpcServerMessage::decode(bytes.as_slice())?;
+                    match envelope.payload {
+                        Some(clipx::ipc_server_message::Payload::Response(resp)) => {
+                            return Ok(resp);
+                        }
+                        // One-shot CLI, doesn't subscribe to push events —
+                        // skip and keep waiting for the actual reply.
+                        Some(clipx::ipc_server_message::Payload::Event(_)) | None => continue,
+                    }
                 }
                 Ok(tungstenite::Message::Close(_)) => {
                     self.state =  State::Down;

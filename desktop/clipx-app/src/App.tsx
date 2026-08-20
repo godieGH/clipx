@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast, subscribeToast, ToastState } from "./components/toast";
 import { Toast } from "./components/Toast.tsx";
+import { listen } from "@tauri-apps/api/event";
 
 type DeviceType = "windows" | "android" | "linux" | "macos" | "ios";
 type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailable";
@@ -50,10 +51,6 @@ const OWN_IDENTITY: OwnIdentity = {
   wsPort: 0,
   ipAddress: "0.0.0.0",
 };
-
-const PAIRED_POLL_MS = 4000;
-
-const HISTORY_POLL_MS = 4000;
 
 const COLLAPSE_THRESHOLD = 4;
 
@@ -665,16 +662,21 @@ function App() {
     getThisDeviceIdenty();
     getThisDeviceIdenty();
     refreshPaired();
+    refreshHistory();
     positionAppWindow();
 
-    // Sync mechanism: poll paired devices/history on an interval. Good enough for now —
-    // a push-based version (core broadcasting state changes) can replace this later
-    // without changing anything downstream of refreshPaired().
-    const interval = setInterval(refreshPaired, PAIRED_POLL_MS);
-    const historyInterval = setInterval(refreshHistory, HISTORY_POLL_MS);
+    // Push-based sync: the core emits these whenever paired/connection or
+    // clipboard-history state actually changes, so we just re-fetch on
+    // demand instead of guessing an interval. refreshPaired/refreshHistory
+    // are unchanged from the polling version — only what triggers them did.
+    let cancelled = false;
+    const unlistenPromises = [
+      listen("devices-changed", () => { if (!cancelled) refreshPaired(); }),
+      listen("clipboard-changed", () => { if (!cancelled) refreshHistory(); }),
+    ];
     return () => {
-      clearInterval(interval);
-      clearInterval(historyInterval);
+      cancelled = true;
+      unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
     };
   }, []);
 
