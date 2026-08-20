@@ -421,6 +421,7 @@ impl DeviceManager {
             } else {
                 tracing::info!("connect session with {device_id} ended (connection closed)");
                 self.connect_sessions.remove(&device_id);
+                self.notify_devices_changed();
             }
         }
 
@@ -460,6 +461,7 @@ impl DeviceManager {
         } else {
             tracing::info!("connect dial to {device_id} failed, giving up");
             self.connect_sessions.remove(&device_id);
+            self.notify_devices_changed();
         }
     }
 
