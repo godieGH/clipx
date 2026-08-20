@@ -1,9 +1,10 @@
 use super::clipstore::{ClipItem, ClipboardStore};
 use super::watcher;
+use crate::message::proto::clipx;
 use crate::notification::{IncomingClipboardDecision, NotificationEngine, Prompt};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, broadcast};
 
 /// Result of a toast fed back into the manager's own select loop.
 /// `NotificationEngine::ask_clipboard()` can take up to its timeout, so
@@ -58,6 +59,10 @@ pub struct ClipboardManager {
     outbound_tx: mpsc::UnboundedSender<String>,
     resolved_tx: mpsc::UnboundedSender<IncomingResolved>,
     resolved_rx: mpsc::UnboundedReceiver<IncomingResolved>,
+    /// Pushed to every IPC client whenever history actually changes —
+    /// add/remove/clear. Owned by the IPC layer's broadcast channel; this
+    /// manager only ever sends into it, never reads from it.
+    events_tx: broadcast::Sender<clipx::IpcEvent>,
 }
 
 impl ClipboardManager {
@@ -66,6 +71,7 @@ impl ClipboardManager {
         max_history: usize,
         notification: NotificationEngine,
         outbound_tx: mpsc::UnboundedSender<String>,
+        events_tx: broadcast::Sender<clipx::IpcEvent>,
     ) -> Self {
         let store = ClipboardStore::load(history_path, max_history);
         let last_known_content = store
@@ -81,7 +87,16 @@ impl ClipboardManager {
             outbound_tx,
             resolved_tx,
             resolved_rx,
+            events_tx,
         }
+    }
+
+    fn notify_clipboard_changed(&self) {
+        let _ = self.events_tx.send(clipx::IpcEvent {
+            event: Some(clipx::ipc_event::Event::ClipboardChanged(
+                clipx::ClipboardChangedEvent {},
+            )),
+        });
     }
 
     /// Owns the watcher task's lifetime internally — nothing outside this
@@ -117,10 +132,18 @@ impl ClipboardManager {
                 let _ = reply_to.send(items);
             }
             ClipboardCommand::RemoveEntry { id, reply_to } => {
-                let _ = reply_to.send(self.store.remove(&id));
+                let removed = self.store.remove(&id);
+                if removed {
+                    self.notify_clipboard_changed();
+                }
+                let _ = reply_to.send(removed);
             }
             ClipboardCommand::ClearHistory { reply_to } => {
+                let had_items = !self.store.history.is_empty();
                 self.store.clear();
+                if had_items {
+                    self.notify_clipboard_changed();
+                }
                 let _ = reply_to.send(());
             }
             ClipboardCommand::IncomingRemote {
@@ -183,12 +206,15 @@ impl ClipboardManager {
             decision,
         } = resolved;
 
-        self.store.add(ClipItem {
+        let inserted = self.store.add(ClipItem {
             id: uuid::Uuid::new_v4().to_string(),
             content: content.clone(),
             source_device: source_device_name,
             received_at_ms: now_ms(),
         });
+        if inserted {
+            self.notify_clipboard_changed();
+        }
 
         if decision == IncomingClipboardDecision::Copy {
             self.last_known_content = content.clone();

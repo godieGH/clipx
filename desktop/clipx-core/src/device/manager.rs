@@ -8,11 +8,11 @@ use crate::device::{config, pairing};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{NotificationEngine, PairDecision, Prompt};
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 pub struct DeviceManager {
     seen: SeenDeviceRegistry,
@@ -29,6 +29,11 @@ pub struct DeviceManager {
     /// component owns what happens to it from here — this manager only
     /// knows it needs to deliver "this text came from this device".
     clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
+    /// Pushed to every IPC client whenever the paired/connection picture
+    /// changes — pairing, connect/disconnect, forget, auto-connect,
+    /// availability flips. Send-only from here; the IPC layer owns the
+    /// receiving/fan-out side.
+    events_tx: broadcast::Sender<proto::IpcEvent>,
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -112,6 +117,7 @@ impl DeviceManager {
         transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
         notification: NotificationEngine,
         clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
+        events_tx: broadcast::Sender<proto::IpcEvent>,
     ) -> Self {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         Self {
@@ -126,7 +132,18 @@ impl DeviceManager {
             notify_tx,
             notify_rx,
             clipboard_tx,
+            events_tx,
         }
+    }
+
+    /// Fires a payload-free "something about paired/connection state
+    /// changed, go re-fetch" ping to every currently-connected IPC client.
+    fn notify_devices_changed(&self) {
+        let _ = self.events_tx.send(proto::IpcEvent {
+            event: Some(proto::ipc_event::Event::DevicesChanged(
+                proto::DevicesChangedEvent {},
+            )),
+        });
     }
 
     pub async fn run(
@@ -145,7 +162,26 @@ impl DeviceManager {
                 _ = shutdown_rx.changed() => { if *shutdown_rx.borrow() { break; } }
                 Some((announce, addr)) = discovered_rx.recv() => { self.handle_announce(announce, addr.ip()); }
                 _ = prune_interval.tick() => {
+                    // Availability (Unavailable <-> Disconnected) is derived
+                    // from `seen` at read time in build_paired_devices, so a
+                    // trusted device quietly timing out here needs its own
+                    // ping — nothing else would ever announce it.
+                    let trusted_seen_before: HashSet<String> = self
+                        .trusted
+                        .list()
+                        .filter(|d| self.seen.get(&d.id).is_some())
+                        .map(|d| d.id.clone())
+                        .collect();
                     self.seen.prune_stale(Duration::from_secs(10));
+                    let trusted_seen_after: HashSet<String> = self
+                        .trusted
+                        .list()
+                        .filter(|d| self.seen.get(&d.id).is_some())
+                        .map(|d| d.id.clone())
+                        .collect();
+                    if trusted_seen_before != trusted_seen_after {
+                        self.notify_devices_changed();
+                    }
                     self.prune_expired_sessions();
                 }
                 Some(cmd) = device_rx.recv() => { self.handle_device_command(cmd).await; }
@@ -208,6 +244,13 @@ impl DeviceManager {
             ws_port: announce.ws_port,
             last_seen: Instant::now(),
         });
+
+        // A trusted device just came back into view — its connection state
+        // flips Unavailable -> Disconnected even though nothing else here
+        // changed, so that needs its own ping too.
+        if just_appeared && self.trusted.is_trusted(&device_id) {
+            self.notify_devices_changed();
+        }
 
         if just_appeared {
             if let Some(td) = self.trusted.get(&device_id) {
@@ -289,7 +332,10 @@ impl DeviceManager {
             reply_to: reply_tx,
         });
         let removed = reply_rx.await.unwrap_or(false);
-        self.connected.remove(device_id);
+        let was_connected = self.connected.remove(device_id).is_some();
+        if was_connected {
+            self.notify_devices_changed();
+        }
         if removed {
             "disconnected".to_string()
         } else {
@@ -378,7 +424,9 @@ impl DeviceManager {
             }
         }
 
-        self.connected.remove(&device_id);
+        if self.connected.remove(&device_id).is_some() {
+            self.notify_devices_changed();
+        }
     }
 
     /// A dial never became a live connection at all (TCP connect failed/timed
@@ -679,6 +727,7 @@ impl DeviceManager {
         });
         self.connected
             .insert(device_id.to_string(), "connected".to_string());
+        self.notify_devices_changed();
     }
 
     // ---------------- Shared: code confirmation result ----------------
@@ -839,6 +888,7 @@ impl DeviceManager {
         self.connected
             .insert(device_id.clone(), "connected".to_string());
         self.connect_sessions.remove(&device_id);
+        self.notify_devices_changed();
     }
 
     // ---------------- Connect: initiator side (continued) ----------------
@@ -875,6 +925,7 @@ impl DeviceManager {
         self.connected
             .insert(device_id.clone(), "connected".to_string());
         self.connect_sessions.remove(&device_id);
+        self.notify_devices_changed();
     }
 
     fn abort_connect(&mut self, device_id: &str, code: u32, message: &str) {
@@ -1108,6 +1159,9 @@ impl DeviceManager {
                 reply_to,
             } => {
                 let ok = self.trusted.set_auto_connect(&device_id, auto_connect);
+                if ok {
+                    self.notify_devices_changed();
+                }
                 let _ = reply_to.send(ok);
             }
             DeviceCommands::ForgetDevice {
@@ -1122,6 +1176,7 @@ impl DeviceManager {
                     let _ = self.handle_disconnect(&device_id).await;
                 }
                 self.trusted.revoke(&device_id);
+                self.notify_devices_changed();
                 let _ = reply_to.send("ok".to_string());
             }
             DeviceCommands::PendingPairings { reply_to } => {

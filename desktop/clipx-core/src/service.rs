@@ -3,7 +3,7 @@ use device::identity::DeviceIdentity;
 use std::sync::Arc;
 use tokio::{
     signal,
-    sync::{mpsc, watch},
+    sync::{broadcast, mpsc, watch},
     task::JoinHandle,
 };
 
@@ -76,6 +76,15 @@ impl CoreService {
         let (device_tx, device_rx) = mpsc::unbounded_channel();
         let (transport_tx, transport_rx) = mpsc::unbounded_channel();
         let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
+        // Fan-out for unsolicited IpcEvent pushes (DevicesChanged /
+        // ClipboardChanged). DeviceManager and ClipboardManager each get a
+        // sender clone; IpcService holds the sender too and hands each
+        // connected client its own subscribe()'d receiver. Capacity is
+        // headroom, not an expected queue depth — every event is a
+        // payload-free "go re-fetch" ping, so a lagged/slow client just
+        // catches up on the next one.
+        let (ipc_events_tx, _) =
+            broadcast::channel::<crate::message::proto::clipx::IpcEvent>(32);
 
         let shutdown_for_transport = shutdown_rx.clone();
         let transport_task = tokio::spawn(async move {
@@ -100,6 +109,7 @@ impl CoreService {
             MAX_CLIPBOARD_HISTORY,
             notification_engine.clone(),
             clipboard_out_tx,
+            ipc_events_tx.clone(),
         );
         let clipboard_task = tokio::spawn(async move {
             clipboard_manager
@@ -119,6 +129,7 @@ impl CoreService {
             Some(transport_tx),
             notification_engine.clone(),
             clipboard_cmd_tx.clone(),
+            ipc_events_tx.clone(),
         );
         let device_manager_task = tokio::spawn(async move {
             device_manager
@@ -141,6 +152,7 @@ impl CoreService {
             shutdown_for_ipc,
             device_tx.clone(),
             clipboard_cmd_tx.clone(),
+            ipc_events_tx.clone(),
         );
         let ipc_task = tokio::spawn(async move { ipc_service.start().await });
         self.tasks.push(ipc_task);

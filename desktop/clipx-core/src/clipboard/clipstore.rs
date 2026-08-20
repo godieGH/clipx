@@ -43,19 +43,20 @@ impl ClipboardStore {
     /// Pushes to the front (most recent first). Skips exact-duplicate
     /// back-to-back entries — e.g. the same URL copied twice in a row —
     /// then persists to disk.
-    pub fn add(&mut self, item: ClipItem) {
+   pub fn add(&mut self, item: ClipItem) -> bool {
         if self
             .history
             .front()
             .is_some_and(|top| top.content == item.content)
         {
-            return;
+            return false;
         }
         self.history.push_front(item);
         while self.history.len() > self.max_capacity {
             self.history.pop_back();
         }
         self.persist();
+        true
     }
 
     pub fn remove(&mut self, id: &str) -> bool {

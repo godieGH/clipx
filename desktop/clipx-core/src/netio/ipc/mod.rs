@@ -10,7 +10,7 @@ use interprocess::local_socket::{
     traits::tokio::Listener as ListenerTrait,
 };
 use prost::Message;
-use tokio::sync::{mpsc::UnboundedSender, oneshot, watch};
+use tokio::sync::{broadcast, mpsc::UnboundedSender, oneshot, watch};
 use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message as WsMessage};
 use tokio_util::task::TaskTracker;
 
@@ -20,6 +20,7 @@ pub struct IpcService {
     core_service_shutdown_rx: watch::Receiver<bool>,
     device_tx: UnboundedSender<DeviceCommands>,
     clipboard_tx: UnboundedSender<ClipboardCommand>,
+    events_tx: broadcast::Sender<clipx::IpcEvent>,
     tracker: TaskTracker,
 }
 
@@ -29,6 +30,7 @@ impl IpcService {
         shutdown_rx: watch::Receiver<bool>,
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
+        events_tx: broadcast::Sender<clipx::IpcEvent>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -36,6 +38,7 @@ impl IpcService {
             core_service_shutdown_rx: shutdown_rx,
             device_tx,
             clipboard_tx,
+            events_tx,
             tracker: TaskTracker::new(),
         }
     }
@@ -51,30 +54,31 @@ impl IpcService {
 
         loop {
             tokio::select! {
-                            _ = self.core_service_shutdown_rx.changed() => {
-                                if *self.core_service_shutdown_rx.borrow() {
-                                    tracing::info!("IPC service stopping — closing client connections");
-                                    break;
-                                }
-                            }
-                            conn = self.listener.as_ref().unwrap().accept() => {
-                match conn {
-                    Ok(stream) => {
+                _ = self.core_service_shutdown_rx.changed() => {
+                    if *self.core_service_shutdown_rx.borrow() {
+                        tracing::info!("IPC service stopping — closing client connections");
+                        break;
+                    }
+                }
+                conn = self.listener.as_ref().unwrap().accept() => {
+                    match conn {
+                        Ok(stream) => {
                         let device_tx = self.device_tx.clone();
                         let clipboard_tx = self.clipboard_tx.clone();
+                        let events_tx = self.events_tx.clone();
                         let client_shutdown_rx = self.core_service_shutdown_rx.clone();
                         self.tracker.spawn(async move {
                             if let Err(err) =
-                                IpcService::handle_client(stream, device_tx, clipboard_tx, client_shutdown_rx).await
+                                IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, client_shutdown_rx).await
                             {
                                 tracing::error!(error = %err, "IPC client handler failed");
                             }
                         });
                     }
-                    Err(e) => tracing::error!("Accept error: {e:?}"),
+                        Err(e) => tracing::error!("Accept error: {e:?}"),
+                    }
                 }
             }
-                        }
         }
 
         // Stop accepting new tasks into the tracker, then wait for every
@@ -89,9 +93,11 @@ impl IpcService {
         conn: LocalStream,
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
+        events_tx: broadcast::Sender<clipx::IpcEvent>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
         let mut ws = accept_async(conn).await?;
+        let mut events_rx = events_tx.subscribe();
 
         loop {
             tokio::select! {
@@ -99,6 +105,26 @@ impl IpcService {
                     if *shutdown_rx.borrow() {
                         let _ = ws.close(None).await;
                         break;
+                    }
+                }
+                // Unsolicited push — goes out on this client's socket the
+                // moment DeviceManager/ClipboardManager fires it. Lagged
+                // just means this slow client missed some pings; since
+                // every event is a payload-free "go re-fetch" signal, the
+                // next one (or the client's own next request) catches it
+                // up fine — no need to treat it as fatal.
+                event = events_rx.recv() => {
+                    match event {
+                        Ok(event) => {
+                            let envelope = clipx::IpcServerMessage {
+                                payload: Some(clipx::ipc_server_message::Payload::Event(event)),
+                            };
+                            let mut buf = Vec::new();
+                            envelope.encode(&mut buf)?;
+                            ws.send(WsMessage::Binary(buf.into())).await?;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => {}
                     }
                 }
                 msg = ws.next() => {
@@ -433,8 +459,12 @@ impl IpcService {
             }
         };
 
+        let envelope = clipx::IpcServerMessage {
+            payload: Some(clipx::ipc_server_message::Payload::Response(response))
+        };
+
         let mut buf = Vec::new();
-        response.encode(&mut buf)?;
+        envelope.encode(&mut buf)?;
         ws.send(WsMessage::Binary(buf.into())).await?;
         Ok(())
     }
