@@ -473,11 +473,9 @@ impl DeviceManager {
     ) {
         match message.body {
             Some(Body::PairRequest(req)) => self.on_pair_request(device_id, req, notify_tx),
-            Some(Body::PairResponse(res)) => self.on_pair_response(device_id, res),
+            Some(Body::PairResponse(res)) => self.on_pair_response(device_id, res, notify_tx),
             Some(Body::PairChallenge(c)) => self.on_pair_challenge(device_id, c, notify_tx),
-            Some(Body::PairChallengeResponse(r)) => {
-                self.on_pair_challenge_response(device_id, r, notify_tx)
-            }
+            Some(Body::PairChallengeResponse(r)) => self.on_pair_challenge_response(device_id, r),
             Some(Body::PairAck(_)) => self.on_pair_ack(device_id),
             Some(Body::ConnectChallenge(c)) => self.on_connect_challenge(device_id, c),
             Some(Body::ConnectChallengeResponse(r)) => {
@@ -615,7 +613,12 @@ impl DeviceManager {
 
     // ---------------- Pair: initiator side (continued) ----------------
 
-    fn on_pair_response(&mut self, device_id: String, res: proto::PeerPairResponse) {
+    fn on_pair_response(
+        &mut self,
+        device_id: String,
+        res: proto::PeerPairResponse,
+        notify_tx: &mpsc::UnboundedSender<NotifyResult>,
+    ) {
         let Some(sess) = self.pair_sessions.get_mut(&device_id) else {
             return;
         };
@@ -644,23 +647,48 @@ impl DeviceManager {
             .try_into()
             .expect("nonce must be 32 bytes");
 
+        // Compute our own code and show it now, on our own nonce/key —
+        // don't wait for the challengeResponse to come back, The responder
+        // will land on this same value once it processes the Challenge.
+        let own_pub = self.identity.public_key_bytes();
+        let code = PairSession::compute_code(&nonce_arr, &own_pub, &pubkey);
+
         let sess = self.pair_sessions.get_mut(&device_id).unwrap();
         sess.peer_public_key = Some(pubkey);
-        sess.peer_name = Some(res.name);
+        sess.peer_name = Some(res.name.clone());
         sess.nonce = Some(nonce_arr);
+        sess.code = Some(code);
         sess.stage = PairStage::AwaitingSignature;
 
         self.send_peer(
             &device_id,
             Body::PairChallenge(proto::PeerPairChallenge { nonce: nonce_vec }),
         );
+
+        let notify_engine = self.notification.clone();
+        let peer_name = res.name;
+        let tx = notify_tx.clone();
+        tokio::spawn(async move {
+            let decision = notify_engine
+                .ask(
+                    Prompt::ConfirmCode {
+                        peer_name,
+                        code: format!("{code:06}"),
+                    },
+                    Duration::from_secs(60),
+                )
+                .await;
+            let _ = tx.send(NotifyResult::PairCodeConfirm {
+                device_id,
+                decision,
+            });
+        });
     }
 
     fn on_pair_challenge_response(
         &mut self,
         device_id: String,
         r: proto::PeerPairChallengeResponse,
-        notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
         let Some(sess) = self.pair_sessions.get_mut(&device_id) else {
             return;
@@ -676,35 +704,56 @@ impl DeviceManager {
             );
             return;
         };
-        let own_pub = self.identity.public_key_bytes();
-        let peer_pub = sess.peer_public_key.unwrap();
-        let nonce = sess.nonce.unwrap();
-        let code = PairSession::compute_code(&nonce, &own_pub, &peer_pub);
 
+        // the code was already computed and shown when we sent the
+        // Challenge — nothing to (re) compute here
         let sess = self.pair_sessions.get_mut(&device_id).unwrap();
         sess.pending_signature = Some(sig);
-        sess.code = Some(code);
-        sess.stage = PairStage::AwaitingCodeConfirm;
 
-        let engine = self.notification.clone();
-        let peer_name = sess.peer_name.clone().unwrap_or_default();
-        let dev_id = device_id;
-        let tx = notify_tx.clone();
-        tokio::spawn(async move {
-            let decision = engine
-                .ask(
-                    Prompt::ConfirmCode {
-                        peer_name,
-                        code: format!("{code:06}"),
-                    },
-                    Duration::from_secs(60),
-                )
-                .await;
-            let _ = tx.send(NotifyResult::PairCodeConfirm {
-                device_id: dev_id,
-                decision,
-            });
-        });
+        if sess.code_confirmed {
+            // User already hit confirm while we were still waiting on the
+            // wire — signature is the last piece, finalize now.
+            self.finalize_initiator_pair(&device_id);
+        }
+        // else: stay in AwaitingSignature with pending_signature set; the
+        // user's confirmation (on_code_confirm_result) will finalize once
+        // it comes in.
+    }
+
+    /// Verifies the peer's signature against our code/nonce and, if it
+    /// checks out, trusts the device and sends the Ack. Called from
+    /// whichever of {signature arrival, user confirmation} completes last.
+    fn finalize_initiator_pair(&mut self, device_id: &str) {
+        let Some(sess) = self.pair_sessions.get(device_id) else {
+            return;
+        };
+        let sig = sess
+            .pending_signature
+            .expect("finalize_initiator_pair called before signature arrived");
+        let pubkey = sess.peer_public_key.unwrap();
+        let nonce = sess.nonce.unwrap();
+        if !identity::verify(&pubkey, &nonce, &sig) {
+            self.abort_pair(
+                device_id,
+                pairing::control::SIGNATURE_INVALID,
+                "signature verification failed",
+            );
+            return;
+        }
+        let peer_name = sess
+            .peer_name
+            .clone()
+            .unwrap_or_else(|| device_id.to_string());
+        self.finalize_pair_trusted(device_id);
+        self.send_peer(device_id, Body::PairAck(proto::PairAck {}));
+        self.pair_sessions.remove(device_id);
+        self.notify_info(
+            "Paired successfully",
+            format!(
+                "Successfully paired with {peer_name}\nFingerprint: {}",
+                get_formated_fp(device_id)
+            ),
+        );
     }
 
     fn finalize_pair_trusted(&mut self, device_id: &str) {
@@ -780,7 +829,12 @@ impl DeviceManager {
         let Some(sess) = self.pair_sessions.get(&device_id) else {
             return;
         };
-        if sess.stage != PairStage::AwaitingCodeConfirm {
+
+        let valid_stage = match sess.role {
+            Role::Responder => sess.stage == PairStage::AwaitingCodeConfirm,
+            Role::Initiator => sess.stage == PairStage::AwaitingSignature,
+        };
+        if !valid_stage {
             return;
         }
 
@@ -809,28 +863,14 @@ impl DeviceManager {
                 );
             }
             Role::Initiator => {
-                let sig = sess.pending_signature.unwrap();
-                let pubkey = sess.peer_public_key.unwrap();
-                let nonce = sess.nonce.unwrap();
-                if !identity::verify(&pubkey, &nonce, &sig) {
-                    self.abort_pair(
-                        &device_id,
-                        pairing::control::SIGNATURE_INVALID,
-                        "signature verification failed",
-                    );
-                    return;
+                let signature_already_here = sess.pending_signature.is_some();
+                if let Some(sess) = self.pair_sessions.get_mut(&device_id) {
+                    sess.code_confirmed = true;
                 }
-                let peer_name = sess.peer_name.clone().unwrap_or_else(|| device_id.clone());
-                self.finalize_pair_trusted(&device_id);
-                self.send_peer(&device_id, Body::PairAck(proto::PairAck {}));
-                self.pair_sessions.remove(&device_id);
-                self.notify_info(
-                    "Paired successfully",
-                    format!(
-                        "Successfully paired with {peer_name}\nFingerprint: {}",
-                        get_formated_fp(&device_id)
-                    ),
-                );
+                if signature_already_here {
+                    self.finalize_initiator_pair(&device_id);
+                }
+                // else confirmed and waiting on pair response pair challenge
             }
         }
     }

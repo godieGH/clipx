@@ -47,6 +47,10 @@ pub struct PairSession {
     /// (sent) only on confirmation, per the design: nothing crosses the
     /// wire until the local user approves what they're looking at.
     pub pending_signature: Option<[u8; 64]>,
+    /// initiator only — true once the local user has confirmed the pair code matches
+    /// even if the peer signature has not arrived yet. Lets confirmation
+    /// and the challange response race — which ever finishes second finalizes
+    pub code_confirmed: bool,
 }
 
 impl PairSession {
@@ -62,6 +66,7 @@ impl PairSession {
             nonce: None,
             code: None,
             pending_signature: None,
+            code_confirmed: false,
         }
     }
 
@@ -77,6 +82,7 @@ impl PairSession {
             nonce: None,
             code: None,
             pending_signature: None,
+            code_confirmed: false,
         }
     }
 
