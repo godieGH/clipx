@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 // TODO: swap for ClipX's own registered AUMID once the installer creates a
 // Start Menu shortcut with an AppUserModelID set. Borrowing PowerShell's id
 // works for development but ships the toast labeled "Windows PowerShell".
-const APP_ID: &str = Toast::POWERSHELL_APP_ID;
+const APP_ID: &str = if cfg!(debug_assertions) {Toast::POWERSHELL_APP_ID } else {"com.godiegh.clipx"};
 
 #[derive(Clone)]
 pub struct NotificationEngine;
