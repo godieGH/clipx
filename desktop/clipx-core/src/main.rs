@@ -1,12 +1,4 @@
-mod clipboard;
-mod device;
-mod logging;
-mod message;
-mod netio;
-mod service;
-mod notification;
-
-use service::CoreService;
+use clipx_core::{service::CoreService, logging};
 
 #[tokio::main]
 async fn main() {
