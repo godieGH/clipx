@@ -42,12 +42,22 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = events_rx.recv().await {
-                        let event_name = match event.event {
-                            Some(clipx::ipc_event::Event::DevicesChanged(_)) => "devices-changed",
-                            Some(clipx::ipc_event::Event::ClipboardChanged(_)) => "clipboard-changed",
+                        match event.event {
+                            Some(clipx::ipc_event::Event::DevicesChanged(_)) => {
+                                let _ = app_handle.emit("devices-changed", ());
+                            }
+                            Some(clipx::ipc_event::Event::ClipboardChanged(_)) => {
+                                let _ = app_handle.emit("clipboard-changed", ());
+                            }
+                            Some(clipx::ipc_event::Event::PairingEvent(payload)) => {
+                                // Forward the real payload (device_id/state/message) —
+                                // this used to be flattened to `()`, which is why the
+                                // frontend never actually saw why a pairing attempt
+                                // ended.
+                                let _ = app_handle.emit("pairing-event", payload);
+                            }
                             None => continue,
-                        };
-                        let _ = app_handle.emit(event_name, ());
+                        }
                     }
                 });
             }

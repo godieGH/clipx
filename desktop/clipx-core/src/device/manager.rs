@@ -146,6 +146,18 @@ impl DeviceManager {
         });
     }
 
+    fn notify_pair_events(&self, device_id: &str, state: i32, message: &str) {
+        let _ = self.events_tx.send(proto::IpcEvent {
+            event: Some(proto::ipc_event::Event::PairingEvent(
+                proto::PairingEvent {
+                    device_id: device_id.to_string(),
+                    state,
+                    message: message.to_string(),
+                }
+            ))
+        });
+    }
+
     pub async fn run(
         mut self,
         mut shutdown_rx: watch::Receiver<bool>,
@@ -401,6 +413,11 @@ impl DeviceManager {
     fn on_transport_disconnected(&mut self, device_id: String) {
         if self.pair_sessions.remove(&device_id).is_some() {
             tracing::info!("pair session with {device_id} ended (connection closed)");
+            self.notify_pair_events(
+                &device_id,
+                proto::pairing_event::State::Failed as i32,
+                "connection lost during pairing",
+            );
         }
 
         if let Some(sess) = self.connect_sessions.get(&device_id) {
@@ -438,6 +455,11 @@ impl DeviceManager {
         if self.pair_sessions.remove(&device_id).is_some() {
             tracing::info!("pair dial to {device_id} never connected");
             self.notify_info("Pairing failed", "could not reach device");
+            self.notify_pair_events(
+                device_id.as_str(),
+                proto::pairing_event::State::Failed as i32,
+                "pair failed could not reach device",
+            );
             return;
         }
 
@@ -747,6 +769,11 @@ impl DeviceManager {
         self.finalize_pair_trusted(device_id);
         self.send_peer(device_id, Body::PairAck(proto::PairAck {}));
         self.pair_sessions.remove(device_id);
+        self.notify_pair_events(
+            device_id,
+            proto::pairing_event::State::Succeeded as i32,
+            "paired successfully",
+        );
         self.notify_info(
             "Paired successfully",
             format!(
@@ -878,6 +905,7 @@ impl DeviceManager {
     fn abort_pair(&mut self, device_id: &str, code: u32, message: &str) {
         self.send_control(device_id, code, message);
         self.pair_sessions.remove(device_id);
+        self.notify_pair_events(device_id, proto::pairing_event::State::Failed as i32, message);
         self.request_transport_disconnect(device_id);
     }
 
@@ -984,8 +1012,15 @@ impl DeviceManager {
             ctrl.code,
             ctrl.message
         );
-        self.pair_sessions.remove(&device_id);
+        let was_pairing = self.pair_sessions.remove(&device_id).is_some();
         self.connect_sessions.remove(&device_id);
+        if was_pairing {
+            self.notify_pair_events(
+                &device_id,
+                proto::pairing_event::State::Failed as i32,
+                &ctrl.message,
+            );
+        }
         self.notify_info("Pairing/connect failed", ctrl.message);
     }
 

@@ -299,10 +299,24 @@ message ClipboardClearResponse {}
 message DevicesChangedEvent {}
 message ClipboardChangedEvent {}
 
+message PairingEvent {
+  string device_id = 1;
+
+  enum State {
+    STARTED = 0;
+    FAILED = 1;
+    SUCCEEDED = 2;
+  }
+
+  State state = 2;
+  string message = 3;
+}
+
 message IpcEvent {
   oneof event {
     DevicesChangedEvent devices_changed = 1;
     ClipboardChangedEvent clipboard_changed = 2;
+    PairingEvent pairing_event = 3;
   }
 }
 

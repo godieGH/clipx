@@ -36,6 +36,16 @@ interface ClipItem {
   receivedAt: number;
 }
 
+// Mirrors clipx.PairingEvent — state is the raw proto3 enum ordinal
+// (0 = STARTED, 1 = FAILED, 2 = SUCCEEDED), since prost serializes
+// proto3 enum fields as plain integers.
+interface PairingEventPayload {
+  device_id: string;
+  state: 0 | 1 | 2;
+  message: string;
+}
+const PAIRING_STATE = { STARTED: 0, FAILED: 1, SUCCEEDED: 2 } as const;
+
 interface OwnIdentity {
   name: string;
   fingerprint: string;
@@ -673,6 +683,21 @@ function App() {
     const unlistenPromises = [
       listen("devices-changed", () => { if (!cancelled) refreshPaired(); }),
       listen("clipboard-changed", () => { if (!cancelled) refreshHistory(); }),
+      // Registered once, for the lifetime of the app — routes by
+      // device_id to whichever "Requesting…" button it belongs to,
+      // instead of being (re)registered per pair attempt.
+      listen<PairingEventPayload>("pairing-event", ({ payload }) => {
+        if (cancelled) return;
+        if (payload.state === PAIRING_STATE.STARTED) return;
+
+        setAvailable((prev) => prev.map((d) =>
+          d.fingerprint === payload.device_id ? { ...d, pairing: "idle" } : d
+        ));
+
+        if (payload.state === PAIRING_STATE.FAILED) {
+          showToast(payload.message || "Pairing failed", { variant: "error" });
+        }
+      }),
     ];
     return () => {
       cancelled = true;
@@ -745,10 +770,11 @@ function App() {
       setAvailable((prev) => prev.map((d) => (d.fingerprint === fingerprint ? { ...d, pairing: "idle" } : d)));
       return;
     }
-    // Core's own pair session TTL is 90s. If it succeeded, refreshPaired's
-    // reconciliation will have already removed this fingerprint from `available`
-    // by the time this fires — so this only resets requests that were rejected,
-    // timed out, or otherwise never resolved.
+
+    // Normal resolution now comes from the "pairing-event" listener
+    // registered once in the top-level useEffect (real push from the
+    // core, not a timer). Core's own pair session TTL is 90s — this is
+    // just a last-resort safety net in case an event is ever missed.
     setTimeout(() => {
       setAvailable((prev) => prev.map((d) =>
         d.fingerprint === fingerprint && d.pairing === "requesting"
