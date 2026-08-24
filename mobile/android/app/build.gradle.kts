@@ -12,7 +12,7 @@ android {
     defaultConfig {
         applicationId = "com.godiegh.clipx"
         minSdk = 29
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
 
@@ -45,8 +45,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    implementation("androidx.compose.material:material-icons-extended:1.7.8")
-    implementation(libs.firebase.crashlytics.buildtools)
+    implementation(libs.androidx.compose.material.icons.extended)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
