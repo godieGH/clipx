@@ -35,7 +35,7 @@ data class ClipxPalette(
 )
 
 val DarkClipxPalette = ClipxPalette(
-    background = Color(0xFF030812),
+    background = Color(0xFF0E1117),
     surface = Color(0xFF09111B),
     card = Color(0xB20F1925),
     cardBorder = Color(0x2637485D),
