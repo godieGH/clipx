@@ -1,0 +1,55 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+
+    <linearGradient id="clip-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#F1F5F9" />
+    </linearGradient>
+
+    <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+
+    <!-- Glossy highlight, top-left, to fake convex bulge -->
+    <radialGradient id="bulge-highlight" cx="35%" cy="28%" r="55%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Soft shading, bottom edge, to sell the same dome -->
+    <radialGradient id="bulge-shadow" cx="50%" cy="78%" r="55%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0" />
+      <stop offset="70%" stop-color="#000000" stop-opacity="0" />
+      <stop offset="100%" stop-color="#1D0BB7" stop-opacity="0.28" />
+    </radialGradient>
+  </defs>
+
+  <!-- Circular background -->
+  <circle cx="256" cy="256" r="224" fill="url(#bg-gradient)" />
+
+  <!-- Bulge shading overlays, clipped to the same circle -->
+  <circle cx="256" cy="256" r="224" fill="url(#bulge-shadow)" />
+  <circle cx="256" cy="256" r="224" fill="url(#bulge-highlight)" />
+
+  <!-- Paperclip Vector -->
+  <g transform="rotate(45, 256, 256)" filter="url(#drop-shadow)">
+    <path d="M 280 278
+             L 280 208
+             A 24 24 0 0 0 232 208
+             L 232 368
+             A 48 48 0 0 0 328 368
+             L 328 168
+             A 72 72 0 0 0 184 168
+             L 184 328"
+          fill="none"
+          stroke="url(#clip-gradient)"
+          stroke-width="32"
+          stroke-linecap="round"
+          stroke-linejoin="round" />
+  </g>
+</svg>
