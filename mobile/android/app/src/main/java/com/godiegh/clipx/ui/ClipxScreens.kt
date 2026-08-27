@@ -1,5 +1,6 @@
 package com.godiegh.clipx.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,7 +65,7 @@ fun DevicesScreen(
     ) {
         item {
             AppTopBar(
-                title = "ClipX",
+                title = "Clipx",
                 showLogo = true,
                 rightContent = {
                     IconButton(onClick = onOpenThisDevice) {
@@ -211,9 +213,9 @@ fun PairNewDeviceScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             ) {
                 ScanRadar()
-                Text("Scanning for ClipX devices…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
+                Text("Scanning for Clipx devices…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
                 Text(
-                    "Make sure the other device has ClipX open and is discoverable.",
+                    "Make sure the other device has Clipx open and is discoverable.",
                     color = palette.mutedText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),

@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -74,42 +76,38 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
 import com.godiegh.clipx.ClipType
 import com.godiegh.clipx.ConnectionStatus
 import com.godiegh.clipx.DeviceType
 import com.godiegh.clipx.PairedDevice
+import com.godiegh.clipx.R
 import com.godiegh.clipx.ui.theme.ClipxBlue
 import com.godiegh.clipx.ui.theme.ClipxError
 import com.godiegh.clipx.ui.theme.ClipxGradientEnd
 import com.godiegh.clipx.ui.theme.ClipxGradientStart
 import com.godiegh.clipx.ui.theme.LocalClipxPalette
 val LocalClipxSheetController = staticCompositionLocalOf<ClipxSheetController> {
-    error("ClipX sheet controller is not provided")
+    error("Clipx sheet controller is not provided")
 }
 
 @Composable
 fun ClipxLogo(modifier: Modifier = Modifier, size: Dp = 34.dp) {
-    val palette = LocalClipxPalette.current
-    Box(
+    Image(
+        painter = painterResource(id = R.drawable.ic_launcher_foreground),
+        contentDescription = "Clipx",
+        contentScale = ContentScale.Crop,
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size / 3))
-            .background(Brush.linearGradient(listOf(ClipxBlue, ClipxGradientEnd)))
-            .border(1.dp, palette.cardBorder, RoundedCornerShape(size / 3)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.AttachFile,
-            contentDescription = "ClipX",
-            tint = Color.White,
-            modifier = Modifier.size(size * .62f),
-        )
-    }
+            .clip(RoundedCornerShape(size / 3)),
+    )
 }
 
 @Composable
@@ -134,7 +132,7 @@ fun AppTopBar(
             Spacer(Modifier.width(2.dp))
         }
         if (showLogo) {
-            ClipxLogo(size = 31.dp)
+            ClipxLogo(size = 34.dp)
             Spacer(Modifier.width(9.dp))
         }
         Text(
@@ -580,13 +578,16 @@ data class ClipxSheetResult(
 @Composable
 fun rememberClipxSheetController(): ClipxSheetController = androidx.compose.runtime.remember { ClipxSheetController() }
 
-class ClipxSheetController {
+class ClipxSheetController: ViewModel() {
+
+    private val queue = ArrayDeque<PendingClipxSheet>()
     var pending: PendingClipxSheet? by mutableStateOf(null)
         private set
 
     /** Event-driven API for UI callers. The callback receives ACTION or DISMISSED. */
     fun show(request: ClipxSheetRequest, onResult: (ClipxSheetResult) -> Unit) {
-        pending = PendingClipxSheet(request, onResult)
+        val item = PendingClipxSheet(request, onResult)
+        if (pending == null) pending = item else queue.addLast(item)
     }
 
     fun dismiss() = resolve(ClipxSheetResult(ClipxSheetResultType.DISMISSED))
@@ -597,6 +598,7 @@ class ClipxSheetController {
         val current = pending ?: return
         pending = null
         current.onResult(result)
+        pending = queue.removeFirstOrNull()
     }
 }
 
@@ -619,8 +621,8 @@ fun ClipxDecisionSheetHost(controller: ClipxSheetController) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(.56f)
-                .padding(horizontal = 20.dp, vertical = 6.dp),
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -630,11 +632,15 @@ fun ClipxDecisionSheetHost(controller: ClipxSheetController) {
                     Text(it, style = MaterialTheme.typography.bodyLarge, color = palette.mutedText)
                 }
             }
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp)) {
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 pending.request.actions.forEach { action ->
                     Button(
                         onClick = { controller.choose(action.id) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                         colors = if (action.destructive) {
                             ButtonDefaults.buttonColors(
@@ -648,7 +654,7 @@ fun ClipxDecisionSheetHost(controller: ClipxSheetController) {
                             )
                         },
                     ) {
-                        Text(action.label, style = MaterialTheme.typography.labelLarge)
+                        Text(action.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
             }
