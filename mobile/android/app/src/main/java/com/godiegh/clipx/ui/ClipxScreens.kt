@@ -1,0 +1,409 @@
+package com.godiegh.clipx.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.godiegh.clipx.ClipType
+import com.godiegh.clipx.ConnectionStatus
+import com.godiegh.clipx.DeviceType
+import com.godiegh.clipx.PairedDevice
+import com.godiegh.clipx.ui.theme.ClipxBlue
+import com.godiegh.clipx.ui.theme.LocalClipxPalette
+
+@Composable
+fun DevicesScreen(
+    pairedDevices: List<PairedDevice>,
+    availableDevices: List<AvailableDeviceUi>,
+    onOpenPair: () -> Unit,
+    onOpenThisDevice: () -> Unit,
+    onOpenDetails: (String) -> Unit,
+    onPair: (String) -> Unit,
+    onConnect: (String) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 2.dp, bottom = 10.dp),
+    ) {
+        item {
+            AppTopBar(
+                title = "ClipX",
+                showLogo = true,
+                rightContent = {
+                    IconButton(onClick = onOpenThisDevice) {
+                        Icon(
+                            Icons.Filled.PhoneAndroid,
+                            contentDescription = "This device identity",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(21.dp),
+                        )
+                    }
+                },
+            )
+        }
+        item { SectionLabel("PAIRED DEVICES") }
+        if (pairedDevices.isEmpty()) {
+            item {
+                Text(
+                    "No paired devices yet.",
+                    color = LocalClipxPalette.current.mutedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                )
+            }
+        } else {
+            items(pairedDevices, key = { it.id }) { device ->
+                DeviceRow(
+                    device = device,
+                    onClick = { onOpenDetails(device.id) },
+                    actionLabel = if (device.status == ConnectionStatus.CONNECTED) null else "Connect",
+                    onAction = { onConnect(device.id) },
+                )
+            }
+        }
+        item {
+            SectionLabel(
+                text = "AVAILABLE DEVICES",
+                action = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = 1.dp),
+                    ) {
+                        TextButton(onClick = onOpenPair) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Scan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                },
+            )
+        }
+        items(availableDevices, key = { it.model.id }) { device ->
+            AvailableDeviceRow(
+                device = device,
+                onPair = { onPair(device.model.id) },
+            )
+        }
+    }
+}
+
+@Composable
+fun DeviceDetailsScreen(
+    device: PairedDevice?,
+    onBack: () -> Unit,
+    onAutoConnectChange: (Boolean) -> Unit,
+    onDisconnect: () -> Unit,
+    onForget: () -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+    if (device == null) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            ScreenHeader("Device Details", onBack)
+            Text("Device no longer exists.", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(18.dp))
+        }
+        return
+    }
+
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
+        item { ScreenHeader("Device Details", onBack) }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DeviceAvatar(device.type, size = 64.dp)
+                Spacer(Modifier.width(13.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        device.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(device.status)
+                        Spacer(Modifier.width(7.dp))
+                        Text(connectionLabel(device.status), color = palette.mutedText, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+        item {
+            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+                    InfoPair("IP Address", device.ipAddress, Modifier.weight(1f))
+                    InfoPair("Port", device.wsPort.toString(), Modifier.weight(1f))
+                }
+                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                InfoPair("Fingerprint", formatFingerprint(device.id), Modifier.fillMaxWidth())
+            }
+        }
+        item {
+            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                ToggleRow(
+                    label = "Auto-connect",
+                    description = "Connect automatically when device is available",
+                    checked = device.autoConnect,
+                    onCheckedChange = onAutoConnectChange,
+                )
+            }
+        }
+        item {
+            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                DangerRow("Disconnect", androidx.compose.material.icons.Icons.Filled.Wifi, onDisconnect)
+                Divider(color = palette.divider)
+                DangerRow("Forget Device", Icons.Filled.DeleteOutline, onForget)
+            }
+        }
+    }
+}
+
+@Composable
+fun PairNewDeviceScreen(
+    availableDevices: List<AvailableDeviceUi>,
+    onBack: () -> Unit,
+    requestId: String?,
+    onPair: (String) -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 18.dp)) {
+        item { ScreenHeader("Pair New Device", onBack) }
+        item {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            ) {
+                ScanRadar()
+                Text("Scanning for ClipX devices…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
+                Text(
+                    "Make sure the other device has ClipX open and is discoverable.",
+                    color = palette.mutedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),
+                )
+            }
+        }
+        item { Spacer(Modifier.height(14.dp)) }
+        item { SectionLabel("FOUND DEVICES") }
+        items(availableDevices, key = { it.model.id }) { device ->
+            AvailableDeviceRow(
+                device = device.copy(requesting = requestId == device.model.id),
+                onPair = { onPair(device.model.id) },
+            )
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = { }) {
+                    Text(
+                        "Can’t see your device?",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThisDeviceScreen(onBack: () -> Unit) {
+    val palette = LocalClipxPalette.current
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
+        item { ScreenHeader("This Device (Identity)", onBack) }
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
+            ) {
+                DeviceAvatar(DeviceType.ANDROID, size = 66.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Pixel 7 Pro",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "Android • Pixel 7 Pro",
+                        color = palette.mutedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        item {
+            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                InfoPair("Device Name", "Pixel 7 Pro", Modifier.fillMaxWidth())
+                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    InfoPair("IP Address", "192.168.1.105", Modifier.weight(1f))
+                    InfoPair("Port", "8765", Modifier.weight(1f))
+                }
+                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                InfoPair("Fingerprint", formatFingerprint("E7F12A3B4C5D6E7F8899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF"))
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoryScreen(
+    items: List<ClipxHistoryItem>,
+    search: Boolean,
+    onSearchChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    onClearAll: () -> Unit,
+    onItemActions: (ClipxHistoryItem) -> Unit,
+    onCopyItem: (ClipxHistoryItem) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val palette = LocalClipxPalette.current
+    val filtered = items.filter {
+        query.isBlank() || it.content.contains(query, ignoreCase = true) || it.sourceDevice.contains(query, ignoreCase = true)
+    }
+
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 18.dp)) {
+        item {
+            if (search) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { query = ""; onSearchChange(false) }) {
+                        Icon(Icons.Filled.Clear, contentDescription = "Close search", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(50),
+                        placeholder = { Text("Search history", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (query.isNotEmpty()) {
+                            { IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear search", tint = palette.mutedText) } }
+                        } else null,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onBackground,
+                            cursorColor = MaterialTheme.colorScheme.primary,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = palette.cardBorder,
+                            focusedContainerColor = palette.surface,
+                            unfocusedContainerColor = palette.surface,
+                        ),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text("${filtered.size} items", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp))
+            } else {
+                AppTopBar(
+                    title = "Clipboard History",
+                    onBack = null,
+                    rightContent = {
+                        IconButton(onClick = { onSearchChange(true) }) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search history", tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                        TextButton(onClick = onClearAll, enabled = items.isNotEmpty()) {
+                            Text("Clear all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    },
+                )
+                Text("${filtered.size} items", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp))
+            }
+        }
+        items(filtered, key = { it.id }) { item ->
+            HistoryListItem(item, onCopy = { onCopyItem(item) }, onActions = { onItemActions(item) })
+        }
+    }
+}
+
+@Composable
+private fun HistoryListItem(
+    item: ClipxHistoryItem,
+    onCopy: () -> Unit,
+    onActions: () -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+    GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().height(76.dp),
+        ) {
+            HistoryTypeBadge(item.type)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f).height(54.dp), verticalArrangement = Arrangement.Center) {
+                Text(
+                    item.preview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${item.sourceDevice}  •  ${item.ageLabel}",
+                    color = palette.mutedText,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            IconButton(onClick = onCopy, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
+            }
+            IconButton(onClick = onActions, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private fun connectionLabel(status: ConnectionStatus): String = when (status) {
+    ConnectionStatus.CONNECTED -> "Connected"
+    ConnectionStatus.CONNECTING -> "Connecting…"
+    ConnectionStatus.DISCONNECTED -> "Disconnected"
+    ConnectionStatus.UNAVAILABLE -> "Unavailable"
+}
