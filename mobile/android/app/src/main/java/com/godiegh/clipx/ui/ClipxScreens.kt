@@ -14,16 +14,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,68 +61,73 @@ fun DevicesScreen(
     onPair: (String) -> Unit,
     onConnect: (String) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 2.dp, bottom = 10.dp),
-    ) {
-        item {
-            AppTopBar(
-                title = "Clipx",
-                showLogo = true,
-                rightContent = {
-                    IconButton(onClick = onOpenThisDevice) {
-                        Icon(
-                            Icons.Filled.PhoneAndroid,
-                            contentDescription = "This device identity",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(21.dp),
-                        )
-                    }
-                },
-            )
-        }
-        item { SectionLabel("PAIRED DEVICES") }
-        if (pairedDevices.isEmpty()) {
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        AppTopBar(
+            title = "Clipx",
+            showLogo = true,
+            elevated = elevated,
+            rightContent = {
+                IconButton(onClick = onOpenThisDevice) {
+                    Icon(
+                        Icons.Filled.Fingerprint,
+                        contentDescription = "This device identity",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
+            },
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(top = 2.dp, bottom = 10.dp),
+        ) {
+            item { SectionLabel("PAIRED DEVICES") }
+            if (pairedDevices.isEmpty()) {
+                item {
+                    Text(
+                        "No paired devices yet.",
+                        color = LocalClipxPalette.current.mutedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    )
+                }
+            } else {
+                items(pairedDevices, key = { it.id }) { device ->
+                    DeviceRow(
+                        device = device,
+                        onClick = { onOpenDetails(device.id) },
+                        actionLabel = if (device.status == ConnectionStatus.CONNECTED) null else "Connect",
+                        onAction = { onConnect(device.id) },
+                    )
+                }
+            }
             item {
-                Text(
-                    "No paired devices yet.",
-                    color = LocalClipxPalette.current.mutedText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                )
-            }
-        } else {
-            items(pairedDevices, key = { it.id }) { device ->
-                DeviceRow(
-                    device = device,
-                    onClick = { onOpenDetails(device.id) },
-                    actionLabel = if (device.status == ConnectionStatus.CONNECTED) null else "Connect",
-                    onAction = { onConnect(device.id) },
-                )
-            }
-        }
-        item {
-            SectionLabel(
-                text = "AVAILABLE DEVICES",
-                action = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 1.dp),
-                    ) {
-                        TextButton(onClick = onOpenPair) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Scan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                SectionLabel(
+                    text = "AVAILABLE DEVICES",
+                    action = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        ) {
+                            TextButton(onClick = onOpenPair) {
+                                Icon(Icons.Filled.Sensors, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Scan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                            }
                         }
-                    }
-                },
-            )
-        }
-        items(availableDevices, key = { it.model.id }) { device ->
-            AvailableDeviceRow(
-                device = device,
-                onPair = { onPair(device.model.id) },
-            )
+                    },
+                )
+            }
+            items(availableDevices, key = { it.model.id }) { device ->
+                AvailableDeviceRow(
+                    device = device,
+                    onPair = { onPair(device.model.id) },
+                )
+            }
         }
     }
 }
@@ -142,8 +149,12 @@ fun DeviceDetailsScreen(
         return
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item { ScreenHeader("Device Details", onBack) }
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader("Device Details", onBack, elevated = elevated)
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 7.dp),
@@ -189,10 +200,11 @@ fun DeviceDetailsScreen(
         }
         item {
             GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                DangerRow("Disconnect", androidx.compose.material.icons.Icons.Filled.Wifi, onDisconnect)
+                DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
                 Divider(color = palette.divider)
-                DangerRow("Forget Device", Icons.Filled.DeleteOutline, onForget)
+                DangerRow("Forget Device", Icons.Filled.DeleteForever, onForget)
             }
+        }
         }
     }
 }
@@ -205,8 +217,12 @@ fun PairNewDeviceScreen(
     onPair: (String) -> Unit,
 ) {
     val palette = LocalClipxPalette.current
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 18.dp)) {
-        item { ScreenHeader("Pair New Device", onBack) }
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader("Pair New Device", onBack, elevated = elevated)
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
         item {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -244,14 +260,19 @@ fun PairNewDeviceScreen(
                 }
             }
         }
+        }
     }
 }
 
 @Composable
 fun ThisDeviceScreen(onBack: () -> Unit) {
     val palette = LocalClipxPalette.current
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item { ScreenHeader("This Device (Identity)", onBack) }
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader("This Device (Identity)", onBack, elevated = elevated)
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -288,6 +309,7 @@ fun ThisDeviceScreen(onBack: () -> Unit) {
                 InfoPair("Fingerprint", formatFingerprint("E7F12A3B4C5D6E7F8899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF"))
             }
         }
+        }
     }
 }
 
@@ -306,58 +328,59 @@ fun HistoryScreen(
     val filtered = items.filter {
         query.isBlank() || it.content.contains(query, ignoreCase = true) || it.sourceDevice.contains(query, ignoreCase = true)
     }
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 18.dp)) {
-        item {
-            if (search) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { query = ""; onSearchChange(false) }) {
-                        Icon(Icons.Filled.Clear, contentDescription = "Close search", tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(50),
-                        placeholder = { Text("Search history", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium) },
-                        trailingIcon = if (query.isNotEmpty()) {
-                            { IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear search", tint = palette.mutedText) } }
-                        } else null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = MaterialTheme.colorScheme.onBackground,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onBackground,
-                            cursorColor = MaterialTheme.colorScheme.primary,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = palette.cardBorder,
-                            focusedContainerColor = palette.surface,
-                            unfocusedContainerColor = palette.surface,
-                        ),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (search) {
+            TopBarSurface(elevated = elevated) {
+                IconButton(onClick = { query = ""; onSearchChange(false) }) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Close search", tint = MaterialTheme.colorScheme.onSurface)
                 }
-                Text("${filtered.size} items", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp))
-            } else {
-                AppTopBar(
-                    title = "Clipboard History",
-                    onBack = null,
-                    rightContent = {
-                        IconButton(onClick = { onSearchChange(true) }) {
-                            Icon(Icons.Filled.Search, contentDescription = "Search history", tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                        TextButton(onClick = onClearAll, enabled = items.isNotEmpty()) {
-                            Text("Clear all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    },
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    shape = RoundedCornerShape(50),
+                    placeholder = { Text("Search history", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = if (query.isNotEmpty()) {
+                        { IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear search", tint = palette.mutedText) } }
+                    } else null,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onBackground,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onBackground,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = palette.cardBorder,
+                        focusedContainerColor = palette.surface,
+                        unfocusedContainerColor = palette.surface,
+                    ),
+                    textStyle = MaterialTheme.typography.bodyMedium,
                 )
+            }
+        } else {
+            AppTopBar(
+                title = "Clipboard History",
+                onBack = null,
+                elevated = elevated,
+                rightContent = {
+                    IconButton(onClick = { onSearchChange(true) }) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search history", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    TextButton(onClick = onClearAll, enabled = items.isNotEmpty()) {
+                        Text("Clear all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                },
+            )
+        }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
+            item {
                 Text("${filtered.size} items", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp))
             }
-        }
-        items(filtered, key = { it.id }) { item ->
-            HistoryListItem(item, onCopy = { onCopyItem(item) }, onActions = { onItemActions(item) })
+            items(filtered, key = { it.id }) { item ->
+                HistoryListItem(item, onCopy = { onCopyItem(item) }, onActions = { onItemActions(item) })
+            }
         }
     }
 }

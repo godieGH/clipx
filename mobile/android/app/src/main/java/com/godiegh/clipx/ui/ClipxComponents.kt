@@ -3,6 +3,7 @@ package com.godiegh.clipx.ui
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -33,23 +34,25 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.DevicesOther
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PhoneIphone
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
@@ -73,6 +76,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -91,22 +97,57 @@ import com.godiegh.clipx.PairedDevice
 import com.godiegh.clipx.R
 import com.godiegh.clipx.ui.theme.ClipxBlue
 import com.godiegh.clipx.ui.theme.ClipxError
-import com.godiegh.clipx.ui.theme.ClipxGradientEnd
-import com.godiegh.clipx.ui.theme.ClipxGradientStart
 import com.godiegh.clipx.ui.theme.LocalClipxPalette
 val LocalClipxSheetController = staticCompositionLocalOf<ClipxSheetController> {
     error("Clipx sheet controller is not provided")
 }
 
 @Composable
-fun ClipxLogo(modifier: Modifier = Modifier, size: Dp = 34.dp) {
+fun ClipxLogo(
+    modifier: Modifier = Modifier,
+    size: Dp = 34.dp,
+    shape: Shape = RoundedCornerShape(size / 3),
+) {
     Image(
         painter = painterResource(id = R.drawable.ic_launcher_foreground),
         contentDescription = "Clipx",
         contentScale = ContentScale.Crop,
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size / 3)),
+            .clip(shape),
+    )
+}
+
+/**
+ * Frosted-glass surface shared by every sticky top bar. Fully transparent at rest so it blends
+ * with the live animated background; as soon as content scrolls underneath (elevated = true) it
+ * fades in a translucent surface tint plus a hairline border, giving depth without ever fully
+ * opaque-ing out the background.
+ */
+@Composable
+fun TopBarSurface(
+    elevated: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+    val bgAlpha by animateFloatAsState(if (elevated) .78f else 0f, label = "topBarBg")
+    val borderAlpha by animateFloatAsState(if (elevated) 1f else 0f, label = "topBarBorder")
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(palette.surface.copy(alpha = bgAlpha))
+            .drawBehind {
+                drawLine(
+                    color = palette.cardBorder.copy(alpha = borderAlpha),
+                    start = Offset(0f, size.height - .5.dp.toPx()),
+                    end = Offset(size.width, size.height - .5.dp.toPx()),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
     )
 }
 
@@ -115,12 +156,10 @@ fun AppTopBar(
     title: String,
     showLogo: Boolean = false,
     onBack: (() -> Unit)? = null,
+    elevated: Boolean = false,
     rightContent: @Composable RowScope.() -> Unit = {},
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    TopBarSurface(elevated = elevated) {
         if (onBack != null) {
             IconButton(onClick = onBack, modifier = Modifier.size(42.dp)) {
                 Icon(
@@ -152,8 +191,9 @@ fun AppTopBar(
 fun ScreenHeader(
     title: String,
     onBack: (() -> Unit)? = null,
+    elevated: Boolean = false,
     rightContent: @Composable RowScope.() -> Unit = {},
-) = AppTopBar(title = title, onBack = onBack, rightContent = rightContent)
+) = AppTopBar(title = title, onBack = onBack, elevated = elevated, rightContent = rightContent)
 
 @Composable
 fun ClipxScaffold(
@@ -196,7 +236,7 @@ private fun ClipxBottomBar(
             modifier = Modifier.fillMaxWidth().height(64.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            BottomTab(currentTab == RootTab.DEVICES, Icons.Filled.DesktopWindows, "Devices", onDevices)
+            BottomTab(currentTab == RootTab.DEVICES, Icons.Filled.Devices, "Devices", onDevices)
             BottomTab(currentTab == RootTab.HISTORY, Icons.Filled.ContentCopy, "History", onHistory)
         }
     }
@@ -239,6 +279,12 @@ fun GlassCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.()
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(palette.card)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color.White.copy(alpha = .05f), Color.Transparent),
+                    endY = 60f,
+                ),
+            )
             .border(BorderStroke(1.dp, palette.cardBorder), RoundedCornerShape(12.dp))
             .padding(10.dp),
         content = content,
@@ -253,7 +299,7 @@ fun DeviceAvatar(type: DeviceType, modifier: Modifier = Modifier, size: Dp = 48.
         DeviceType.MACOS -> Icons.Filled.Laptop
         DeviceType.LINUX -> Icons.Filled.Terminal
         DeviceType.ANDROID -> Icons.Filled.Android
-        DeviceType.IOS -> Icons.Filled.PhoneAndroid
+        DeviceType.IOS -> Icons.Filled.PhoneIphone
         DeviceType.UNKNOWN -> Icons.Filled.DevicesOther
     }
     Box(
@@ -396,12 +442,22 @@ fun ScanRadar() {
         RadarRing(200.dp, .12f)
         RadarRing((170 * pulse).dp, .14f)
         RadarRing((140 * pulse).dp, .17f)
-        Box(
-            modifier = Modifier.size(70.dp).clip(CircleShape).background(Brush.linearGradient(listOf(ClipxBlue, ClipxGradientEnd))),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.Link, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
-        }
+        Image(
+            painter = painterResource(id = R.drawable.clipx_brand_mark),
+            contentDescription = "Clipx",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(100.dp)
+                .shadow(elevation = 10.dp, shape = CircleShape, clip = false)
+                .clip(CircleShape)
+                .border(
+                    width = 4.dp,
+                    brush = Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = .15f), Color.White.copy(alpha = .05f)),
+                    ),
+                    shape = CircleShape,
+                ),
+        )
     }
 }
 
@@ -491,7 +547,7 @@ fun HistoryActionsSheet(
             Spacer(Modifier.height(12.dp))
             Divider(color = palette.divider)
             HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
-            HistoryActionRow("Remove from history", Icons.Filled.DeleteOutline, onRemove, danger = true)
+            HistoryActionRow("Remove from history", Icons.Filled.DeleteForever, onRemove, danger = true)
         }
     }
 }
