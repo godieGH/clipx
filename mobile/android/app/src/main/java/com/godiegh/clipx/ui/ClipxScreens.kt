@@ -1,6 +1,5 @@
 package com.godiegh.clipx.ui
 
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,8 +24,8 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,11 +43,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.godiegh.clipx.ClipType
 import com.godiegh.clipx.ConnectionStatus
 import com.godiegh.clipx.DeviceType
 import com.godiegh.clipx.PairedDevice
-import com.godiegh.clipx.ui.theme.ClipxBlue
 import com.godiegh.clipx.ui.theme.LocalClipxPalette
 
 @Composable
@@ -184,7 +181,11 @@ fun DeviceDetailsScreen(
                     InfoPair("IP Address", device.ipAddress, Modifier.weight(1f))
                     InfoPair("Port", device.wsPort.toString(), Modifier.weight(1f))
                 }
-                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    thickness = DividerDefaults.Thickness,
+                    color = palette.divider
+                )
                 InfoPair("Fingerprint", formatFingerprint(device.id), Modifier.fillMaxWidth())
             }
         }
@@ -201,7 +202,7 @@ fun DeviceDetailsScreen(
         item {
             GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                 DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
-                Divider(color = palette.divider)
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, color = palette.divider)
                 DangerRow("Forget Device", Icons.Filled.DeleteForever, onForget)
             }
         }
@@ -300,12 +301,20 @@ fun ThisDeviceScreen(onBack: () -> Unit) {
         item {
             GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                 InfoPair("Device Name", "Pixel 7 Pro", Modifier.fillMaxWidth())
-                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    thickness = DividerDefaults.Thickness,
+                    color = palette.divider
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
                     InfoPair("IP Address", "192.168.1.105", Modifier.weight(1f))
                     InfoPair("Port", "8765", Modifier.weight(1f))
                 }
-                Divider(color = palette.divider, modifier = Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    thickness = DividerDefaults.Thickness,
+                    color = palette.divider
+                )
                 InfoPair("Fingerprint", formatFingerprint("E7F12A3B4C5D6E7F8899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF"))
             }
         }
