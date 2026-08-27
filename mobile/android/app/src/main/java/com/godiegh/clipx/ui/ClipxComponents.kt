@@ -44,19 +44,15 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.DevicesOther
 import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.PhoneIphone
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,11 +60,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -334,9 +329,9 @@ fun StatusDot(status: ConnectionStatus) {
 @Composable
 fun ActionButton(
     text: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     enabled: Boolean = true,
-    modifier: Modifier = Modifier,
 ) {
     val palette = LocalClipxPalette.current
     Button(
@@ -392,7 +387,7 @@ fun DeviceRow(
             }
             if (actionLabel != null && onAction != null) {
                 Spacer(Modifier.width(10.dp))
-                ActionButton(actionLabel, onAction)
+                ActionButton(actionLabel, onClick = onAction)
             }
         }
     }
@@ -424,7 +419,7 @@ fun AvailableDeviceRow(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            ActionButton(if (device.requesting) "Requesting…" else "Pair", onPair, enabled = !device.requesting)
+            ActionButton(if (device.requesting) "Requesting…" else "Pair", onClick = onPair, enabled = !device.requesting)
         }
     }
 }
@@ -494,7 +489,7 @@ fun ToggleRow(label: String, description: String, checked: Boolean, onCheckedCha
             Text(description, color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(uncheckedThumbColor = Color(0xFF5F6875)))
     }
 }
 
@@ -545,7 +540,7 @@ fun HistoryActionsSheet(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Divider(color = palette.divider)
+            HorizontalDivider(color = palette.divider)
             HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
             HistoryActionRow("Remove from history", Icons.Filled.DeleteForever, onRemove, danger = true)
         }
