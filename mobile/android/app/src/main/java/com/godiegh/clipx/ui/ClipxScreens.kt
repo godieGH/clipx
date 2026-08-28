@@ -204,8 +204,10 @@ fun DeviceDetailsScreen(
         }
         item {
             GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
-                HorizontalDivider(Modifier, DividerDefaults.Thickness, color = palette.divider)
+                if (device.status == ConnectionStatus.CONNECTED) {
+                    DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
+                    HorizontalDivider(Modifier, DividerDefaults.Thickness, color = palette.divider)
+                }
                 DangerRow("Forget Device", Icons.Filled.DeleteForever, onForget)
             }
         }
