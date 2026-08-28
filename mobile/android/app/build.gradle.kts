@@ -35,6 +35,33 @@ android {
     }
 }
 
+tasks.register<Exec>("buildRustAndroidFfiBridge") {
+    group = "custom"
+    description = "This task builds the rust-android-ffi-bridge via uniffi."
+
+    workingDir("../native/rust-android-ffi-bridge")
+    commandLine("cargo", "ndk", "-t", "arm64-v8a", "-t", "x86_64", "-o", "../../app/src/main/jniLibs", "build", "--release")
+}
+
+tasks.register<Exec>("generateBindingsForFfiBridge") {
+    group = "custom"
+    description = "This task generates ffi bindings to call rust from android kotlin/java"
+
+    dependsOn("buildRustAndroidFfiBridge")
+    workingDir("../native/rust-android-ffi-bridge")
+    commandLine(
+        "cargo", "run", "--bin", "uniffi-bindgen",
+        "generate",
+        "--library", "target/aarch64-linux-android/release/librust_android_ffi_bridge.so",
+        "--language", "kotlin",
+        "--out-dir", "../../app/src/main/java/com/godiegh/clipx"
+    )
+}
+
+tasks.named("preBuild") {
+    dependsOn("generateBindingsForFfiBridge")
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -48,9 +75,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)
-    testImplementation(libs.junit.jupiter)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
