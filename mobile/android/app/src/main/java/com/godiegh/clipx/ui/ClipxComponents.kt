@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.DevicesOther
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.PhoneIphone
@@ -541,7 +542,7 @@ fun HistoryActionsSheet(
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = palette.divider)
-            HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
+            if (item.type == ClipType.FILE) null else HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
             HistoryActionRow("Remove from history", Icons.Filled.DeleteForever, onRemove, danger = true)
         }
     }
@@ -571,7 +572,7 @@ fun HistoryTypeBadge(type: ClipType) {
     val icon = when (type) {
         ClipType.TEXT -> Icons.Filled.TextFields
         ClipType.IMAGE -> Icons.Filled.Image
-        ClipType.FILE -> Icons.Filled.AttachFile
+        ClipType.FILE -> Icons.Filled.FileCopy
     }
     val tint = when (type) {
         ClipType.TEXT -> palette.textBadge

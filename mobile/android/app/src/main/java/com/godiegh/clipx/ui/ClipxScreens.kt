@@ -19,7 +19,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
@@ -43,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.godiegh.clipx.ClipType
 import com.godiegh.clipx.ConnectionStatus
 import com.godiegh.clipx.DeviceType
 import com.godiegh.clipx.PairedDevice
@@ -97,7 +100,7 @@ fun DevicesScreen(
                     DeviceRow(
                         device = device,
                         onClick = { onOpenDetails(device.id) },
-                        actionLabel = if (device.status == ConnectionStatus.CONNECTED) null else "Connect",
+                        actionLabel = if (device.status == ConnectionStatus.DISCONNECTED) "Connect" else null,
                         onAction = { onConnect(device.id) },
                     )
                 }
@@ -426,7 +429,7 @@ private fun HistoryListItem(
                 )
             }
             IconButton(onClick = onCopy, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
+                if (item.type == ClipType.FILE) Icon(Icons.Filled.FileDownload, contentDescription = "File Download", tint = MaterialTheme.colorScheme.onSurface) else Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = onActions, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)

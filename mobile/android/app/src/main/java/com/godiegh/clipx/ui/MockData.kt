@@ -32,7 +32,7 @@ object ClipxMockData {
             id = "B4E24F6A809D1A2B3C4F5E6F708190A1B2C3D4E5F60718293A4B5C6D7E8F9012",
             name = "LUCY",
             type = DeviceType.ANDROID,
-            status = ConnectionStatus.DISCONNECTED,
+            status = ConnectionStatus.UNAVAILABLE,
             ipAddress = "192.168.1.12",
             wsPort = 8080,
             autoConnect = false,
@@ -62,5 +62,6 @@ object ClipxMockData {
         ClipxHistoryItem("2", "Design system colors #396CD8 #7B61FF #0E1117", "Design system colors #396CD8 #7B61FF #0E1117", "Office Linux", "2m ago", ClipType.TEXT),
         ClipxHistoryItem("3", "Ship the mobile pairing flow after the UI pass.", "Ship the mobile pairing flow after the UI pass.", "Meckz Laptop", "7m ago", ClipType.TEXT),
         ClipxHistoryItem("4", "192.168.1.42:8765", "192.168.1.42:8765", "Office Linux", "12m ago", ClipType.IMAGE),
+        ClipxHistoryItem("5", "filename.pdf", "url://to/the/res", "Office Linux", "20m ago", ClipType.FILE),
     )
 }
