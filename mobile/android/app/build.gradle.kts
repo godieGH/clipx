@@ -54,7 +54,7 @@ tasks.register<Exec>("generateBindingsForFfiBridge") {
         "generate",
         "--library", "target/aarch64-linux-android/release/librust_android_ios_ffi_bridge.so",
         "--language", "kotlin",
-        "--out-dir", "../android/app/src/main/java/com/godiegh/clipx"
+        "--out-dir", "../android/app/src/main/java"
     )
 }
 

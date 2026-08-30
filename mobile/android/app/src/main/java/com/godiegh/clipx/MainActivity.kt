@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        uniffi.rust_android_ios_ffi_bridge.initLogging()
+        com.godiegh.clipx.ffi.initLogging()
         setContent {
             ClipxTheme {
                 ClipxApp()
