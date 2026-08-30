@@ -55,7 +55,7 @@ tasks.register<Exec>("generateBindingsForFfiBridge") {
 
     inputs.file("../../native/target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so")
     inputs.file("../../native/rust-mobile-ffi-bridge/uniffi.toml")
-    outputs.dir("src/main/com/godiegh/clipx/ffi")
+    outputs.dir("src/main/java/com/godiegh/clipx/ffi")
 
     workingDir("../../native")
     commandLine(
