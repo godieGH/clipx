@@ -37,10 +37,14 @@ android {
 
 tasks.register<Exec>("buildRustAndroidFfiBridge") {
     group = "custom"
-    description = "This task builds the rust-android-ffi-bridge via uniffi."
+    description = "This task builds the rust-mobile-ffi-bridge for android via uniffi."
+
+    inputs.dir("../../native/rust-mobile-ffi-bridge/src")
+    inputs.file("../../native/rust-mobile-ffi-bridge/Cargo.toml")
+    outputs.dir("src/main/jniLibs")
 
     workingDir("../../native")
-    commandLine("cargo", "ndk", "-t", "arm64-v8a", "-t", "x86_64", "-o", "../android/app/src/main/jniLibs", "build", "--package", "rust-android-ios-ffi-bridge", "--release")
+    commandLine("cargo", "ndk", "-t", "arm64-v8a", "-t", "x86_64", "-o", "../android/app/src/main/jniLibs", "build", "--package", "rust-mobile-ffi-bridge", "--release")
 }
 
 tasks.register<Exec>("generateBindingsForFfiBridge") {
@@ -48,11 +52,16 @@ tasks.register<Exec>("generateBindingsForFfiBridge") {
     description = "This task generates ffi bindings to call rust from android kotlin/java"
 
     dependsOn("buildRustAndroidFfiBridge")
+
+    inputs.file("../../native/target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so")
+    inputs.file("../../native/rust-mobile-ffi-bridge/uniffi.toml")
+    outputs.dir("src/main/com/godiegh/clipx/ffi")
+
     workingDir("../../native")
     commandLine(
         "cargo", "run", "--bin", "uniffi-bindgen",
         "generate",
-        "--library", "target/aarch64-linux-android/release/librust_android_ios_ffi_bridge.so",
+        "--library", "target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so",
         "--language", "kotlin",
         "--out-dir", "../android/app/src/main/java"
     )
