@@ -1,3 +1,6 @@
 [workspace]
 members = ["rust-android-ios-ffi-bridge"]
 resolver = "2"
+
+[workspace.dependencies]
+clipx-core = {path = "../../desktop/clipx-core"}
