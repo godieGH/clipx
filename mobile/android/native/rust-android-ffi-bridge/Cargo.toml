@@ -7,4 +7,5 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-uniffi = { version = "0.29.5", features = ["cli"] }
+tokio = { version = "1.53.1", features = ["full"] }
+uniffi = { version = "0.29.5", features = ["cli", "tokio"] }
