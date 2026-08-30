@@ -35,16 +35,25 @@ android {
     }
 }
 
+val targetAbis = (findProperty("clipxAbis") as String? ?: "arm64-v8a")
+    .split(",")
+    .map { it.trim() }
+
 tasks.register<Exec>("buildRustAndroidFfiBridge") {
     group = "custom"
     description = "This task builds the rust-mobile-ffi-bridge for android via uniffi."
 
     inputs.dir("../../native/rust-mobile-ffi-bridge/src")
     inputs.file("../../native/rust-mobile-ffi-bridge/Cargo.toml")
+    inputs.property("targetAbis", targetAbis)
     outputs.dir("src/main/jniLibs")
 
     workingDir("../../native")
-    commandLine("cargo", "ndk", "-t", "arm64-v8a", "-t", "x86_64", "-o", "../android/app/src/main/jniLibs", "build", "--package", "rust-mobile-ffi-bridge", "--release")
+    val abiFlags = targetAbis.flatMap { listOf("-t", it) }
+    commandLine(
+        listOf("cargo", "ndk") + abiFlags +
+                listOf("-o", "../android/app/src/main/jniLibs", "build", "--package", "rust-mobile-ffi-bridge", "--release")
+    )
 }
 
 tasks.register<Exec>("generateBindingsForFfiBridge") {

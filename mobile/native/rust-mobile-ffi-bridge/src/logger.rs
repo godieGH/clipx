@@ -1,29 +1,40 @@
-#[allow(unused)]
-use log::LevelFilter;
+#![allow(unused)]
 
-// TODO: This should be os aware gated (internally so export seems agnostic) or made in a way it works crossly
-// for now we can just leave it android support — until ios comes up
+use tracing::Level;
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::layer::{Layer, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
+
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
 #[uniffi::export]
 pub fn init_logging() {
-    #[cfg(target_os = "android")]
-    {
-        android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(LevelFilter::Trace)
-                .with_tag("rust-android-ffi-bridge"),
-        );
+    INIT.call_once(|| {
+        #[cfg(target_os = "android")]
+        {
+            let bridge_filter = Targets::new().with_target("rust_mobile_ffi_bridge", Level::TRACE);
+            let core_filter = Targets::new().with_target("clipx_core", Level::TRACE);
 
-        use tracing_subscriber::layer::SubscriberExt;
-        use tracing_subscriber::util::SubscriberInitExt;
+            tracing_subscriber::registry()
+                .with(
+                    paranoid_android::layer("rust-mobile-ffi-bridge")
+                        .with_ansi(false)
+                        .with_filter(bridge_filter),
+                )
+                .with(
+                    paranoid_android::layer("clipx-core")
+                        .with_ansi(false)
+                        .with_filter(core_filter),
+                )
+                .init();
+        }
 
-        tracing_subscriber::registry()
-            .with(paranoid_android::layer("clipx-core"))
-            .init();
-    }
-
-    #[cfg(target_os = "ios")]
-    {
-        // could use the oslog crate, or tracing-oslog layer when we get there
-        todo!("Not implemeted yet")
-    }
+        #[cfg(target_os = "ios")]
+        {
+            // could use the oslog crate, or tracing-oslog layer when we get there
+            todo!("Not implemeted yet")
+        }
+    });
 }
