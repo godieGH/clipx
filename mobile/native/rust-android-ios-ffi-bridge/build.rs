@@ -4,11 +4,8 @@ fn main() {
 
     let target = std::env::var("TARGET").unwrap_or_default();
 
+    // android build with 16KB page alignment
     if target.contains("android") {
         println!("cargo:rustc-link-arg=-Wl,-z,max-page-size=16384");
-        
-        // Option B: If building directly via rust-lld without clang:
-        // println!("cargo:rustc-link-arg=-z");
-        // println!("cargo:rustc-link-arg=max-page-size=16384");
     }
 }

@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust-android-ios-ffi-bridge"]
+resolver = "2"
