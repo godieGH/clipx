@@ -75,7 +75,11 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation(libs.jna) {
+        artifact {
+            type = "aar"
+        }
+    }
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)

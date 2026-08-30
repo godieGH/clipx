@@ -2,6 +2,7 @@
   <dictionary name="project">
     <words>
       <w>clipx</w>
+      <w>uniffi</w>
     </words>
   </dictionary>
 </component>
