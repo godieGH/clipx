@@ -1,21 +1,32 @@
 use crate::message::proto::DeviceType;
 use directories::ProjectDirs;
 use std::{fs, path::PathBuf};
+use std::sync::OnceLock;
 
 const MACHINE_DEVICE_ID_FILE: &str = "device_id";
 const TRUSTED_DEVICES_FILE: &str = "trusted_devices.json";
 const IDENTITY_KEY_FILE: &str = "identity_key";
 const WEBSOCKET_SERVER_PORT: u32 = 8080;
 const CLIPBOARD_HISTORY_FILE: &str = "clipboard_history.json";
+static CONFIG_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn get_hostname() -> String {
     hostname::get().unwrap().to_string_lossy().into_owned()
 }
 
+/// This is for mobile OSes — since they need a way to tell the core
+/// where the config dir resides, this is defferent from desktops which already handles it
+pub fn set_config_root(path: PathBuf) {
+    let _ = CONFIG_ROOT.set(path);
+}
+
 fn config_dir() -> PathBuf {
-    let dirs = ProjectDirs::from("com", "godiegh", "clipx").unwrap();
-    fs::create_dir_all(dirs.config_dir()).unwrap();
-    dirs.config_dir().to_path_buf()
+    let dir = CONFIG_ROOT.get_or_init(|| {
+        let dirs = ProjectDirs::from("com", "godiegh", "clipx").unwrap();
+        dirs.config_dir().to_path_buf()
+    });
+    fs::create_dir_all(dir).unwrap();
+    dir.clone()
 }
 
 #[allow(unused)]
