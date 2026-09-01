@@ -7,7 +7,7 @@ use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStag
 use crate::device::{config, pairing};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
-use crate::notification::{NotificationEngine, PairDecision, Prompt};
+use crate::notification::{platform::NotificationEngine as Engine, NotificationEngine, PairDecision, Prompt};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -561,7 +561,7 @@ impl DeviceManager {
         let tx = notify_tx.clone();
         tokio::spawn(async move {
             let decision = engine
-                .ask(Prompt::PairRequest { peer_name }, Duration::from_secs(60))
+                .ask_pair(Prompt::PairRequest { peer_name }, Duration::from_secs(60))
                 .await;
             let _ = tx.send(NotifyResult::PairApproval {
                 device_id: dev_id,
@@ -607,7 +607,7 @@ impl DeviceManager {
         let tx = notify_tx.clone();
         tokio::spawn(async move {
             let decision = engine
-                .ask(
+                .ask_pair(
                     Prompt::ConfirmCode {
                         peer_name,
                         code: format!("{code:06}"),
@@ -692,7 +692,7 @@ impl DeviceManager {
         let tx = notify_tx.clone();
         tokio::spawn(async move {
             let decision = notify_engine
-                .ask(
+                .ask_pair(
                     Prompt::ConfirmCode {
                         peer_name,
                         code: format!("{code:06}"),

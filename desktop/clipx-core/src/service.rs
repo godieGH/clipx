@@ -1,4 +1,9 @@
-use crate::{clipboard::manager::ClipboardManager, device, netio};
+use crate::{
+    clipboard::manager::ClipboardManager,
+    device, netio,
+    notification::platform::PlatformNotificationEngine,
+    platform::{ClipboardSink, CoreEventListener, NotificationPrompter, PushEvents},
+};
 use device::identity::DeviceIdentity;
 use std::sync::Arc;
 use tokio::{
@@ -83,8 +88,7 @@ impl CoreService {
         // headroom, not an expected queue depth — every event is a
         // payload-free "go re-fetch" ping, so a lagged/slow client just
         // catches up on the next one.
-        let (ipc_events_tx, _) =
-            broadcast::channel::<crate::message::proto::clipx::IpcEvent>(32);
+        let (ipc_events_tx, _) = broadcast::channel::<crate::message::proto::clipx::IpcEvent>(32);
 
         let shutdown_for_transport = shutdown_rx.clone();
         let transport_task = tokio::spawn(async move {
@@ -197,4 +201,44 @@ mod tests {
         service.finish_stop();
         assert_eq!(service.state(), ServiceState::Stopped);
     }
+}
+
+pub async fn spawn_core_tasks(
+    _clipboard: Arc<dyn ClipboardSink>,
+    notifier: Arc<dyn NotificationPrompter>,
+    _events: Arc<dyn CoreEventListener>,
+) -> (Vec<JoinHandle<()>>, watch::Sender<bool>) {
+    // a bucket of tasks
+    let mut tasks = Vec::<JoinHandle<()>>::new();
+
+    // this creates or loads device identity so the core can use it fo devices identity
+    // later will think about this in different approach — this is just a prototype then
+    // we can just roll it simply
+    let _identity = Arc::new(DeviceIdentity::load_or_create(
+        device::config::identity_key_path(),
+    ));
+
+    // creates a notification_engine that wraps a platform notifier and so
+    let _notification_engine = PlatformNotificationEngine::new(notifier);
+
+    // a shutdown idea just like how desktop already behave
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let (_transport_tx, transport_rx) = mpsc::unbounded_channel();
+    let (peer_event_tx, _peer_event_rx) = mpsc::unbounded_channel();
+    let (_push_events_tx, _) = broadcast::channel::<PushEvents>(32);
+
+    let shutdown_for_transport = shutdown_rx.clone();
+    let transport_task = tokio::spawn(async move {
+        let transport = crate::netio::transport::Transport::create_transport(
+            shutdown_for_transport,
+            transport_rx,
+            peer_event_tx,
+        )
+        .await;
+        transport.run().await;
+    });
+    tasks.push(transport_task);
+
+    (tasks, shutdown_tx)
 }

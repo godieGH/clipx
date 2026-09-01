@@ -1,0 +1,24 @@
+{
+    "cSpell.words": [
+        "addrs",
+        "arboard",
+        "AUMID",
+        "clipstore",
+        "clipx",
+        "cmdres",
+        "dalek",
+        "DGRAM",
+        "humantime",
+        "ipcreq",
+        "nonblocking",
+        "oneshot",
+        "prost",
+        "REUSEADDR",
+        "REUSEPORT",
+        "serde",
+        "sess",
+        "tauri",
+        "termux",
+        "winrt"
+    ]
+}

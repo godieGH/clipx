@@ -1,4 +1,11 @@
-use super::{IncomingClipboardDecision, PairDecision, Prompt};
+//! when desktop os don't provide notification engine this stub stands out
+//! it ensures other parts of the app on all build target compiles
+//! Linux and Macos desktop later will provide a core baked provide a notification engine
+//! and gate the module at compile time — the stub then just says non of those three
+//! Just as windows does to ensure consistency but this stub still is important for non-windows, 
+//! non-Linux, and Non-macos desktops
+
+use super::{platform::NotificationEngine as Engine, IncomingClipboardDecision, PairDecision, Prompt};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -8,15 +15,18 @@ impl NotificationEngine {
     pub fn new() -> Self {
         Self
     }
+}
 
-    pub async fn ask(&self, prompt: Prompt, _timeout: Duration) -> PairDecision {
+impl Engine for NotificationEngine {
+
+    async fn ask_pair(&self, prompt: Prompt, _timeout: Duration) -> PairDecision {
         tracing::warn!(
             "notification engine not implemented on this platform — auto-denying: {prompt:?}"
         );
         PairDecision::NoResponse
     }
 
-    pub async fn ask_clipboard(
+    async fn ask_clipboard(
         &self,
         prompt: Prompt,
         _timeout: Duration,
@@ -28,7 +38,7 @@ impl NotificationEngine {
     }
 
     // stub_engine.rs
-    pub async fn notify_info(&self, title: &str, body: impl Into<String>) {
+    async fn notify_info(&self, title: &str, body: impl Into<String>) {
         tracing::info!("[{title}] {}", body.into());
     }
 }

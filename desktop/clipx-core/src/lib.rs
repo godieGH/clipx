@@ -5,3 +5,4 @@ pub mod message;
 pub mod netio;
 pub mod service;
 pub mod notification;
+pub mod platform;

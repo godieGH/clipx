@@ -1,7 +1,7 @@
 use super::clipstore::{ClipItem, ClipboardStore};
 use super::watcher;
 use crate::message::proto::clipx;
-use crate::notification::{IncomingClipboardDecision, NotificationEngine, Prompt};
+use crate::notification::{platform::NotificationEngine as Engine, IncomingClipboardDecision, NotificationEngine, Prompt};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, watch, broadcast};

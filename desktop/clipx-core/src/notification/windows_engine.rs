@@ -1,4 +1,4 @@
-use super::{IncomingClipboardDecision, PairDecision, Prompt};
+use super::{platform::NotificationEngine as Engine, IncomingClipboardDecision, PairDecision, Prompt};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,77 +19,7 @@ impl NotificationEngine {
         Self
     }
 
-    /// Shows a pairing prompt.
-    ///
-    /// Existing callers such as DeviceManager can continue using this API
-    /// and still receive a PairDecision.
-    pub async fn ask(
-        &self,
-        prompt: Prompt,
-        timeout: Duration,
-    ) -> PairDecision {
-        let (title, body) = prompt.render();
-
-        self.show_prompt(
-            &title,
-            &body,
-            timeout,
-            &[("Allow", "allow"), ("Deny", "deny")],
-            |action| match action {
-                Some("allow") => PairDecision::Allow,
-                Some("deny") => PairDecision::Deny,
-                _ => PairDecision::NoResponse,
-            },
-            PairDecision::NoResponse,
-        )
-        .await
-    }
-
-    /// Shows an incoming clipboard prompt.
-    ///
-    /// There is only one button. Dismissal, timeout, or failure is treated
-    /// as Ignore rather than being represented by a UI button.
-    pub async fn ask_clipboard(
-        &self,
-        prompt: Prompt,
-        timeout: Duration,
-    ) -> IncomingClipboardDecision {
-        let (title, body) = prompt.render();
-
-        self.show_prompt(
-            &title,
-            &body,
-            timeout,
-            &[("Copy to clipboard", "copy")],
-            |action| match action {
-                Some("copy") => IncomingClipboardDecision::Copy,
-                _ => IncomingClipboardDecision::Ignore,
-            },
-            IncomingClipboardDecision::Ignore,
-        )
-        .await
-    }
-
-    /// Shows an informational notification.
-    ///
-    /// No buttons and no waiting for a decision.
-    pub async fn notify_info(
-        &self,
-        title: &str,
-        body: impl Into<String>,
-    ) {
-        let title = title.to_string();
-        let body = body.into();
-
-        tokio::task::block_in_place(|| {
-            let _ = Toast::new(APP_ID)
-                .title(&title)
-                .text1(&body)
-                .show();
-        });
-    }
-
-    /// Shared implementation for all interactive Windows notifications.
+        /// Shared implementation for all interactive Windows notifications.
     ///
     /// The platform-specific toast mechanics live here exactly once.
     /// Individual notification types only provide their buttons,
@@ -170,6 +100,78 @@ impl NotificationEngine {
             // We stopped waiting. The toast may still be visible.
             Err(_) => map_action(None),
         }
+    }
+}
+
+impl Engine for NotificationEngine {
+    /// Shows a pairing prompt.
+    ///
+    /// Existing callers such as DeviceManager can continue using this API
+    /// and still receive a PairDecision.
+    async fn ask_pair(
+        &self,
+        prompt: Prompt,
+        timeout: Duration,
+    ) -> PairDecision {
+        let (title, body) = prompt.render();
+
+        self.show_prompt(
+            &title,
+            &body,
+            timeout,
+            &[("Allow", "allow"), ("Deny", "deny")],
+            |action| match action {
+                Some("allow") => PairDecision::Allow,
+                Some("deny") => PairDecision::Deny,
+                _ => PairDecision::NoResponse,
+            },
+            PairDecision::NoResponse,
+        )
+        .await
+    }
+
+    /// Shows an incoming clipboard prompt.
+    ///
+    /// There is only one button. Dismissal, timeout, or failure is treated
+    /// as Ignore rather than being represented by a UI button.
+    async fn ask_clipboard(
+        &self,
+        prompt: Prompt,
+        timeout: Duration,
+    ) -> IncomingClipboardDecision {
+        let (title, body) = prompt.render();
+
+        self.show_prompt(
+            &title,
+            &body,
+            timeout,
+            &[("Copy to clipboard", "copy")],
+            |action| match action {
+                Some("copy") => IncomingClipboardDecision::Copy,
+                _ => IncomingClipboardDecision::Ignore,
+            },
+            IncomingClipboardDecision::Ignore,
+        )
+        .await
+    }
+
+    /// Shows an informational notification.
+    ///
+    /// No buttons and no waiting for a decision.
+    async fn notify_info(
+        &self,
+        title: &str,
+        body: impl Into<String>,
+    ) {
+        let title = title.to_string();
+        let body = body.into();
+
+        tokio::task::block_in_place(|| {
+            let _ = Toast::new(APP_ID)
+                .title(&title)
+                .text1(&body)
+                .show();
+        });
     }
 }
 
