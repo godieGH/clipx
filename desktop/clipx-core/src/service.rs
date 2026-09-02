@@ -1,7 +1,7 @@
 use crate::{
     clipboard::manager::ClipboardManager,
     device, netio,
-    platform::{ClipboardSink, CoreEventListener, PushEvents},
+    platform::{ClipboardSink, CoreEvent, CoreEventListener},
 };
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -73,7 +73,7 @@ impl CoreService {
 
         let clipboard_sink = ArboardClipboardSink::new();
         let notification_engine = crate::notification::NotificationEngine::new();
-        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, ipc_events_tx) =
+        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx) =
             spawn_core_tasks(clipboard_sink, notification_engine.clone(), None);
         self.tasks = tasks;
         self.shutdown_tx = Some(shutdown_tx.clone());
@@ -83,7 +83,7 @@ impl CoreService {
             shutdown_tx.subscribe(),
             device_tx,
             clipboard_cmd_tx,
-            ipc_events_tx,
+            core_events_tx,
         );
         self.tasks.push(tokio::spawn(async move { ipc_service.start().await }));
         
@@ -139,7 +139,7 @@ pub fn spawn_core_tasks<S, N>(
     watch::Sender<bool>,
     mpsc::UnboundedSender<crate::clipboard::manager::ClipboardCommand>,
     mpsc::UnboundedSender<crate::device::manager::DeviceCommands>,
-    broadcast::Sender<PushEvents>,
+    broadcast::Sender<CoreEvent>,
 )
 where
     S: ClipboardSink + 'static,
@@ -157,7 +157,7 @@ where
     let (device_tx, device_rx) = mpsc::unbounded_channel();
     let (transport_tx, transport_rx) = mpsc::unbounded_channel();
     let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
-    let (events_tx, _) = broadcast::channel::<PushEvents>(32);
+    let (events_tx, _) = broadcast::channel::<CoreEvent>(32);
 
     let shutdown_for_transport = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -227,10 +227,17 @@ where
                     }
                     result = events_rx.recv() => {
                         match result {
-                            Ok(event) => match event.event {
-                                Some(crate::message::proto::clipx::ipc_event::Event::DevicesChanged(_)) => events.on_device_change(),
-                                Some(crate::message::proto::clipx::ipc_event::Event::ClipboardChanged(_)) => events.on_clipboard_change(),
-                                _ => {}
+                            Ok(event) => match event {
+                                crate::platform::CoreEvent::DevicesChanged => events.on_device_change(),
+                                crate::platform::CoreEvent::ClipboardChanged => events.on_clipboard_change(),
+                                crate::platform::CoreEvent::PairingChanged { device_id, state, message } => {
+                                    let state = match state {
+                                        crate::platform::PairingEventState::Started => 0,
+                                        crate::platform::PairingEventState::Failed => 1,
+                                        crate::platform::PairingEventState::Succeeded => 2,
+                                    };
+                                    events.on_pairing_change(device_id, state, message);
+                                }
                             },
                             Err(broadcast::error::RecvError::Lagged(_)) => continue,
                             Err(broadcast::error::RecvError::Closed) => break,

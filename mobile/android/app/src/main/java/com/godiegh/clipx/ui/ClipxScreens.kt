@@ -221,6 +221,7 @@ fun PairNewDeviceScreen(
     onBack: () -> Unit,
     requestId: String?,
     onPair: (String) -> Unit,
+    onCantSeeDevice: () -> Unit,
 ) {
     val palette = LocalClipxPalette.current
     val listState = rememberLazyListState()
@@ -237,7 +238,7 @@ fun PairNewDeviceScreen(
                 ScanRadar()
                 Text("Scanning for Clipx devices…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
                 Text(
-                    "Make sure the other device has Clipx open and is discoverable.",
+                    "Make sure the other device has Clipx app open and is discoverable.",
                     color = palette.mutedText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),
@@ -257,7 +258,7 @@ fun PairNewDeviceScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                TextButton(onClick = { }) {
+                TextButton(onClick = onCantSeeDevice) {
                     Text(
                         "Can’t see your device?",
                         color = MaterialTheme.colorScheme.primary,
@@ -271,7 +272,7 @@ fun PairNewDeviceScreen(
 }
 
 @Composable
-fun ThisDeviceScreen(onBack: () -> Unit) {
+fun ThisDeviceScreen(identity: com.godiegh.clipx.ThisDeviceInfo?, onBack: () -> Unit) {
     val palette = LocalClipxPalette.current
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
@@ -284,18 +285,18 @@ fun ThisDeviceScreen(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
             ) {
-                DeviceAvatar(DeviceType.ANDROID, size = 66.dp)
+                DeviceAvatar(identity?.deviceType ?: DeviceType.ANDROID, size = 66.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Pixel 7 Pro",
+                        identity?.name ?: "This device",
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "Android • Pixel 7 Pro",
+                        "${(identity?.deviceType ?: DeviceType.ANDROID).name.lowercase().replaceFirstChar { it.uppercase() }} • ${identity?.name ?: "Unknown"}",
                         color = palette.mutedText,
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
@@ -305,24 +306,60 @@ fun ThisDeviceScreen(onBack: () -> Unit) {
         }
         item {
             GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                InfoPair("Device Name", "Pixel 7 Pro", Modifier.fillMaxWidth())
+                InfoPair("Device Name", identity?.name ?: "Unknown", Modifier.fillMaxWidth())
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
                     thickness = DividerDefaults.Thickness,
                     color = palette.divider
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                    InfoPair("IP Address", "192.168.1.105", Modifier.weight(1f))
-                    InfoPair("Port", "8765", Modifier.weight(1f))
+                    InfoPair("IP Address", identity?.ipAddress ?: "Unknown", Modifier.weight(1f))
+                    InfoPair("Port", identity?.wsPort?.toString() ?: "Unknown", Modifier.weight(1f))
                 }
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
                     thickness = DividerDefaults.Thickness,
                     color = palette.divider
                 )
-                InfoPair("Fingerprint", formatFingerprint("E7F12A3B4C5D6E7F8899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF"))
+                InfoPair("Fingerprint", formatFingerprint(identity?.fingerprint.orEmpty()))
             }
         }
+        }
+    }
+}
+
+@Composable
+fun CantSeeDeviceScreen(onBack: () -> Unit) {
+    val palette = LocalClipxPalette.current
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader("Can’t see your device?", onBack, elevated = elevated)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            item {
+                GlassCard {
+                    Text("Connect over the same Wi-Fi", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "For now Clipx discovers devices on your local network. Put this phone and the other device on the same Wi-Fi network, then keep Clipx open on both devices.",
+                        color = palette.mutedText,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text("1. Join the same Wi-Fi network on both devices.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text("2. Open Clipx on the other device and keep it running.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text("3. Return here and open Scan again.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Wi-Fi Direct support can be added later without changing this pairing flow.", color = palette.mutedText, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }

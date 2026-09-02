@@ -1,5 +1,5 @@
 use super::clipstore::{ClipItem, ClipboardStore};
-use crate::message::proto::clipx;
+use crate::platform::CoreEvent;
 use crate::notification::{platform::NotificationEngine as Engine, IncomingClipboardDecision, Prompt};
 use crate::platform::ClipboardSink;
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
     /// Pushed to every IPC client whenever history actually changes —
     /// add/remove/clear. Owned by the IPC layer's broadcast channel; this
     /// manager only ever sends into it, never reads from it.
-    events_tx: broadcast::Sender<clipx::IpcEvent>,
+    events_tx: broadcast::Sender<CoreEvent>,
 }
 
 impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E, S> {
@@ -80,7 +80,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         notification: E,
         clipboard_sink: S,
         outbound_tx: mpsc::UnboundedSender<String>,
-        events_tx: broadcast::Sender<clipx::IpcEvent>,
+        events_tx: broadcast::Sender<CoreEvent>,
     ) -> Self {
         let store = ClipboardStore::load(history_path, max_history);
         let last_known_content = store
@@ -102,11 +102,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
 
     fn notify_clipboard_changed(&self) {
-        let _ = self.events_tx.send(clipx::IpcEvent {
-            event: Some(clipx::ipc_event::Event::ClipboardChanged(
-                clipx::ClipboardChangedEvent {},
-            )),
-        });
+        let _ = self.events_tx.send(CoreEvent::ClipboardChanged);
     }
 
     /// Owns the watcher task's lifetime internally — nothing outside this

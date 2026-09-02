@@ -1416,6 +1416,7 @@ dependencies = [
  "clipx-core",
  "log",
  "paranoid-android",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",

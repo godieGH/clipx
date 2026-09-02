@@ -1,15 +1,91 @@
 use std::sync::Arc;
 
+use clipx_core::device::manager::{DeviceCommands, SeenMode};
+use clipx_core::message::proto::{DeviceType, ConnectionState};
 use clipx_core::notification::platform::{PlatformNotificationEngine, PromptResult};
 use tokio::task::JoinHandle;
 
 use crate::platform::{
-    ClipboardPlatform, ClipxEventAdapter, ClipxEventListener, ClipboardSinkAdapter,
+    ClipboardPlatform, ClipxEventListener, ClipboardSinkAdapter,
     NotificationAdapter, NotificationPlatform, NotifierDecision,
 };
 
-/// The FFI bridge wrapper for the core service. It owns the running core
-/// tasks and the channels Android uses to report host-side events.
+#[derive(uniffi::Record, Clone)]
+pub struct MobileIdentity {
+    pub id: String,
+    pub name: String,
+    pub fingerprint: String,
+    pub device_type: String,
+    pub ip_address: String,
+    pub ws_port: u32,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct MobilePairedDevice {
+    pub id: String,
+    pub name: String,
+    pub device_type: String,
+    pub connection: String,
+    pub ip_address: String,
+    pub ws_port: u32,
+    pub auto_connect: bool,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct MobileAvailableDevice {
+    pub id: String,
+    pub name: String,
+    pub device_type: String,
+}
+
+#[derive(uniffi::Record, Clone)]
+pub struct MobileClipItem {
+    pub id: String,
+    pub content: String,
+    pub source_device: String,
+    pub received_at_ms: u64,
+}
+
+fn device_type_name(value: DeviceType) -> String {
+    match value {
+        DeviceType::Windows => "windows",
+        DeviceType::Android => "android",
+        DeviceType::Linux => "linux",
+        DeviceType::Macos => "macos",
+        DeviceType::Ios => "ios",
+        DeviceType::Unspecified => "unknown",
+    }.to_string()
+}
+
+#[derive(uniffi::Error, Debug, thiserror::Error)]
+pub enum BridgeError {
+    #[error("{reason}")]
+    Message { reason: String },
+}
+
+impl From<String> for BridgeError {
+    fn from(reason: String) -> Self {
+        Self::Message { reason }
+    }
+}
+
+impl From<&str> for BridgeError {
+    fn from(reason: &str) -> Self {
+        Self::Message { reason: reason.to_string() }
+    }
+}
+
+fn connection_name(value: ConnectionState) -> String {
+    match value {
+        ConnectionState::Disconnected => "disconnected",
+        ConnectionState::Connecting => "connecting",
+        ConnectionState::Connected => "connected",
+        ConnectionState::Unavailable => "unavailable",
+    }.to_string()
+}
+
+/// The FFI bridge wrapper for the running core. It owns the core task handles
+/// and exposes platform-neutral commands/events to Android/iOS.
 #[derive(uniffi::Object)]
 pub struct BridgeService {
     inner: tokio::sync::Mutex<Inner>,
@@ -20,8 +96,7 @@ struct Inner {
     tasks: Vec<JoinHandle<()>>,
     shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     clipboard_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<clipx_core::clipboard::manager::ClipboardCommand>>,
-    device_tx: Option<tokio::sync::mpsc::UnboundedSender<clipx_core::device::manager::DeviceCommands>>,
-    core_events_tx: Option<tokio::sync::broadcast::Sender<clipx_core::platform::PushEvents>>,
+    device_tx: Option<tokio::sync::mpsc::UnboundedSender<DeviceCommands>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -50,23 +125,22 @@ impl BridgeService {
         let clipboard_adapter = ClipboardSinkAdapter(clipboard);
         let notifier_adapter = NotificationAdapter(notifier);
         let notification_engine = PlatformNotificationEngine::new(Arc::new(notifier_adapter));
-        let event_adapter = Arc::new(ClipxEventAdapter(event));
+        let event_listener: Arc<dyn clipx_core::platform::CoreEventListener> =
+            Arc::new(crate::platform::ClipxEventAdapter(event));
 
-        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, events_tx) =
+        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, _events_tx) =
             clipx_core::service::spawn_core_tasks(
                 clipboard_adapter,
                 notification_engine,
-                Some(event_adapter),
+                Some(event_listener),
             );
 
         inner.tasks = tasks;
         inner.shutdown_tx = Some(shutdown_tx);
         inner.clipboard_cmd_tx = Some(clipboard_cmd_tx);
         inner.device_tx = Some(device_tx);
-        inner.core_events_tx = Some(events_tx);
     }
 
-    /// Resolves an interactive prompt created by the core notification engine.
     pub fn resolve_prompt(&self, prompt_id: String, result: NotifierDecision) {
         let result = match result {
             NotifierDecision::PairDecision(value) => {
@@ -90,7 +164,6 @@ impl BridgeService {
         clipx_core::notification::platform::resolve_prompt(prompt_id, result);
     }
 
-    /// Reports a change detected by Android's system clipboard listener.
     pub async fn report_clipboard_changed(&self, content: String) {
         let tx = self.inner.lock().await.clipboard_cmd_tx.clone();
         if let Some(tx) = tx {
@@ -98,23 +171,183 @@ impl BridgeService {
         }
     }
 
-    /// Stops all core tasks and waits for them to finish.
+    pub async fn get_identity(&self) -> Result<MobileIdentity, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::GetIdentity { reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        let identity = reply_rx.await.map_err(|_| "core device manager is stopped".to_string())?;
+        Ok(MobileIdentity {
+            fingerprint: identity.device_id.clone(),
+            id: identity.device_id,
+            name: identity.device_name,
+            device_type: device_type_name(identity.device_type),
+            ip_address: identity.ip_addr,
+            ws_port: identity.ws_port,
+        })
+    }
+
+    pub async fn get_paired_devices(&self) -> Result<Vec<MobilePairedDevice>, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::GetPaired { reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        let devices = reply_rx.await.map_err(|_| "core device manager is stopped".to_string())?;
+        devices
+            .into_iter()
+            .map(|device| {
+                let connection = ConnectionState::try_from(device.connection)
+                    .map_err(|_| format!("invalid connection state {}", device.connection))?;
+                let device_type = DeviceType::try_from(device.device_type)
+                    .map_err(|_| format!("invalid device type {}", device.device_type))?;
+                Ok(MobilePairedDevice {
+                    id: device.id,
+                    name: device.name,
+                    device_type: device_type_name(device_type),
+                    connection: connection_name(connection),
+                    ip_address: device.address,
+                    ws_port: device.ws_port,
+                    auto_connect: device.auto_connect,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn get_available_devices(&self) -> Result<Vec<MobileAvailableDevice>, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::GetSeen {
+            mode: SeenMode::Untrusted,
+            reply_to: reply_tx,
+        })
+        .map_err(|_| "core device manager is stopped".to_string())?;
+        let devices = reply_rx.await.map_err(|_| "core device manager is stopped".to_string())?;
+        Ok(devices
+            .into_iter()
+            .map(|device| MobileAvailableDevice {
+                id: device.id,
+                name: device.name,
+                device_type: device_type_name(device.device_type),
+            })
+            .collect())
+    }
+
+    pub async fn pair_device(&self, device_id: String) -> Result<String, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::Pair { device_id, reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn connect_device(&self, device_id: String) -> Result<String, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::Connect { device_id, reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn disconnect_device(&self, device_id: String) -> Result<String, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::Disconnect { device_id, reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn set_auto_connect(&self, device_id: String, auto_connect: bool) -> Result<bool, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::SetAutoConnect { device_id, auto_connect, reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn forget_device(&self, device_id: String) -> Result<String, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::ForgetDevice { device_id, reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn get_clipboard_history(&self, limit: u32) -> Result<Vec<MobileClipItem>, BridgeError> {
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let limit = if limit == 0 { None } else { Some(limit as usize) };
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::GetHistory { limit, reply_to: reply_tx })
+            .map_err(|_| "core clipboard manager is stopped".to_string())?;
+        let items = reply_rx
+            .await
+            .map_err(|_| "core clipboard manager is stopped".to_string())
+            .map_err(BridgeError::from)?;
+        Ok(items.into_iter().map(|item| MobileClipItem {
+            id: item.id,
+            content: item.content,
+            source_device: item.source_device,
+            received_at_ms: item.received_at_ms,
+        }).collect())
+    }
+
+    pub async fn remove_clipboard_entry(&self, id: String) -> Result<bool, BridgeError> {
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::RemoveEntry { id, reply_to: reply_tx })
+            .map_err(|_| "core clipboard manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core clipboard manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn clear_clipboard_history(&self) -> Result<(), BridgeError> {
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::ClearHistory { reply_to: reply_tx })
+            .map_err(|_| "core clipboard manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core clipboard manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
     pub async fn stop(&self) {
         let (shutdown_tx, tasks) = {
             let mut inner = self.inner.lock().await;
             let shutdown_tx = inner.shutdown_tx.take();
             inner.clipboard_cmd_tx = None;
             inner.device_tx = None;
-            inner.core_events_tx = None;
             (shutdown_tx, std::mem::take(&mut inner.tasks))
         };
 
         if let Some(tx) = shutdown_tx {
             let _ = tx.send(true);
         }
-
         for task in tasks {
             let _ = task.await;
         }
+    }
+}
+
+impl BridgeService {
+    async fn device_sender(&self) -> Result<tokio::sync::mpsc::UnboundedSender<DeviceCommands>, String> {
+        self.inner.lock().await.device_tx.clone().ok_or_else(|| "core device manager is stopped".to_string())
     }
 }

@@ -45,4 +45,8 @@ impl clipx_core::platform::CoreEventListener for ClipxEventAdapter {
     fn on_device_change(&self) {
         self.0.on_device_change();
     }
+
+    fn on_pairing_change(&self, device_id: String, state: u8, message: String) {
+        self.0.on_pairing_change(device_id, state, message);
+    }
 }

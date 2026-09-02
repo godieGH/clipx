@@ -23,4 +23,5 @@ pub trait NotificationPlatform: Send + Sync {
 pub trait ClipxEventListener: Send + Sync {
     fn on_device_change(&self);
     fn on_clipboard_change(&self);
+    fn on_pairing_change(&self, device_id: String, state: u8, message: String);
 }

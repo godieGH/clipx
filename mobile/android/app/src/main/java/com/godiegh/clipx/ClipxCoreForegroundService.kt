@@ -23,6 +23,7 @@ class ClipxCoreForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "clipx_core"
         private const val NOTIFICATION_ID = 1001
+        const val PROMPT_CHANNEL_ID = "clipx_prompts"
 
         fun start(context: android.content.Context) {
             val intent = Intent(context, ClipxCoreForegroundService::class.java)
@@ -45,7 +46,8 @@ class ClipxCoreForegroundService : Service() {
         bridgeService = BridgeService()
         clipboardPlatform = AndroidClipboardPlatform(this, bridgeService)
         notificationPlatform = AndroidNotificationPlatform(this, bridgeService)
-        eventListener = AndroidCoreEventListener()
+        eventListener = AndroidCoreEventListener(application as ClipxApplication)
+        (application as ClipxApplication).onActiveClipboardCheck = { clipboardPlatform.checkClipboardNow() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -62,6 +64,12 @@ class ClipxCoreForegroundService : Service() {
                 notifier = notificationPlatform,
                 event = eventListener,
             )
+            // Only now is device_tx/clipboard_cmd_tx actually wired up on the
+            // Rust side — publishing any earlier lets the ViewModel's
+            // awaitBridgeService() unblock and call getIdentity() before the
+            // core can answer it, so it silently fails and identity stays
+            // "Unknown" until something else forces a re-fetch.
+            (application as ClipxApplication).setBridgeService(bridgeService)
         }
 
         return START_STICKY
@@ -86,13 +94,17 @@ class ClipxCoreForegroundService : Service() {
             listening = false
         }
 
+        (application as ClipxApplication).onActiveClipboardCheck = null
+
         if (wait) {
             runBlocking { bridgeService.stop() }
+            (application as ClipxApplication).setBridgeService(null)
             return
         }
 
         scope.launch {
             bridgeService.stop()
+            (application as ClipxApplication).setBridgeService(null)
             stopSelf()
         }
     }
@@ -123,6 +135,13 @@ class ClipxCoreForegroundService : Service() {
                 "Clipx core service",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply { setShowBadge(false) },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                PROMPT_CHANNEL_ID,
+                "Clipx requests",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply { setShowBadge(true) },
         )
     }
 

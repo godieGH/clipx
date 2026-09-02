@@ -2,6 +2,7 @@ use crate::{
     clipboard::manager::ClipboardCommand,
     device::manager::{DeviceCommands, SeenMode},
     message::proto::clipx,
+    platform::{CoreEvent, PairingEventState},
 };
 use futures_util::{SinkExt, StreamExt};
 use interprocess::local_socket::{
@@ -20,7 +21,7 @@ pub struct IpcService {
     core_service_shutdown_rx: watch::Receiver<bool>,
     device_tx: UnboundedSender<DeviceCommands>,
     clipboard_tx: UnboundedSender<ClipboardCommand>,
-    events_tx: broadcast::Sender<clipx::IpcEvent>,
+    events_tx: broadcast::Sender<CoreEvent>,
     tracker: TaskTracker,
 }
 
@@ -30,7 +31,7 @@ impl IpcService {
         shutdown_rx: watch::Receiver<bool>,
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
-        events_tx: broadcast::Sender<clipx::IpcEvent>,
+        events_tx: broadcast::Sender<CoreEvent>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -93,7 +94,7 @@ impl IpcService {
         conn: LocalStream,
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
-        events_tx: broadcast::Sender<clipx::IpcEvent>,
+        events_tx: broadcast::Sender<CoreEvent>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
         let mut ws = accept_async(conn).await?;
@@ -116,6 +117,28 @@ impl IpcService {
                 event = events_rx.recv() => {
                     match event {
                         Ok(event) => {
+                            let event = match event {
+                                CoreEvent::DevicesChanged => clipx::IpcEvent {
+                                    event: Some(clipx::ipc_event::Event::DevicesChanged(clipx::DevicesChangedEvent {})),
+                                },
+                                CoreEvent::ClipboardChanged => clipx::IpcEvent {
+                                    event: Some(clipx::ipc_event::Event::ClipboardChanged(clipx::ClipboardChangedEvent {})),
+                                },
+                                CoreEvent::PairingChanged { device_id, state, message } => {
+                                    let state = match state {
+                                        PairingEventState::Started => clipx::pairing_event::State::Started,
+                                        PairingEventState::Failed => clipx::pairing_event::State::Failed,
+                                        PairingEventState::Succeeded => clipx::pairing_event::State::Succeeded,
+                                    };
+                                    clipx::IpcEvent {
+                                        event: Some(clipx::ipc_event::Event::PairingEvent(clipx::PairingEvent {
+                                            device_id,
+                                            state: state as i32,
+                                            message,
+                                        })),
+                                    }
+                                }
+                            };
                             let envelope = clipx::IpcServerMessage {
                                 payload: Some(clipx::ipc_server_message::Payload::Event(event)),
                             };

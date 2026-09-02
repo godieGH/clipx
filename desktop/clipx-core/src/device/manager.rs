@@ -8,6 +8,7 @@ use crate::device::{config, pairing};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{platform::NotificationEngine as Engine, PairDecision, Prompt};
+use crate::platform::CoreEvent;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -33,7 +34,7 @@ pub struct DeviceManager<E: Engine> {
     /// changes — pairing, connect/disconnect, forget, auto-connect,
     /// availability flips. Send-only from here; the IPC layer owns the
     /// receiving/fan-out side.
-    events_tx: broadcast::Sender<proto::IpcEvent>,
+    events_tx: broadcast::Sender<CoreEvent>,
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -117,7 +118,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
         notification: E,
         clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
-        events_tx: broadcast::Sender<proto::IpcEvent>,
+        events_tx: broadcast::Sender<CoreEvent>,
     ) -> Self {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         Self {
@@ -139,22 +140,20 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     /// Fires a payload-free "something about paired/connection state
     /// changed, go re-fetch" ping to every currently-connected IPC client.
     fn notify_devices_changed(&self) {
-        let _ = self.events_tx.send(proto::IpcEvent {
-            event: Some(proto::ipc_event::Event::DevicesChanged(
-                proto::DevicesChangedEvent {},
-            )),
-        });
+        let _ = self.events_tx.send(CoreEvent::DevicesChanged);
     }
 
     fn notify_pair_events(&self, device_id: &str, state: i32, message: &str) {
-        let _ = self.events_tx.send(proto::IpcEvent {
-            event: Some(proto::ipc_event::Event::PairingEvent(
-                proto::PairingEvent {
-                    device_id: device_id.to_string(),
-                    state,
-                    message: message.to_string(),
-                }
-            ))
+        let state = match proto::pairing_event::State::try_from(state) {
+            Ok(proto::pairing_event::State::Started) => crate::platform::PairingEventState::Started,
+            Ok(proto::pairing_event::State::Failed) => crate::platform::PairingEventState::Failed,
+            Ok(proto::pairing_event::State::Succeeded) => crate::platform::PairingEventState::Succeeded,
+            Err(_) => return,
+        };
+        let _ = self.events_tx.send(CoreEvent::PairingChanged {
+            device_id: device_id.to_string(),
+            state,
+            message: message.to_string(),
         });
     }
 
@@ -294,6 +293,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             device_id.to_string(),
             PairSession::new_initiator(addr, seen.device_type),
         );
+        self.notify_pair_events(device_id, proto::pairing_event::State::Started as i32, "pairing started");
         self.dial(device_id, addr);
         "pairing started".to_string()
     }

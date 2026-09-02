@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 [dependencies]
 tokio = { version = "1.53.1", features = ["full"] }
 uniffi = { version = "0.29.5", features = ["cli", "tokio"] }
+thiserror = "2"
 
 # load clipx-core lib so ffi can reuse the core functionality and expose uniffied APIs
 clipx-core = {workspace = true}

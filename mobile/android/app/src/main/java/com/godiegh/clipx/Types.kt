@@ -52,3 +52,12 @@ data class ClipItem(
     val timestamp: Long,
     val type: ClipType, // IMAGE, TEXT, FILE, CODE
 )
+
+data class ThisDeviceInfo(
+    val id: String,
+    val name: String,
+    val fingerprint: String,
+    val deviceType: DeviceType,
+    val ipAddress: String,
+    val wsPort: Int,
+)

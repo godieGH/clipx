@@ -46,10 +46,30 @@ pub trait NotificationPrompter: Send + Sync {
     fn notify_info(&self, title: String, message: String);
 }
 
+/// Platform-neutral events emitted by core. Desktop IPC and mobile FFI are
+/// adapters at the edge; core itself has no knowledge of either transport.
+#[derive(Debug, Clone)]
+pub enum CoreEvent {
+    DevicesChanged,
+    ClipboardChanged,
+    PairingChanged {
+        device_id: String,
+        state: PairingEventState,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PairingEventState {
+    Started,
+    Failed,
+    Succeeded,
+}
+
 /// Platform implements this so core can push coarse-grained state changes back to a host UI.
 pub trait CoreEventListener: Send + Sync {
     fn on_device_change(&self);
     fn on_clipboard_change(&self);
-}
 
-pub type PushEvents = crate::message::proto::clipx::IpcEvent;
+    fn on_pairing_change(&self, _device_id: String, _state: u8, _message: String) {}
+}
