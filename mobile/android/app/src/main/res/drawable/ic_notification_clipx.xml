@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:name="clip"
+        android:pivotX="256"
+        android:pivotY="256"
+        android:rotation="45"
+        android:scaleX="1.5"
+        android:scaleY="1.5">
+        <path
+            android:pathData="M 280 278
+                               L 280 208
+                               A 24 24 0 0 0 232 208
+                               L 232 368
+                               A 48 48 0 0 0 328 368
+                               L 328 168
+                               A 72 72 0 0 0 184 168
+                               L 184 328"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="32"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:fillColor="#00000000" />
+    </group>
+</vector>

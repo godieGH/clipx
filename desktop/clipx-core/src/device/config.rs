@@ -9,13 +9,24 @@ const IDENTITY_KEY_FILE: &str = "identity_key";
 const WEBSOCKET_SERVER_PORT: u32 = 8080;
 const CLIPBOARD_HISTORY_FILE: &str = "clipboard_history.json";
 static CONFIG_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static DEVICE_NAME_OVERRIDE: OnceLock<String> = OnceLock::new();
+
+/// For mobile Oses — Android/Ios have a real human-readable device name
+/// that only the platform layer can resolve, so it's supplied here the
+/// same way the config root is
+pub fn set_device_name_override(name: String) {
+    let _ = DEVICE_NAME_OVERRIDE.set(name);
+}
 
 pub fn get_hostname() -> String {
+    if let Some(name) = DEVICE_NAME_OVERRIDE.get() {
+        return name.clone();
+    }
     hostname::get().unwrap().to_string_lossy().into_owned()
 }
 
 /// This is for mobile OSes — since they need a way to tell the core
-/// where the config dir resides, this is defferent from desktops which already handles it
+/// where the config dir resides, this is different from desktops which already handles it
 pub fn set_config_root(path: PathBuf) {
     let _ = CONFIG_ROOT.set(path);
 }

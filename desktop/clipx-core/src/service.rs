@@ -9,10 +9,12 @@ use crate::platform::ArboardClipboardSink;
 use device::identity::DeviceIdentity;
 use std::sync::Arc;
 use tokio::{
-    signal,
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
 };
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use tokio::signal;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ServiceState {
@@ -24,7 +26,9 @@ pub enum ServiceState {
 
 pub struct CoreService {
     state: ServiceState,
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     shutdown_tx: Option<watch::Sender<bool>>,
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -32,7 +36,9 @@ impl Default for CoreService {
     fn default() -> Self {
         Self {
             state: ServiceState::Stopped,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             shutdown_tx: None,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             tasks: vec![],
         }
     }
@@ -80,7 +86,7 @@ impl CoreService {
             ipc_events_tx,
         );
         self.tasks.push(tokio::spawn(async move { ipc_service.start().await }));
-
+        
         signal::ctrl_c().await?;
 
         self.stop();
@@ -88,6 +94,7 @@ impl CoreService {
         Ok(())
     }
 
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     async fn shutdown(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(true);
@@ -150,7 +157,7 @@ where
     let (device_tx, device_rx) = mpsc::unbounded_channel();
     let (transport_tx, transport_rx) = mpsc::unbounded_channel();
     let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
-    let (ipc_events_tx, _) = broadcast::channel::<PushEvents>(32);
+    let (events_tx, _) = broadcast::channel::<PushEvents>(32);
 
     let shutdown_for_transport = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -170,7 +177,7 @@ where
         notification_engine.clone(),
         clipboard_sink,
         clipboard_out_tx,
-        ipc_events_tx.clone(),
+        events_tx.clone(),
     );
     let shutdown_for_clipboard = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -194,7 +201,7 @@ where
         Some(transport_tx),
         notification_engine,
         clipboard_cmd_tx.clone(),
-        ipc_events_tx.clone(),
+        events_tx.clone(),
     );
     let shutdown_for_device_manager = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -210,7 +217,7 @@ where
     }));
 
     if let Some(events) = events {
-        let mut events_rx = ipc_events_tx.subscribe();
+        let mut events_rx = events_tx.subscribe();
         let mut shutdown_for_events = shutdown_rx.clone();
         tasks.push(tokio::spawn(async move {
             loop {
@@ -234,5 +241,5 @@ where
         }));
     }
 
-    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, ipc_events_tx)
+    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, events_tx)
 }

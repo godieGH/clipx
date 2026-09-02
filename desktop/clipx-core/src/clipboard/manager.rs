@@ -1,11 +1,13 @@
 use super::clipstore::{ClipItem, ClipboardStore};
-use super::watcher;
 use crate::message::proto::clipx;
 use crate::notification::{platform::NotificationEngine as Engine, IncomingClipboardDecision, Prompt};
 use crate::platform::ClipboardSink;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, watch, broadcast};
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use super::watcher;
 
 /// Result of a toast fed back into the manager's own select loop.
 /// `NotificationEngine::ask_clipboard()` can take up to its timeout, so

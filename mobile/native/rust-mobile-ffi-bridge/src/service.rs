@@ -21,7 +21,7 @@ struct Inner {
     shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     clipboard_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<clipx_core::clipboard::manager::ClipboardCommand>>,
     device_tx: Option<tokio::sync::mpsc::UnboundedSender<clipx_core::device::manager::DeviceCommands>>,
-    ipc_events_tx: Option<tokio::sync::broadcast::Sender<clipx_core::platform::PushEvents>>,
+    core_events_tx: Option<tokio::sync::broadcast::Sender<clipx_core::platform::PushEvents>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -34,6 +34,7 @@ impl BridgeService {
     pub async fn start(
         &self,
         data_dir: String,
+        device_name: String,
         clipboard: Arc<dyn ClipboardPlatform>,
         notifier: Arc<dyn NotificationPlatform>,
         event: Arc<dyn ClipxEventListener>,
@@ -44,13 +45,14 @@ impl BridgeService {
         }
 
         clipx_core::device::config::set_config_root(std::path::PathBuf::from(data_dir));
+        clipx_core::device::config::set_device_name_override(device_name);
 
         let clipboard_adapter = ClipboardSinkAdapter(clipboard);
         let notifier_adapter = NotificationAdapter(notifier);
         let notification_engine = PlatformNotificationEngine::new(Arc::new(notifier_adapter));
         let event_adapter = Arc::new(ClipxEventAdapter(event));
 
-        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, ipc_events_tx) =
+        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, events_tx) =
             clipx_core::service::spawn_core_tasks(
                 clipboard_adapter,
                 notification_engine,
@@ -61,7 +63,7 @@ impl BridgeService {
         inner.shutdown_tx = Some(shutdown_tx);
         inner.clipboard_cmd_tx = Some(clipboard_cmd_tx);
         inner.device_tx = Some(device_tx);
-        inner.ipc_events_tx = Some(ipc_events_tx);
+        inner.core_events_tx = Some(events_tx);
     }
 
     /// Resolves an interactive prompt created by the core notification engine.
@@ -103,7 +105,7 @@ impl BridgeService {
             let shutdown_tx = inner.shutdown_tx.take();
             inner.clipboard_cmd_tx = None;
             inner.device_tx = None;
-            inner.ipc_events_tx = None;
+            inner.core_events_tx = None;
             (shutdown_tx, std::mem::take(&mut inner.tasks))
         };
 

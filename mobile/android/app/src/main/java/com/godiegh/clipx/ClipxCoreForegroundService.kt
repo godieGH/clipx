@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.godiegh.clipx.ffi.BridgeService
@@ -56,6 +57,7 @@ class ClipxCoreForegroundService : Service() {
         scope.launch {
             bridgeService.start(
                 dataDir = noBackupFilesDir.absolutePath,
+                deviceName = resolveDeviceName(),
                 clipboard = clipboardPlatform,
                 notifier = notificationPlatform,
                 event = eventListener,
@@ -66,7 +68,9 @@ class ClipxCoreForegroundService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        stopCoreAndSelf()
+        // intentionally not stopping — core keeps running after the task
+        // is swiped; user stops it
+        // stopCoreAndSelf()
         super.onTaskRemoved(rootIntent)
     }
 
@@ -103,7 +107,7 @@ class ClipxCoreForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_clipx)
             .setContentTitle("Clipx")
             .setContentText("Clipboard synchronization is running")
             .setContentIntent(pendingIntent)
@@ -112,15 +116,18 @@ class ClipxCoreForegroundService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Clipx core service",
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "Clipx core service",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply { setShowBadge(false) },
+        )
+    }
+
+    private fun resolveDeviceName(): String {
+        val settingsName = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+        return if (!settingsName.isNullOrBlank()) settingsName else Build.MODEL
     }
 }
