@@ -5,7 +5,7 @@
 //! Just as windows does to ensure consistency but this stub still is important for non-windows, 
 //! non-Linux, and Non-macos desktops
 
-use super::{platform::NotificationEngine as Engine, IncomingClipboardDecision, PairDecision, Prompt};
+use super::{platform::{NotificationEngine as Engine, NotificationFuture}, IncomingClipboardDecision, PairDecision, Prompt};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -18,27 +18,39 @@ impl NotificationEngine {
 }
 
 impl Engine for NotificationEngine {
-
-    async fn ask_pair(&self, prompt: Prompt, _timeout: Duration) -> PairDecision {
-        tracing::warn!(
-            "notification engine not implemented on this platform — auto-denying: {prompt:?}"
-        );
-        PairDecision::NoResponse
-    }
-
-    async fn ask_clipboard(
-        &self,
+    fn ask_pair<'a>(
+        &'a self,
         prompt: Prompt,
         _timeout: Duration,
-    ) -> IncomingClipboardDecision {
-        tracing::warn!(
-            "notification engine not implemented on this platform — auto-ignoring: {prompt:?}"
-        );
-        IncomingClipboardDecision::Ignore
+    ) -> NotificationFuture<'a, PairDecision> {
+        Box::pin(async move {
+            tracing::warn!(
+                "notification engine not implemented on this platform — auto-denying: {prompt:?}"
+            );
+            PairDecision::NoResponse
+        })
     }
 
-    // stub_engine.rs
-    async fn notify_info(&self, title: &str, body: impl Into<String>) {
-        tracing::info!("[{title}] {}", body.into());
+    fn ask_clipboard<'a>(
+        &'a self,
+        prompt: Prompt,
+        _timeout: Duration,
+    ) -> NotificationFuture<'a, IncomingClipboardDecision> {
+        Box::pin(async move {
+            tracing::warn!(
+                "notification engine not implemented on this platform — auto-ignoring: {prompt:?}"
+            );
+            IncomingClipboardDecision::Ignore
+        })
+    }
+
+    fn notify_info<'a>(
+        &'a self,
+        title: &'a str,
+        body: String,
+    ) -> NotificationFuture<'a, ()> {
+        Box::pin(async move {
+            tracing::info!("[{title}] {body}");
+        })
     }
 }

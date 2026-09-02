@@ -1,9 +1,11 @@
 use crate::{
     clipboard::manager::ClipboardManager,
     device, netio,
-    notification::platform::PlatformNotificationEngine,
-    platform::{ClipboardSink, CoreEventListener, NotificationPrompter, PushEvents},
+    platform::{ClipboardSink, CoreEventListener, PushEvents},
 };
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use crate::platform::ArboardClipboardSink;
 use device::identity::DeviceIdentity;
 use std::sync::Arc;
 use tokio::{
@@ -58,108 +60,26 @@ impl CoreService {
         self.state = ServiceState::Stopped;
     }
 
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     pub async fn run(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.start();
         tracing::info!("Core service starting");
 
-        let identity = Arc::new(DeviceIdentity::load_or_create(
-            device::config::identity_key_path(),
-        ));
-
+        let clipboard_sink = ArboardClipboardSink::new();
         let notification_engine = crate::notification::NotificationEngine::new();
+        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, ipc_events_tx) =
+            spawn_core_tasks(clipboard_sink, notification_engine.clone(), None);
+        self.tasks = tasks;
+        self.shutdown_tx = Some(shutdown_tx.clone());
 
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        self.shutdown_tx = Some(shutdown_tx);
-
-        // clipboard_cmd_*: how anyone (Device Manager, the IPC layer)
-        // talks to the clipboard component.
-        // clipboard_out_*: how the clipboard component hands local changes
-        // to the Device Manager for dispatch — one direction, one way.
-        let (clipboard_cmd_tx, clipboard_cmd_rx) = mpsc::unbounded_channel();
-        let (clipboard_out_tx, clipboard_out_rx) = mpsc::unbounded_channel();
-        let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
-        let (device_tx, device_rx) = mpsc::unbounded_channel();
-        let (transport_tx, transport_rx) = mpsc::unbounded_channel();
-        let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
-        // Fan-out for unsolicited IpcEvent pushes (DevicesChanged /
-        // ClipboardChanged). DeviceManager and ClipboardManager each get a
-        // sender clone; IpcService holds the sender too and hands each
-        // connected client its own subscribe()'d receiver. Capacity is
-        // headroom, not an expected queue depth — every event is a
-        // payload-free "go re-fetch" ping, so a lagged/slow client just
-        // catches up on the next one.
-        let (ipc_events_tx, _) = broadcast::channel::<crate::message::proto::clipx::IpcEvent>(32);
-
-        let shutdown_for_transport = shutdown_rx.clone();
-        let transport_task = tokio::spawn(async move {
-            let transport = crate::netio::transport::Transport::create_transport(
-                shutdown_for_transport,
-                transport_rx,
-                peer_event_tx,
-            )
-            .await;
-            transport.run().await;
-        });
-        self.tasks.push(transport_task);
-
-        let shutdown_for_device_manager = shutdown_rx.clone();
-        let shutdown_for_clipboard = shutdown_rx.clone();
-        let shutdown_for_discovery = shutdown_rx.clone();
-        let shutdown_for_ipc = shutdown_rx.clone();
-
-        const MAX_CLIPBOARD_HISTORY: usize = 200;
-        let clipboard_manager = ClipboardManager::new(
-            device::config::clipboard_history_path(),
-            MAX_CLIPBOARD_HISTORY,
-            notification_engine.clone(),
-            clipboard_out_tx,
-            ipc_events_tx.clone(),
-        );
-        let clipboard_task = tokio::spawn(async move {
-            clipboard_manager
-                .run(shutdown_for_clipboard, clipboard_cmd_rx)
-                .await;
-        });
-        self.tasks.push(clipboard_task);
-
-        let discovery_tasks =
-            netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx)
-                .expect("failed to start discovery");
-        self.tasks.extend(discovery_tasks);
-
-        let device_manager = device::manager::DeviceManager::new(
-            device::config::trusted_devices_path(),
-            identity.clone(),
-            Some(transport_tx),
-            notification_engine.clone(),
-            clipboard_cmd_tx.clone(),
-            ipc_events_tx.clone(),
-        );
-        let device_manager_task = tokio::spawn(async move {
-            device_manager
-                .run(
-                    shutdown_for_device_manager,
-                    discovered_rx,
-                    device_rx,
-                    peer_event_rx,
-                    clipboard_out_rx,
-                )
-                .await;
-        });
-        self.tasks.push(device_manager_task);
-
-        // Same command channel the Device Manager uses — the IPC layer can
-        // issue GetHistory/RemoveEntry/ClearHistory the same way it issues
-        // DeviceCommands, once those routes are added there.
         let mut ipc_service = netio::ipc::IpcService::new(
             "clipx",
-            shutdown_for_ipc,
-            device_tx.clone(),
-            clipboard_cmd_tx.clone(),
-            ipc_events_tx.clone(),
+            shutdown_tx.subscribe(),
+            device_tx,
+            clipboard_cmd_tx,
+            ipc_events_tx,
         );
-        let ipc_task = tokio::spawn(async move { ipc_service.start().await });
-        self.tasks.push(ipc_task);
+        self.tasks.push(tokio::spawn(async move { ipc_service.start().await }));
 
         signal::ctrl_c().await?;
 
@@ -203,33 +123,37 @@ mod tests {
     }
 }
 
-pub async fn spawn_core_tasks(
-    _clipboard: Arc<dyn ClipboardSink>,
-    notifier: Arc<dyn NotificationPrompter>,
-    _events: Arc<dyn CoreEventListener>,
-) -> (Vec<JoinHandle<()>>, watch::Sender<bool>) {
-    // a bucket of tasks
+pub fn spawn_core_tasks<S, N>(
+    clipboard_sink: S,
+    notification_engine: N,
+    events: Option<Arc<dyn CoreEventListener>>,
+) -> (
+    Vec<JoinHandle<()>>,
+    watch::Sender<bool>,
+    mpsc::UnboundedSender<crate::clipboard::manager::ClipboardCommand>,
+    mpsc::UnboundedSender<crate::device::manager::DeviceCommands>,
+    broadcast::Sender<PushEvents>,
+)
+where
+    S: ClipboardSink + 'static,
+    N: crate::notification::platform::NotificationEngine + Clone + Send + Sync + 'static,
+{
     let mut tasks = Vec::<JoinHandle<()>>::new();
-
-    // this creates or loads device identity so the core can use it fo devices identity
-    // later will think about this in different approach — this is just a prototype then
-    // we can just roll it simply
-    let _identity = Arc::new(DeviceIdentity::load_or_create(
+    let identity = Arc::new(DeviceIdentity::load_or_create(
         device::config::identity_key_path(),
     ));
-
-    // creates a notification_engine that wraps a platform notifier and so
-    let _notification_engine = PlatformNotificationEngine::new(notifier);
-
-    // a shutdown idea just like how desktop already behave
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let (_transport_tx, transport_rx) = mpsc::unbounded_channel();
-    let (peer_event_tx, _peer_event_rx) = mpsc::unbounded_channel();
-    let (_push_events_tx, _) = broadcast::channel::<PushEvents>(32);
+    let (clipboard_cmd_tx, clipboard_cmd_rx) = mpsc::unbounded_channel();
+    let (clipboard_out_tx, clipboard_out_rx) = mpsc::unbounded_channel();
+    let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
+    let (device_tx, device_rx) = mpsc::unbounded_channel();
+    let (transport_tx, transport_rx) = mpsc::unbounded_channel();
+    let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
+    let (ipc_events_tx, _) = broadcast::channel::<PushEvents>(32);
 
     let shutdown_for_transport = shutdown_rx.clone();
-    let transport_task = tokio::spawn(async move {
+    tasks.push(tokio::spawn(async move {
         let transport = crate::netio::transport::Transport::create_transport(
             shutdown_for_transport,
             transport_rx,
@@ -237,8 +161,78 @@ pub async fn spawn_core_tasks(
         )
         .await;
         transport.run().await;
-    });
-    tasks.push(transport_task);
+    }));
 
-    (tasks, shutdown_tx)
+    const MAX_CLIPBOARD_HISTORY: usize = 200;
+    let clipboard_manager = ClipboardManager::new(
+        device::config::clipboard_history_path(),
+        MAX_CLIPBOARD_HISTORY,
+        notification_engine.clone(),
+        clipboard_sink,
+        clipboard_out_tx,
+        ipc_events_tx.clone(),
+    );
+    let shutdown_for_clipboard = shutdown_rx.clone();
+    tasks.push(tokio::spawn(async move {
+        clipboard_manager
+            .run(shutdown_for_clipboard, clipboard_cmd_rx)
+            .await;
+    }));
+
+    let shutdown_for_discovery = shutdown_rx.clone();
+    let discovery_tasks = netio::discovery::spawn(
+        shutdown_for_discovery,
+        identity.clone(),
+        discovered_tx,
+    )
+    .expect("failed to start discovery");
+    tasks.extend(discovery_tasks);
+
+    let device_manager = crate::device::manager::DeviceManager::new(
+        device::config::trusted_devices_path(),
+        identity,
+        Some(transport_tx),
+        notification_engine,
+        clipboard_cmd_tx.clone(),
+        ipc_events_tx.clone(),
+    );
+    let shutdown_for_device_manager = shutdown_rx.clone();
+    tasks.push(tokio::spawn(async move {
+        device_manager
+            .run(
+                shutdown_for_device_manager,
+                discovered_rx,
+                device_rx,
+                peer_event_rx,
+                clipboard_out_rx,
+            )
+            .await;
+    }));
+
+    if let Some(events) = events {
+        let mut events_rx = ipc_events_tx.subscribe();
+        let mut shutdown_for_events = shutdown_rx.clone();
+        tasks.push(tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown_for_events.changed() => {
+                        if *shutdown_for_events.borrow() { break; }
+                    }
+                    result = events_rx.recv() => {
+                        match result {
+                            Ok(event) => match event.event {
+                                Some(crate::message::proto::clipx::ipc_event::Event::DevicesChanged(_)) => events.on_device_change(),
+                                Some(crate::message::proto::clipx::ipc_event::Event::ClipboardChanged(_)) => events.on_clipboard_change(),
+                                _ => {}
+                            },
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                }
+            }
+        }));
+    }
+
+    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, ipc_events_tx)
 }

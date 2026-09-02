@@ -1,4 +1,4 @@
-use super::{platform::NotificationEngine as Engine, IncomingClipboardDecision, PairDecision, Prompt};
+use super::{platform::{NotificationEngine as Engine, NotificationFuture}, IncomingClipboardDecision, PairDecision, Prompt};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -104,74 +104,68 @@ impl NotificationEngine {
 }
 
 impl Engine for NotificationEngine {
-    /// Shows a pairing prompt.
-    ///
-    /// Existing callers such as DeviceManager can continue using this API
-    /// and still receive a PairDecision.
-    async fn ask_pair(
-        &self,
+    fn ask_pair<'a>(
+        &'a self,
         prompt: Prompt,
         timeout: Duration,
-    ) -> PairDecision {
-        let (title, body) = prompt.render();
+    ) -> NotificationFuture<'a, PairDecision> {
+        Box::pin(async move {
+            let (title, body) = prompt.render();
 
-        self.show_prompt(
-            &title,
-            &body,
-            timeout,
-            &[("Allow", "allow"), ("Deny", "deny")],
-            |action| match action {
-                Some("allow") => PairDecision::Allow,
-                Some("deny") => PairDecision::Deny,
-                _ => PairDecision::NoResponse,
-            },
-            PairDecision::NoResponse,
-        )
-        .await
+            self.show_prompt(
+                &title,
+                &body,
+                timeout,
+                &[("Allow", "allow"), ("Deny", "deny")],
+                |action| match action {
+                    Some("allow") => PairDecision::Allow,
+                    Some("deny") => PairDecision::Deny,
+                    _ => PairDecision::NoResponse,
+                },
+                PairDecision::NoResponse,
+            )
+            .await
+        })
     }
 
-    /// Shows an incoming clipboard prompt.
-    ///
-    /// There is only one button. Dismissal, timeout, or failure is treated
-    /// as Ignore rather than being represented by a UI button.
-    async fn ask_clipboard(
-        &self,
+    fn ask_clipboard<'a>(
+        &'a self,
         prompt: Prompt,
         timeout: Duration,
-    ) -> IncomingClipboardDecision {
-        let (title, body) = prompt.render();
+    ) -> NotificationFuture<'a, IncomingClipboardDecision> {
+        Box::pin(async move {
+            let (title, body) = prompt.render();
 
-        self.show_prompt(
-            &title,
-            &body,
-            timeout,
-            &[("Copy to clipboard", "copy")],
-            |action| match action {
-                Some("copy") => IncomingClipboardDecision::Copy,
-                _ => IncomingClipboardDecision::Ignore,
-            },
-            IncomingClipboardDecision::Ignore,
-        )
-        .await
+            self.show_prompt(
+                &title,
+                &body,
+                timeout,
+                &[("Copy to clipboard", "copy")],
+                |action| match action {
+                    Some("copy") => IncomingClipboardDecision::Copy,
+                    _ => IncomingClipboardDecision::Ignore,
+                },
+                IncomingClipboardDecision::Ignore,
+            )
+            .await
+        })
     }
 
-    /// Shows an informational notification.
-    ///
-    /// No buttons and no waiting for a decision.
-    async fn notify_info(
-        &self,
-        title: &str,
-        body: impl Into<String>,
-    ) {
-        let title = title.to_string();
-        let body = body.into();
+    fn notify_info<'a>(
+        &'a self,
+        title: &'a str,
+        body: String,
+    ) -> NotificationFuture<'a, ()> {
+        Box::pin(async move {
+            let title = title.to_string();
 
-        tokio::task::block_in_place(|| {
-            let _ = Toast::new(APP_ID)
-                .title(&title)
-                .text1(&body)
-                .show();
-        });
+            tokio::task::block_in_place(|| {
+                let _ = Toast::new(APP_ID)
+                    .title(&title)
+                    .text1(&body)
+                    .show();
+            });
+        })
     }
 }
 

@@ -1,7 +1,8 @@
 use super::clipstore::{ClipItem, ClipboardStore};
 use super::watcher;
 use crate::message::proto::clipx;
-use crate::notification::{platform::NotificationEngine as Engine, IncomingClipboardDecision, NotificationEngine, Prompt};
+use crate::notification::{platform::NotificationEngine as Engine, IncomingClipboardDecision, Prompt};
+use crate::platform::ClipboardSink;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, watch, broadcast};
@@ -39,15 +40,20 @@ pub enum ClipboardCommand {
         content: String,
         source_device_name: String,
     },
+    /// A host platform reports a local system clipboard change.
+    LocalChangeDetected {
+        content: String,
+    },
 }
 
 /// Owns clipboard semantics end-to-end: runs the watcher, applies incoming
 /// remote content (after asking the user), and maintains history. Knows
 /// nothing about sockets, peers, or transports — it only ever sees plain
 /// text in and plain text out.
-pub struct ClipboardManager {
+pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
     store: ClipboardStore,
-    notification: NotificationEngine,
+    notification: E,
+    clipboard_sink: S,
     /// Mirrors what we believe the OS clipboard currently holds. Sharing
     /// this single value between "watcher detected a change" and "we just
     /// applied a remote value" is what stops an applied remote update from
@@ -65,11 +71,12 @@ pub struct ClipboardManager {
     events_tx: broadcast::Sender<clipx::IpcEvent>,
 }
 
-impl ClipboardManager {
+impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E, S> {
     pub fn new(
         history_path: PathBuf,
         max_history: usize,
-        notification: NotificationEngine,
+        notification: E,
+        clipboard_sink: S,
         outbound_tx: mpsc::UnboundedSender<String>,
         events_tx: broadcast::Sender<clipx::IpcEvent>,
     ) -> Self {
@@ -83,6 +90,7 @@ impl ClipboardManager {
         Self {
             store,
             notification,
+            clipboard_sink,
             last_known_content,
             outbound_tx,
             resolved_tx,
@@ -107,7 +115,12 @@ impl ClipboardManager {
         mut command_rx: mpsc::UnboundedReceiver<ClipboardCommand>,
     ) {
         let (watcher_tx, mut watcher_rx) = mpsc::unbounded_channel();
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         let watcher_task = tokio::spawn(watcher::watch_clipboard(shutdown_rx.clone(), watcher_tx));
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        drop(watcher_tx);
 
         let mut shutdown_rx = shutdown_rx;
         loop {
@@ -118,7 +131,9 @@ impl ClipboardManager {
                 Some(resolved) = self.resolved_rx.recv() => { self.on_incoming_resolved(resolved); }
             }
         }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         let _ = watcher_task.await;
+
         tracing::info!("clipboard manager stopped");
     }
 
@@ -150,6 +165,7 @@ impl ClipboardManager {
                 content,
                 source_device_name,
             } => self.spawn_incoming_prompt(content, source_device_name),
+            ClipboardCommand::LocalChangeDetected { content } => self.on_local_change(content),
         }
     }
 
@@ -222,22 +238,8 @@ impl ClipboardManager {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
     fn apply_to_system_clipboard(&self, content: &str) {
-        match arboard::Clipboard::new() {
-            Ok(mut cb) => {
-                if let Err(e) = cb.set_text(content.to_string()) {
-                    tracing::warn!("failed to apply remote clipboard content: {e}");
-                }
-            }
-            Err(e) => tracing::warn!("failed to open clipboard to apply remote content: {e}"),
-        }
-    }
-
-    #[cfg(target_os = "android")]
-    fn apply_to_system_clipboard(&self, _content: &str) {
-        // Android clipboard access goes through the platform module, not arboard.
-        tracing::info!("apply_to_system_clipboard is not implemented for Android in this crate");
+        self.clipboard_sink.write(content.to_string());
     }
 }
 

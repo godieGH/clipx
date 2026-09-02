@@ -16,7 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.viewmodel.compose.viewModel
+import com.godiegh.clipx.ClipxApplication
 import com.godiegh.clipx.ConnectionStatus
 import com.godiegh.clipx.ui.theme.ClipxLiveBackground
 
@@ -42,7 +42,7 @@ fun ClipxApp() {
     var selectedHistory by remember { mutableStateOf<ClipxHistoryItem?>(null) }
     var searchHistory by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val clipxSheetController: ClipxSheetController = viewModel()
+    val clipxSheetController = (context.applicationContext as ClipxApplication).sheetController
 
     fun openDevices() {
         tab = RootTab.DEVICES

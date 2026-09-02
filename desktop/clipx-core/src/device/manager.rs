@@ -7,14 +7,14 @@ use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStag
 use crate::device::{config, pairing};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
-use crate::notification::{platform::NotificationEngine as Engine, NotificationEngine, PairDecision, Prompt};
+use crate::notification::{platform::NotificationEngine as Engine, PairDecision, Prompt};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-pub struct DeviceManager {
+pub struct DeviceManager<E: Engine> {
     seen: SeenDeviceRegistry,
     trusted: TrustedDeviceStore,
     identity: Arc<DeviceIdentity>,
@@ -22,7 +22,7 @@ pub struct DeviceManager {
     connect_sessions: HashMap<String, ConnectSession>,
     connected: HashMap<String, String>,
     transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
-    notification: NotificationEngine,
+    notification: E,
     notify_tx: mpsc::UnboundedSender<NotifyResult>,
     notify_rx: mpsc::UnboundedReceiver<NotifyResult>,
     /// Where inbound clipboard content gets handed off. The clipboard
@@ -110,12 +110,12 @@ pub enum DeviceCommands {
     },
 }
 
-impl DeviceManager {
+impl<E: Engine + Clone + 'static> DeviceManager<E> {
     pub fn new(
         trusted_store_path: std::path::PathBuf,
         identity: Arc<DeviceIdentity>,
         transport_tx: Option<mpsc::UnboundedSender<TransportCommand>>,
-        notification: NotificationEngine,
+        notification: E,
         clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
         events_tx: broadcast::Sender<proto::IpcEvent>,
     ) -> Self {
@@ -1173,7 +1173,7 @@ fn get_formated_fp(device_id: &str) -> String {
         .join("-")
 }
 
-impl DeviceManager {
+impl<E: Engine + Clone + 'static> DeviceManager<E> {
     async fn handle_device_command(&mut self, cmd: DeviceCommands) {
         match cmd {
             DeviceCommands::GetSeen { mode, reply_to } => {
@@ -1270,7 +1270,7 @@ impl DeviceManager {
     }
 }
 
-impl DeviceManager {
+impl<E: Engine + Clone + 'static> DeviceManager<E> {
     fn list_pending_pairings(&self) -> Vec<PendingPairEntry> {
         self.pair_sessions
             .iter()
