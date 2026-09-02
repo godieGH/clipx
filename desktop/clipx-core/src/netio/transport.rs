@@ -59,7 +59,7 @@ enum Registration {
     Ok {
         device_id: String,
         addr: SocketAddr,
-        outbound_tx: mpsc::UnboundedSender<WsMessage>,
+        outbound_tx: mpsc::Sender<WsMessage>,
         reply_to: Option<oneshot::Sender<bool>>,
     },
     Failed {
@@ -73,7 +73,7 @@ enum Registration {
 
 struct Conn {
     addr: SocketAddr,
-    outbound_tx: mpsc::UnboundedSender<WsMessage>,
+    outbound_tx: mpsc::Sender<WsMessage>,
 }
 
 pub struct Transport {
@@ -165,12 +165,14 @@ impl Transport {
                     let _ = reply_to.send(false);
                     return;
                 }
-                let ok = self
-                    .connections
-                    .get(&device_id)
-                    .map(|c| c.outbound_tx.send(WsMessage::binary(buf)).is_ok())
-                    .unwrap_or(false);
-                let _ = reply_to.send(ok);
+                let Some(outbound_tx) = self.connections.get(&device_id).map(|c| c.outbound_tx.clone()) else {
+                    let _ = reply_to.send(false);
+                    return;
+                };
+                tokio::spawn(async move {
+                    let ok = outbound_tx.send(WsMessage::binary(buf)).await.is_ok();
+                    let _ = reply_to.send(ok);
+                });
             }
             TransportCommand::ListConnections { reply_to } => {
                 let devices = self
@@ -261,7 +263,7 @@ impl Transport {
                     return;
                 }
             };
-            let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+            let (outbound_tx, outbound_rx) = mpsc::channel(8);
             let _ = register_tx.send(Registration::Ok {
                 device_id: device_id.clone(),
                 addr,
@@ -316,7 +318,7 @@ impl Transport {
                 }
             };
 
-            let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+            let (outbound_tx, outbound_rx) = mpsc::channel(8);
             let _ = register_tx.send(Registration::Ok {
                 device_id: device_id.clone(),
                 addr,
@@ -338,7 +340,7 @@ impl Transport {
 async fn run_connection(
     mut ws: WebSocketStream<TcpStream>,
     device_id: String,
-    mut outbound_rx: mpsc::UnboundedReceiver<WsMessage>,
+    mut outbound_rx: mpsc::Receiver<WsMessage>,
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
 ) {

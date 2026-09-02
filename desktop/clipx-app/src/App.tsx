@@ -9,8 +9,8 @@ import { listen } from "@tauri-apps/api/event";
 type DeviceType = "windows" | "android" | "linux" | "macos" | "ios";
 type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailable";
 type PairingState = "idle" | "requesting";
-type Screen = "devices" | "history";
-
+type Screen = "devices" | "sync" | "history";
+type CurrentClipboard = { kind: "text" | "rich_text" | "image"; text: string; html?: string; width?: number; height?: number; rgba?: number[] };
 
 interface PairedDevice {
   fingerprint: string;
@@ -29,11 +29,26 @@ interface AvailableDevice {
   pairing: PairingState;
 }
 
+interface PickedFile {
+  path: string;
+  name: string;
+  size: number;
+  mimeType: string;
+}
+
 interface ClipItem {
   id: string;
   content: string;
   sourceDevice: string;
   receivedAt: number;
+  kind: "text" | "rich_text" | "image" | "file";
+  html?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  fileSize?: number;
+  fileExpiresAtMs?: number;
+  fileDownloaded?: boolean;
+  localFilePath?: string | null;
 }
 
 // Mirrors clipx.PairingEvent — state is the raw proto3 enum ordinal
@@ -516,7 +531,8 @@ function timeAgo(ts: number, locale = "en-US"): string {
 }
 
 
-function ClipRow({ item, onCopy, onRemove }: { item: ClipItem; onCopy: (content: string) => void; onRemove: (id: string) => void }) {
+function ClipRow({ item, onCopy, onRemove, onDownload, onReveal, transfer, nowMs }: { item: ClipItem; onCopy: (content: string) => void; onRemove: (id: string) => void; onDownload: (id: string) => void; onReveal: (path: string) => void; transfer?: { done: number; total: number; state: string; message: string }; nowMs: number }) {
+  const expired = item.kind === "file" && !item.fileDownloaded && !!item.fileExpiresAtMs && nowMs >= item.fileExpiresAtMs;
   return (
     <div className="clip-row">
       <div className="clip-main">
@@ -524,14 +540,26 @@ function ClipRow({ item, onCopy, onRemove }: { item: ClipItem; onCopy: (content:
         <div className="clip-meta">
           {item.sourceDevice} · {timeAgo(item.receivedAt)}
         </div>
+        {item.kind === "file" && (
+          <div className="file-inline">
+            <div>{item.fileName || item.content} · {Math.ceil((item.fileSize || 0) / 1024)} KB {transfer?.message ? `· ${transfer.message}` : ""}</div>
+            <div className="file-progress"><span style={{ width: `${item.fileDownloaded ? 100 : transfer?.total ? Math.round((transfer.done / transfer.total) * 100) : 0}%` }} /></div>
+          </div>
+        )}
       </div>
       <div className="clip-actions">
-        <button className="icon-button" title="Copy to clipboard" onClick={() => onCopy(item.content)}>
+        {item.kind === "file" && <button className="icon-button" title={expired ? "Offer expired" : "Download file"} onClick={() => onDownload(item.id)} disabled={expired}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>}
+        {item.kind === "file" && item.fileDownloaded && item.localFilePath && <button className="icon-button" title="Show in folder" onClick={() => onReveal(item.localFilePath!)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg></button>}
+        {item.kind !== "file" && <button className="icon-button" title="Copy to clipboard" onClick={() => onCopy(item.content)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect x="8" y="8" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
             <path d="M16 8V6a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 5 6v8A1.5 1.5 0 0 0 6.5 16H8" stroke="currentColor" strokeWidth="1.5" />
           </svg>
-        </button>
+        </button>}
         <button className="icon-button remove" title="Remove" onClick={() => onRemove(item.id)}>
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -600,11 +628,43 @@ function App() {
   const [showIdentity, setShowIdentity] = useState(false);
   const [showIdentityDisabled, setshowIdentityDisabled] = useState(true);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(null);
+  const [currentClipboard, setCurrentClipboard] = useState<CurrentClipboard | null>(null);
+  const [outgoingFiles, setOutgoingFiles] = useState<PickedFile[]>([]);
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { done: number; total: number; state: string; message: string }>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [sendingReadyItems, setSendingReadyItems] = useState(false);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY);
 
   useEffect(() => subscribeToast(setToast), []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    appWindow.onDragDropEvent((event) => {
+      if (cancelled || screen !== "sync") return;
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        setIsFileDragActive(true);
+      } else if (event.payload.type === "leave") {
+        setIsFileDragActive(false);
+      } else if (event.payload.type === "drop") {
+        setIsFileDragActive(false);
+        const paths = event.payload.paths ?? [];
+        if (!paths.length) return;
+        invoke<PickedFile[]>("get_dropped_files", { paths })
+          .then((files) => addPickedFiles(files))
+          .catch((e) => showToast(`${e}`, { variant: "error" }));
+      }
+    }).then((off) => { unlisten = off; }).catch(() => {});
+    return () => { cancelled = true; unlisten?.(); };
+  }, [appWindow, screen]);
 
   const refreshPaired = useCallback(async () => {
     try {
@@ -686,6 +746,10 @@ function App() {
       // Registered once, for the lifetime of the app — routes by
       // device_id to whichever "Requesting…" button it belongs to,
       // instead of being (re)registered per pair attempt.
+      listen<{ entry_id: string; file_id: string; done: number; total: number; state: string; message: string }>("file-transfer", ({ payload }) => {
+        if (cancelled) return;
+        setDownloadProgress((prev) => ({ ...prev, [payload.entry_id]: payload, [payload.file_id]: payload }));
+      }),
       listen<PairingEventPayload>("pairing-event", ({ payload }) => {
         if (cancelled) return;
         if (payload.state === PAIRING_STATE.STARTED) return;
@@ -798,6 +862,88 @@ function App() {
     invoke("clear_clipboard_history").catch((e) => showToast(`${e}`, { variant: "error" }));
   }
 
+  const connectedCount = paired.filter((d) => d.connection === "connected").length;
+
+  const refreshCurrentClipboard = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        const item = items[0];
+        if (item) {
+          if (item.types.includes("text/html")) {
+            const html = await (await item.getType("text/html")).text();
+            const text = item.types.includes("text/plain") ? await (await item.getType("text/plain")).text() : html.replace(/<[^>]*>/g, "");
+            setCurrentClipboard({ kind: "rich_text", text, html });
+            return;
+          }
+          const imageType = item.types.find((type) => type.startsWith("image/"));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const bitmap = await createImageBitmap(blob);
+            const canvas = document.createElement("canvas");
+            canvas.width = bitmap.width; canvas.height = bitmap.height;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(bitmap, 0, 0);
+              const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+              setCurrentClipboard({ kind: "image", text: `Image ${bitmap.width}×${bitmap.height}`, width: bitmap.width, height: bitmap.height, rgba: Array.from(pixels) });
+              bitmap.close();
+              return;
+            }
+            bitmap.close();
+          }
+        }
+      }
+      const text = await navigator.clipboard?.readText();
+      if (typeof text === "string") setCurrentClipboard(text ? { kind: "text", text } : null);
+    } catch {}
+  }, []);
+
+  function addPickedFiles(files: PickedFile[]) {
+    setOutgoingFiles((prev) => {
+      const merged = [...prev];
+      for (const file of files) {
+        if (!merged.some((existing) => existing.path === file.path)) merged.push(file);
+      }
+      return merged;
+    });
+  }
+
+  async function pickFiles() {
+    try {
+      const files = await invoke<PickedFile[]>("pick_files");
+      addPickedFiles(files);
+    } catch (e) {
+      showToast(`${e}`, { variant: "error" });
+    }
+  }
+
+  const sendReadyItems = useCallback(async () => {
+    if (connectedCount === 0) { showToast("No connected devices", { variant: "error" }); return; }
+    const hasClipboard = !!currentClipboard;
+    if (!hasClipboard && outgoingFiles.length === 0) { showToast("Nothing ready to send", { variant: "error" }); return; }
+    setSendingReadyItems(true);
+    try {
+      if (currentClipboard) {
+        if (currentClipboard.kind === "rich_text") await invoke("send_rich_text", { text: currentClipboard.text, html: currentClipboard.html || currentClipboard.text });
+        else if (currentClipboard.kind === "image" && currentClipboard.rgba && currentClipboard.width && currentClipboard.height) await invoke("send_image", { width: currentClipboard.width, height: currentClipboard.height, rgba: currentClipboard.rgba });
+        else await invoke("send_text", { content: currentClipboard.text });
+      }
+      for (const file of outgoingFiles) {
+        await invoke("send_file_path", { name: file.name, mimeType: file.mimeType, path: file.path });
+      }
+      setOutgoingFiles([]);
+      showToast(`${(hasClipboard ? 1 : 0) + outgoingFiles.length} item(s) offered`);
+    } catch (e) { showToast(`${e}`, { variant: "error" }); } finally { setSendingReadyItems(false); }
+  }, [connectedCount, currentClipboard, outgoingFiles]);
+
+  async function handleDownloadHistoryFile(id: string) {
+    try { await invoke("download_clipboard_file", { id }); showToast("File download requested"); }
+    catch (e) { showToast(`${e}`, { variant: "error" }); }
+  }
+
+  async function handleRevealHistoryFile(path: string) { try { await invoke("reveal_file_location", { path }); } catch (e) { showToast(`${e}`, { variant: "error" }); } }
+
   const detailDevice = paired.find((d) => d.fingerprint === detailFingerprint) ?? null;
 
   function renderDevicesScreen() {
@@ -855,6 +1001,152 @@ function App() {
     );
   }
 
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+  }
+
+  function renderSyncScreen() {
+    const readyCount = (currentClipboard ? 1 : 0) + outgoingFiles.length;
+    const clipboardKindLabel = currentClipboard?.kind === "image" ? "Image" : currentClipboard?.kind === "rich_text" ? "Rich text" : "Text";
+
+    return (
+      <section className={`sync-screen ${isFileDragActive ? "sync-screen--dragging" : ""}`}>
+        <ScrollFade className="sync-scroll">
+        <div className="sync-shell">
+          <header className="sync-page-header">
+            <div>
+              <div className="sync-heading-row">
+                <div className="sync-device-transfer-icon" aria-hidden="true">
+                  <svg viewBox="0 0 36 42" fill="none">
+                    <rect x="8" y="2" width="20" height="28" rx="4" stroke="currentColor" strokeWidth="1.8" />
+                  </svg>
+                </div>
+                <div style={{flex: "1", display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                  <div className="sync-heading">Send</div>
+                  <div className={`sync-connection-pill ${connectedCount > 0 ? "online" : "offline"}`}>
+                    <span className="status-dot" />
+                    {connectedCount > 0 ? `${connectedCount} connected` : "No device connected"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="sync-layout">
+            <div className="sync-primary-column">
+              <section className="sync-panel clipboard-panel">
+                <div className="sync-panel-header sync-clipboard-header">
+                  <div className="sync-panel-title">Clipboard</div>
+                  <div className="sync-clipboard-actions">
+                    {currentClipboard && <span className="sync-kind ready">{clipboardKindLabel}</span>}
+                    <button className="sync-refresh sync-refresh--compact" onClick={refreshCurrentClipboard} title="Refresh clipboard"><span className="sync-refresh-icon">↻</span><span>Refresh</span></button>
+                  </div>
+                </div>
+                {currentClipboard ? (
+                  <div className="sync-clipboard-preview">
+                    <div className="sync-preview-icon">
+                      {currentClipboard.kind === "image" ? "▧" : currentClipboard.kind === "rich_text" ? "R" : "T"}
+                    </div>
+                    <div className="sync-preview-copy">
+                      <div className="sync-preview-text">{currentClipboard.text || "Clipboard content"}</div>
+                    </div>
+                    <button className="sync-selection-remove" title="Don't send clipboard" onClick={() => setCurrentClipboard(null)}>×</button>
+                  </div>
+                ) : (
+                  <button className="sync-clipboard-empty" onClick={refreshCurrentClipboard} title="Read clipboard">
+                    <div className="sync-empty-glyph">＋</div>
+                    <div>
+                      <div className="sync-empty-title">Add clipboard</div>
+                      <div className="sync-empty-copy">Tap to read what is currently copied.</div>
+                    </div>
+                  </button>
+                )}
+              </section>
+
+              <section className="sync-panel files-panel">
+                <div className="sync-panel-header">
+                  <div>
+                    <div className="sync-panel-title">Files to send</div>
+                    <div className="sync-panel-subtitle">Files stay local until you explicitly press Send.</div>
+                  </div>
+                  {outgoingFiles.length > 0 && <span className="sync-count-chip">{outgoingFiles.length}</span>}
+                </div>
+
+                <button className={`sync-dropzone ${isFileDragActive ? "dragging" : ""}`} onClick={pickFiles} title="Choose files">
+                  <div className="sync-drop-icon">＋</div>
+                  <div className="sync-drop-title">Drop files anywhere</div>
+                  <div className="sync-drop-copy">or click to choose files</div>
+                </button>
+
+                {outgoingFiles.length > 0 && (
+                  <div className="sync-file-list">
+                    {outgoingFiles.map((file, index) => (
+                      <div className="sync-file-row" key={`${file.name}:${file.size}${/*:${file?.lastModified}*/""}:${index}`}>
+                        <div className="sync-file-icon">{file.mimeType.startsWith("image/") ? "▧" : "□"}</div>
+                        <div className="sync-file-info">
+                          <div className="sync-file-name">{file.name}</div>
+                          <div className="sync-file-meta">{file.mimeType} · {formatBytes(file.size)}</div>
+                        </div>
+                        <button
+                          className="sync-file-remove"
+                          title={`Remove ${file.name}`}
+                          onClick={() => setOutgoingFiles((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <aside className="sync-aside">
+              <div className="sync-summary-panel">
+                <div className="sync-summary-label">READY TO SEND</div>
+                <div className="sync-summary-number">{readyCount}</div>
+                <div className="sync-summary-caption">{readyCount === 1 ? "item" : "items"} in this send</div>
+
+                <div className="sync-summary-breakdown">
+                  {currentClipboard && (
+                    <div className="sync-breakdown-row"><span>Clipboard</span><strong>1</strong></div>
+                  )}
+                  {outgoingFiles.length > 0 && (
+                    <div className="sync-breakdown-row"><span>Files</span><strong>{outgoingFiles.length}</strong></div>
+                  )}
+                  {!currentClipboard && outgoingFiles.length === 0 && (
+                    <div className="sync-breakdown-empty">Add something to the queue to enable sending.</div>
+                  )}
+                </div>
+
+                <div className="sync-summary-destination">
+                  <span className={`status-dot ${connectedCount > 0 ? "connected" : "disconnected"}`} />
+                  <div>
+                    <div>{connectedCount > 0 ? "Connected devices" : "No connected devices"}</div>
+                    <small>{connectedCount > 0 ? "The bundle will be sent to connected peers." : "Connect a paired device first."}</small>
+                  </div>
+                </div>
+
+                <button className="sync-send-button" onClick={sendReadyItems} disabled={sendingReadyItems || connectedCount === 0 || readyCount === 0}>
+                  <span>{sendingReadyItems ? "Preparing…" : "Send now"}</span>
+                  <span className="sync-send-arrow">→</span>
+                </button>
+
+                <div className="sync-summary-note">Files are offered as downloadable content and remain available for up to 24 hours.</div>
+              </div>
+            </aside>
+          </div>
+        </div>
+        </ScrollFade>
+      </section>
+    );
+  }
+
   function renderHistoryScreen() {
     return (
       <section className="history-screen">
@@ -876,7 +1168,7 @@ function App() {
             <ScrollFade className="history-scroll">
               <div className="device-list">
                 {history.map((item) => (
-                  <ClipRow key={item.id} item={item} onCopy={handleCopy} onRemove={handleRemoveHistory} />
+                  <ClipRow key={item.id} item={item} onCopy={handleCopy} onRemove={handleRemoveHistory} onDownload={handleDownloadHistoryFile} onReveal={handleRevealHistoryFile} transfer={downloadProgress[item.id]} nowMs={nowMs} />
                 ))}
               </div>
             </ScrollFade>
@@ -904,6 +1196,11 @@ function App() {
               <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
+          <button className="icon-button titlebar-icon" title="Sync" onClick={() => setScreen("sync")}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+            </svg>
+          </button>
           <button
             className="icon-button titlebar-icon"
             title={screen === "devices" ? "Clipboard history" : "Back to devices"}
@@ -929,7 +1226,7 @@ function App() {
         </div>
       </header>
 
-      <main>{screen === "devices" ? renderDevicesScreen() : renderHistoryScreen()}</main>
+      <main>{screen === "devices" ? renderDevicesScreen() : screen === "sync" ? renderSyncScreen() : renderHistoryScreen()}</main>
 
       {showIdentity && <DeviceIdentity identity={ownIdentity} onClose={() => setShowIdentity(false)} />}
 

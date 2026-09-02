@@ -136,11 +136,18 @@ impl Engine for NotificationEngine {
         Box::pin(async move {
             let (title, body) = prompt.render();
 
+            let action_label = match prompt {
+                Prompt::IncomingClipboard { kind: super::IncomingClipboardKind::Image, .. } => "Save image",
+                Prompt::IncomingClipboard { kind: super::IncomingClipboardKind::File, .. } => "Download file",
+                Prompt::IncomingClipboard { .. } => "Copy to clipboard",
+                _ => "Copy to clipboard",
+            };
+
             self.show_prompt(
                 &title,
                 &body,
                 timeout,
-                &[("Copy to clipboard", "copy")],
+                &[(action_label, "copy")],
                 |action| match action {
                     Some("copy") => IncomingClipboardDecision::Copy,
                     _ => IncomingClipboardDecision::Ignore,

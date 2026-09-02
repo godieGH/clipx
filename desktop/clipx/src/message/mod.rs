@@ -41,6 +41,15 @@ pub mod types {
         pub content: String,
         pub source_device: String,
         pub received_at: u64,
+        pub kind: String,
+        pub html: Option<String>,
+        pub file_id: Option<String>,
+        pub file_name: Option<String>,
+        pub mime_type: Option<String>,
+        pub file_size: u64,
+        pub file_expires_at_ms: u64,
+        pub file_downloaded: bool,
+        pub local_file_path: Option<String>,
     }
 
     impl From<crate::clipx::ClipHistoryEntry> for ClipHistoryEntry {
@@ -50,6 +59,15 @@ pub mod types {
                 content: e.content,
                 source_device: e.source_device_name,
                 received_at: e.received_at_ms,
+                kind: e.kind,
+                html: if e.html.is_empty() { None } else { Some(e.html) },
+                file_id: if e.file_id.is_empty() { None } else { Some(e.file_id) },
+                file_name: if e.file_name.is_empty() { None } else { Some(e.file_name) },
+                mime_type: if e.mime_type.is_empty() { None } else { Some(e.mime_type) },
+                file_size: e.file_size,
+                file_expires_at_ms: e.file_expires_at_ms,
+                file_downloaded: e.file_downloaded,
+                local_file_path: if e.local_file_path.is_empty() { None } else { Some(e.local_file_path) },
             }
         }
     }
@@ -109,7 +127,7 @@ pub mod types {
     }
 }
 
-pub trait IpcCmddBridge {
+pub trait IpcCmdBridge {
     fn get_this_device_identity(
         &mut self,
     ) -> impl std::future::Future<Output = Result<types::OwnIdentity, String>> + Send;
@@ -151,9 +169,15 @@ pub trait IpcCmddBridge {
     fn clear_clipboard_history(
         &mut self,
     ) -> impl std::future::Future<Output = Result<(), String>> + Send;
+    fn send_text(&mut self, content: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn send_rich_text(&mut self, text: String, html: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn send_image(&mut self, width: u32, height: u32, rgba: Vec<u8>) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn send_file(&mut self, name: String, mime_type: String, data: Vec<u8>) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn send_file_path(&mut self, name: String, mime_type: String, path: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn download_clipboard_file(&mut self, id: String) -> impl std::future::Future<Output = Result<String, String>> + Send;
 }
 
-impl IpcCmddBridge for crate::ipc::non_blocking::Client {
+impl IpcCmdBridge for crate::ipc::non_blocking::Client {
     async fn get_this_device_identity(&mut self) -> Result<types::OwnIdentity, String> {
         if !self.is_running() {
             self.start().await?;
@@ -375,4 +399,41 @@ async fn clear_clipboard_history(&mut self) -> Result<(), String> {
         _ => Err("Failed to clear clipboard history: unexpected response variant".into()),
     }
 }
+    async fn send_text(&mut self, content: String) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::SendText(clipx::SendTextRequest { content })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message), Some(clipx::ipc_response::Response::Send(r)) => Err(r.message), _ => Err("Unexpected send response".into()) }
+    }
+    async fn send_rich_text(&mut self, text: String, html: String) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::SendRichText(clipx::SendRichTextRequest { text, html })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message), Some(clipx::ipc_response::Response::Send(r)) => Err(r.message), _ => Err("Unexpected send response".into()) }
+    }
+    async fn send_image(&mut self, width: u32, height: u32, rgba: Vec<u8>) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::SendImage(clipx::SendImageRequest { width, height, rgba })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message), Some(clipx::ipc_response::Response::Send(r)) => Err(r.message), _ => Err("Unexpected send response".into()) }
+    }
+    async fn send_file(&mut self, name: String, mime_type: String, data: Vec<u8>) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::SendFile(clipx::SendFileRequest { name, mime_type, data })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message), Some(clipx::ipc_response::Response::Send(r)) => Err(r.message), _ => Err("Unexpected send response".into()) }
+    }
+    async fn send_file_path(&mut self, name: String, mime_type: String, path: String) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::SendFilePath(clipx::SendFilePathRequest { name, mime_type, path })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message), Some(clipx::ipc_response::Response::Send(r)) => Err(r.message), _ => Err("Unexpected send response".into()) }
+    }
+    async fn download_clipboard_file(&mut self, id: String) -> Result<String, String> {
+        if !self.is_running() { self.start().await?; }
+        let req = clipx::IpcRequest { request: Some(clipx::ipc_request::Request::DownloadClipboardFile(clipx::DownloadClipboardFileRequest { entry_id: id })) };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response { Some(clipx::ipc_response::Response::DownloadClipboardFile(r)) if r.started => Ok(r.message), Some(clipx::ipc_response::Response::DownloadClipboardFile(r)) => Err(r.message), _ => Err("Unexpected download response".into()) }
+    }
+
 }

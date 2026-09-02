@@ -7,18 +7,21 @@
         "clipx",
         "cmdres",
         "dalek",
+        "Deque",
         "DGRAM",
         "humantime",
         "ipcreq",
         "nonblocking",
         "oneshot",
         "prost",
+        "pwstr",
         "REUSEADDR",
         "REUSEPORT",
         "serde",
         "sess",
         "tauri",
         "termux",
+        "USERPROFILE",
         "winrt"
     ]
 }

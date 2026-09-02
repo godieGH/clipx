@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.DevicesOther
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileCopy
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.PhoneIphone
@@ -571,11 +572,13 @@ fun HistoryTypeBadge(type: ClipType) {
     val palette = LocalClipxPalette.current
     val icon = when (type) {
         ClipType.TEXT -> Icons.Filled.TextFields
+        ClipType.RICH_TEXT -> Icons.Filled.FontDownload
         ClipType.IMAGE -> Icons.Filled.Image
         ClipType.FILE -> Icons.Filled.FileCopy
     }
     val tint = when (type) {
         ClipType.TEXT -> palette.textBadge
+        ClipType.RICH_TEXT -> MaterialTheme.colorScheme.primary
         ClipType.IMAGE -> MaterialTheme.colorScheme.primary
         ClipType.FILE -> palette.codeBadge
     }
@@ -602,6 +605,13 @@ data class ClipxHistoryItem(
     val sourceDevice: String,
     val ageLabel: String,
     val type: ClipType,
+    val html: String? = null,
+    val fileId: String? = null,
+    val fileName: String? = null,
+    val mimeType: String? = null,
+    val fileSize: Long = 0L,
+    val fileExpiresAtMs: Long = 0L,
+    val fileDownloaded: Boolean = false,
 )
 
 data class ClipxSheetAction(

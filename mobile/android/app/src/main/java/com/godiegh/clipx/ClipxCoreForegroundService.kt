@@ -7,10 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
+import android.os.Process
 import android.os.IBinder
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import com.godiegh.clipx.ffi.BridgeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,10 +24,11 @@ class ClipxCoreForegroundService : Service() {
         private const val CHANNEL_ID = "clipx_core"
         private const val NOTIFICATION_ID = 1001
         const val PROMPT_CHANNEL_ID = "clipx_prompts"
+        private const val ACTION_KILL_CLIPX = "com.godiegh.clipx.action.KILL_PROCESS"
 
         fun start(context: android.content.Context) {
             val intent = Intent(context, ClipxCoreForegroundService::class.java)
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
     }
 
@@ -37,6 +38,8 @@ class ClipxCoreForegroundService : Service() {
     private lateinit var notificationPlatform: AndroidNotificationPlatform
     private lateinit var eventListener: AndroidCoreEventListener
     private var listening = false
+    private var coreStarted = false
+    private var cleanedUp = false
 
     override fun onCreate() {
         super.onCreate()
@@ -51,10 +54,19 @@ class ClipxCoreForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_KILL_CLIPX) {
+            stopCoreAndSelf(wait = true)
+            stopSelfResult(startId)
+            Process.killProcess(Process.myPid())
+            return START_NOT_STICKY
+        }
         if (!listening) {
             clipboardPlatform.startListening()
             listening = true
         }
+
+        if (coreStarted) return START_STICKY
+        coreStarted = true
 
         scope.launch {
             bridgeService.start(
@@ -64,12 +76,15 @@ class ClipxCoreForegroundService : Service() {
                 notifier = notificationPlatform,
                 event = eventListener,
             )
-            // Only now is device_tx/clipboard_cmd_tx actually wired up on the
-            // Rust side — publishing any earlier lets the ViewModel's
-            // awaitBridgeService() unblock and call getIdentity() before the
-            // core can answer it, so it silently fails and identity stays
-            // "Unknown" until something else forces a re-fetch.
-            (application as ClipxApplication).setBridgeService(bridgeService)
+            // Only now are the Rust command channels actually wired. If the
+            // Activity resumed while the service was starting, its lifecycle
+            // callback may already have fired; re-check after the core is
+            // ready so that clipboard changes made in another app are not lost.
+            val app = application as ClipxApplication
+            app.setBridgeService(bridgeService)
+            if (app.isActivityVisible && AndroidClipboardPlatform.isAutoSyncOnResumeEnabled(this@ClipxCoreForegroundService)) {
+                clipboardPlatform.checkClipboardNow()
+            }
         }
 
         return START_STICKY
@@ -83,12 +98,20 @@ class ClipxCoreForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        coreStarted = false
+        listening = false
         stopCoreAndSelf(wait = true)
         scope.cancel()
         super.onDestroy()
     }
 
+    private fun clearBridgeIfOwned(app: ClipxApplication) {
+        if (app.bridgeService === bridgeService) app.setBridgeService(null)
+    }
+
     private fun stopCoreAndSelf(wait: Boolean = false) {
+        if (cleanedUp) return
+        cleanedUp = true
         if (listening) {
             clipboardPlatform.stopListening()
             listening = false
@@ -97,14 +120,14 @@ class ClipxCoreForegroundService : Service() {
         (application as ClipxApplication).onActiveClipboardCheck = null
 
         if (wait) {
-            runBlocking { bridgeService.stop() }
-            (application as ClipxApplication).setBridgeService(null)
+            if (::bridgeService.isInitialized) runBlocking { bridgeService.stop() }
+            clearBridgeIfOwned(application as ClipxApplication)
             return
         }
 
         scope.launch {
-            bridgeService.stop()
-            (application as ClipxApplication).setBridgeService(null)
+            if (::bridgeService.isInitialized) bridgeService.stop()
+            clearBridgeIfOwned(application as ClipxApplication)
             stopSelf()
         }
     }
@@ -118,11 +141,19 @@ class ClipxCoreForegroundService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val killIntent = Intent(this, ClipxCoreForegroundService::class.java).apply { action = ACTION_KILL_CLIPX }
+        val killPendingIntent = PendingIntent.getService(
+            this,
+            1002,
+            killIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_clipx)
             .setContentTitle("Clipx")
             .setContentText("Clipboard synchronization is running")
             .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_notification_clipx, "Kill Clipx", killPendingIntent)
             .setOngoing(true)
             .build()
     }

@@ -23,9 +23,9 @@ enum class PairedStatus {
 
 enum class ClipType {
     TEXT,
+    RICH_TEXT,
     IMAGE,
     FILE,
-    // for now - more will be added
 }
 
 data class PairedDevice(
@@ -60,4 +60,29 @@ data class ThisDeviceInfo(
     val deviceType: DeviceType,
     val ipAddress: String,
     val wsPort: Int,
+)
+
+
+data class SystemClipboardItem(
+    val index: Int,
+    val text: String?,
+    val htmlText: String?,
+    val mimeTypes: List<String>,
+    val isImage: Boolean,
+    val isText: Boolean,
+    val fileUri: String? = null,
+    val fileName: String? = null,
+    val fileMimeType: String? = null,
+    val fileSize: Long = 0L,
+) {
+    val isFile: Boolean get() = fileUri != null
+    val isRichText: Boolean get() = !htmlText.isNullOrBlank() && isText
+    val canSend: Boolean get() = isText || isImage || isFile
+}
+
+data class OutgoingFile(
+    val uri: android.net.Uri,
+    val name: String,
+    val mimeType: String,
+    val size: Long,
 )

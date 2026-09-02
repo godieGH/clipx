@@ -26,3 +26,8 @@ serde_json = "1"
 # local deps
 clipx = {workspace = true}
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging"] }
+rfd = "0.16"
+
+[target."cfg(windows)".dependencies]
+webview2-com = "0.38.2"
+windows = "0.61.3"

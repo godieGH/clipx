@@ -44,6 +44,14 @@ pub struct MobileClipItem {
     pub content: String,
     pub source_device: String,
     pub received_at_ms: u64,
+    pub kind: String,
+    pub html: String,
+    pub file_id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub file_size: u64,
+    pub file_expires_at_ms: u64,
+    pub file_downloaded: bool,
 }
 
 fn device_type_name(value: DeviceType) -> String {
@@ -167,8 +175,76 @@ impl BridgeService {
     pub async fn report_clipboard_changed(&self, content: String) {
         let tx = self.inner.lock().await.clipboard_cmd_tx.clone();
         if let Some(tx) = tx {
-            let _ = tx.send(clipx_core::clipboard::manager::ClipboardCommand::LocalChangeDetected { content });
+            let _ = tx.send(clipx_core::clipboard::manager::ClipboardCommand::LocalChangeDetected { payload: clipx_core::clipboard::manager::ClipboardPayload::Text(content) });
         }
+    }
+
+    async fn require_connected_device(&self) -> Result<(), BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::Connected { reply_to: reply_tx })
+            .map_err(|_| BridgeError::from("core device manager is stopped"))?;
+        let devices = reply_rx
+            .await
+            .map_err(|_| BridgeError::from("core device manager is stopped"))?;
+        if devices.is_empty() {
+            return Err(BridgeError::from("No connected devices"));
+        }
+        Ok(())
+    }
+
+    /// Explicit user-initiated clipboard send from the mobile UI.
+    /// This bypasses local-change deduplication because pressing Send is
+    /// deliberate, including when the text is identical to a previous send.
+    pub async fn send_clipboard(&self, content: String) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone()
+            .ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::SendLocal { payload: clipx_core::clipboard::manager::ClipboardPayload::Text(content) })
+            .map_err(|_| "core clipboard manager is stopped".to_string())
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn send_rich_text(&self, text: String, html: String) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::SendLocal { payload: clipx_core::clipboard::manager::ClipboardPayload::RichText { text, html } }).map_err(|_| BridgeError::from("core clipboard manager is stopped"))
+    }
+
+    pub async fn send_image(&self, width: u32, height: u32, rgba: Vec<u8>) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::SendLocal { payload: clipx_core::clipboard::manager::ClipboardPayload::Image { width, height, rgba } }).map_err(|_| BridgeError::from("core clipboard manager is stopped"))
+    }
+
+    pub async fn send_file(&self, name: String, mime_type: String, data: Vec<u8>) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::SendLocal { payload: clipx_core::clipboard::manager::ClipboardPayload::FileBytes { name, mime_type, data } }).map_err(|_| BridgeError::from("core clipboard manager is stopped"))
+    }
+
+    /// Send a file by staging/copying its path in the core instead of loading the file into a byte array.
+    pub async fn send_file_path(&self, name: String, mime_type: String, path: String) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone()
+            .ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::SendFilePath {
+            name,
+            mime_type,
+            path: std::path::PathBuf::from(path),
+            reply_to: reply_tx,
+        }).map_err(|_| BridgeError::from("core clipboard manager is stopped"))?;
+        reply_rx.await
+            .map_err(|_| BridgeError::from("core clipboard manager is stopped"))?
+            .map_err(BridgeError::from)
+    }
+
+    pub async fn download_clipboard_file(&self, id: String) -> Result<String, BridgeError> {
+        let tx = self.inner.lock().await.clipboard_cmd_tx.clone().ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::DownloadHistoryFile { entry_id: id, reply_to: reply_tx }).map_err(|_| BridgeError::from("core clipboard manager is stopped"))?;
+        reply_rx.await.map_err(|_| BridgeError::from("core clipboard manager is stopped"))
     }
 
     pub async fn get_identity(&self) -> Result<MobileIdentity, BridgeError> {
@@ -299,10 +375,10 @@ impl BridgeService {
             .map_err(|_| "core clipboard manager is stopped".to_string())
             .map_err(BridgeError::from)?;
         Ok(items.into_iter().map(|item| MobileClipItem {
-            id: item.id,
-            content: item.content,
-            source_device: item.source_device,
-            received_at_ms: item.received_at_ms,
+            id: item.id, content: item.content, source_device: item.source_device, received_at_ms: item.received_at_ms,
+            kind: match item.kind { clipx_core::clipboard::clipstore::ClipKind::Text => "text", clipx_core::clipboard::clipstore::ClipKind::RichText => "rich_text", clipx_core::clipboard::clipstore::ClipKind::Image => "image", clipx_core::clipboard::clipstore::ClipKind::File => "file" }.into(),
+            html: item.html.unwrap_or_default(), file_id: item.file_id.unwrap_or_default(), file_name: item.file_name.unwrap_or_default(), mime_type: item.mime_type.unwrap_or_default(),
+            file_size: item.file_size, file_expires_at_ms: item.file_expires_at_ms, file_downloaded: item.file_downloaded,
         }).collect())
     }
 

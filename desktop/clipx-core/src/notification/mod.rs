@@ -33,6 +33,14 @@ pub enum IncomingClipboardDecision {
     Ignore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncomingClipboardKind {
+    Text,
+    RichText,
+    Image,
+    File,
+}
+
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum Prompt {
@@ -47,8 +55,8 @@ pub enum Prompt {
 
     IncomingClipboard {
         peer_name: String,
-        content: String, // later will be use to for image url,
-        // clipboard_type: ClipboardType, // Text, Image, File, RichText
+        content: String,
+        kind: IncomingClipboardKind,
     },
 }
 
@@ -67,13 +75,15 @@ impl Prompt {
                 ),
             ),
 
-            Prompt::IncomingClipboard { peer_name, .. } => (
-                "Clipboard received".to_string(),
-                format!(
-                    "Received clipboard from {peer_name}. \
-                     Would you like to copy it to your clipboard?"
-                ),
-            ),
+            Prompt::IncomingClipboard { peer_name, content, kind } => {
+                let body = match kind {
+                    IncomingClipboardKind::Text | IncomingClipboardKind::RichText =>
+                        format!("{content}\n\nReceived from {peer_name}."),
+                    IncomingClipboardKind::Image => format!("Image received from {peer_name}."),
+                    IncomingClipboardKind::File => format!("{content}\nReceived from {peer_name}."),
+                };
+                ("Clipboard received".to_string(), body)
+            }
         }
     }
 }

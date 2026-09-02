@@ -16,6 +16,10 @@ fn main() {
         "clipx.PairingEvent.State",
         "#[derive(serde::Serialize)]",
     );
+    config.type_attribute(
+        "clipx.FileTransferEvent",
+        "#[derive(serde::Serialize)]",
+    );
 
     config
         .compile_protos(&["../../protos/clipx.proto"], &["../../protos/"])

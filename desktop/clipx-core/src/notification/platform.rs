@@ -10,7 +10,7 @@ use crate::platform::NotificationPrompter;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::{IncomingClipboardDecision, PairDecision, Prompt};
+use super::{IncomingClipboardDecision, IncomingClipboardKind, PairDecision, Prompt};
 
 pub type NotificationFuture<'a, T> =
     Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -107,8 +107,13 @@ impl<T: NotificationPrompter> NotificationEngine for PlatformNotificationEngine<
             let (prompt_id, rx) = Self::register_prompt();
 
             match prompt {
-                Prompt::IncomingClipboard { peer_name, .. } => {
-                    self.notifier.show_received_clipboard(prompt_id.clone(), peer_name);
+                Prompt::IncomingClipboard { peer_name, kind, .. } => {
+                    let action = match kind {
+                        IncomingClipboardKind::Image => "Save image",
+                        IncomingClipboardKind::File => "Download file",
+                        IncomingClipboardKind::Text | IncomingClipboardKind::RichText => "Copy to clipboard",
+                    };
+                    self.notifier.show_received_clipboard(prompt_id.clone(), peer_name, action.to_string());
                 }
                 _ => {
                     Self::remove_prompt(&prompt_id);

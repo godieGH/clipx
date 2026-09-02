@@ -16,6 +16,20 @@ import kotlinx.coroutines.flow.first
 class ClipxApplication : Application() {
     val sheetController = ClipxSheetController()
 
+
+    private val unreadClipboardPromptIds = mutableSetOf<String>()
+
+    @Synchronized
+    fun markClipboardPromptUnread(promptId: String): Int {
+        unreadClipboardPromptIds.add(promptId)
+        return unreadClipboardPromptIds.size
+    }
+
+    @Synchronized
+    fun clearClipboardPrompt(promptId: String): Int {
+        unreadClipboardPromptIds.remove(promptId)
+        return unreadClipboardPromptIds.size
+    }
     @Volatile
     var bridgeService: BridgeService? = null
         private set
@@ -66,7 +80,6 @@ class ClipxApplication : Application() {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) = Unit
         })
-        ClipxCoreForegroundService.start(this)
     }
 }
 
@@ -74,4 +87,5 @@ sealed interface CoreUiEvent {
     data object DevicesChanged : CoreUiEvent
     data object ClipboardChanged : CoreUiEvent
     data class PairingChanged(val deviceId: String, val state: Int, val message: String) : CoreUiEvent
+    data class FileTransferChanged(val entryId: String, val fileId: String, val done: Long, val total: Long, val state: String, val message: String) : CoreUiEvent
 }

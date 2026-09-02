@@ -30,10 +30,39 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
         }
         enableEdgeToEdge()
+        handleShareIntent(intent)
         setContent {
             ClipxTheme {
                 ClipxApp(coreViewModel)
             }
         }
+    }
+
+    private var serviceStartRequested = false
+
+    override fun onPostResume() {
+        super.onPostResume()
+        if (!serviceStartRequested) {
+            serviceStartRequested = true
+            ClipxCoreForegroundService.start(this)
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: android.content.Intent?) {
+        if (intent?.action != android.content.Intent.ACTION_SEND && intent?.action != android.content.Intent.ACTION_SEND_MULTIPLE) return
+        val uris = buildList {
+            intent?.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let(::add)
+            intent?.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let { addAll(it) }
+            intent?.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(::add) }
+        }.distinct()
+        if (uris.isNotEmpty()) coreViewModel.enqueueFiles(this, uris)
+        else intent?.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let(coreViewModel::enqueueSharedText)
+        if (uris.isNotEmpty()) coreViewModel.openSharedSync()
     }
 }

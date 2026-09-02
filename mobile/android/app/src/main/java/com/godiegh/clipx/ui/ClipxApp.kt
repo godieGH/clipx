@@ -1,6 +1,8 @@
 package com.godiegh.clipx.ui
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -21,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.godiegh.clipx.ClipxApplication
 import com.godiegh.clipx.ClipxCoreViewModel
+import com.godiegh.clipx.ClipType
 import com.godiegh.clipx.AndroidClipboardPlatform
 import com.godiegh.clipx.ui.theme.ClipxLiveBackground
 
@@ -30,6 +34,7 @@ private enum class AppRoute {
     PAIR_NEW,
     THIS_DEVICE,
     DEVICE_DETAILS,
+    SYNC,
     CANT_SEE_DEVICE,
 }
 
@@ -46,6 +51,9 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
     val context = LocalContext.current
     val application = context.applicationContext as ClipxApplication
     val clipxSheetController = application.sheetController
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) viewModel.enqueueFiles(context, uris)
+    }
 
     fun openDevices() {
         viewModel.stopActiveScan()
@@ -64,6 +72,13 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
         else viewModel.stopActiveScan()
     }
 
+    LaunchedEffect(viewModel.sharedSyncRequested) {
+        if (viewModel.sharedSyncRequested) {
+            route = AppRoute.SYNC
+            viewModel.consumeSharedSyncRequest()
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.messages.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -80,13 +95,18 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                 onDevices = ::openDevices,
                 onHistory = ::openHistory,
             ) { innerPadding ->
-                AnimatedContent(
-                    targetState = route,
-                    modifier = innerPadding,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "clipx-route",
-                ) { currentRoute ->
-                    when (currentRoute) {
+                PullToRefreshBox(
+                    isRefreshing = viewModel.refreshing,
+                    onRefresh = { viewModel.restartServiceAndRefresh(context) },
+                    modifier = innerPadding.fillMaxSize(),
+                ) {
+                    AnimatedContent(
+                        targetState = route,
+                        modifier = Modifier.fillMaxSize(),
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "clipx-route",
+                    ) { currentRoute ->
+                        when (currentRoute) {
                         AppRoute.DEVICES -> DevicesScreen(
                             pairedDevices = viewModel.pairedDevices,
                             availableDevices = viewModel.availableDevices.map {
@@ -94,6 +114,10 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                             },
                             onOpenPair = { route = AppRoute.PAIR_NEW },
                             onOpenThisDevice = { route = AppRoute.THIS_DEVICE },
+                            onOpenSync = {
+                                viewModel.clearSyncClipboardItem()
+                                route = AppRoute.SYNC
+                            },
                             onOpenDetails = { id ->
                                 detailDeviceId = id
                                 route = AppRoute.DEVICE_DETAILS
@@ -134,20 +158,43 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                             onBack = ::openDevices,
                         )
 
+                        AppRoute.SYNC -> SyncScreen(
+                            item = viewModel.systemClipboardItem,
+                            pendingFiles = viewModel.pendingFiles,
+                            connectedDeviceCount = viewModel.connectedDeviceCount(),
+                            autoSyncOnResume = viewModel.autoSyncOnResume,
+                            onAutoSyncChange = { enabled -> viewModel.setAutoSyncOnResume(context, enabled) },
+                            onRefresh = { viewModel.refreshSystemClipboard(context) },
+                            onPickFiles = { pickFiles.launch(arrayOf("*/*")) },
+                            onRemovePendingFile = viewModel::removePendingFile,
+                            onSend = { item -> viewModel.sendSelectedClipboardItem(item, context) },
+                            onSendFiles = { viewModel.sendPendingFiles(context) },
+                            sendingFiles = viewModel.sendingFiles,
+                            onBack = ::openDevices,
+                            onClearClipboard = {
+                                viewModel.clearSyncClipboardItem()
+                            },
+                        )
+
                         AppRoute.CANT_SEE_DEVICE -> CantSeeDeviceScreen(onBack = { route = AppRoute.PAIR_NEW })
 
                         AppRoute.HISTORY -> HistoryScreen(
                             items = viewModel.historyItems,
+                            fileTransfers = viewModel.fileTransfers,
                             search = searchHistory,
                             onSearchChange = { searchHistory = it },
                             onBack = ::openHistory,
                             onClearAll = viewModel::clearHistory,
                             onItemActions = { selectedHistory = it },
                             onCopyItem = { item ->
-                                AndroidClipboardPlatform.copyWithoutSync(context, item.content)
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(item)
+                                else {
+                                    AndroidClipboardPlatform.copyWithoutSync(context, item.content)
+                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
                             },
                         )
+                        }
                     }
                 }
             }
@@ -157,8 +204,11 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                     item = item,
                     onDismiss = { selectedHistory = null },
                     onCopy = {
-                        AndroidClipboardPlatform.copyWithoutSync(context, item.content)
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(item)
+                        else {
+                            AndroidClipboardPlatform.copyWithoutSync(context, item.content)
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
                         selectedHistory = null
                     },
                     onRemove = {

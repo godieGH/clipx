@@ -1,5 +1,5 @@
 use crate::{
-    clipboard::manager::ClipboardManager,
+    clipboard::manager::{ClipboardManager, ClipboardOutbound},
     device, netio,
     platform::{ClipboardSink, CoreEvent, CoreEventListener},
 };
@@ -152,7 +152,7 @@ where
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let (clipboard_cmd_tx, clipboard_cmd_rx) = mpsc::unbounded_channel();
-    let (clipboard_out_tx, clipboard_out_rx) = mpsc::unbounded_channel();
+    let (clipboard_out_tx, clipboard_out_rx) = mpsc::unbounded_channel::<ClipboardOutbound>();
     let (discovered_tx, discovered_rx) = mpsc::unbounded_channel();
     let (device_tx, device_rx) = mpsc::unbounded_channel();
     let (transport_tx, transport_rx) = mpsc::unbounded_channel();
@@ -195,6 +195,7 @@ where
     .expect("failed to start discovery");
     tasks.extend(discovery_tasks);
 
+    
     let device_manager = crate::device::manager::DeviceManager::new(
         device::config::trusted_devices_path(),
         identity,
@@ -204,6 +205,7 @@ where
         events_tx.clone(),
     );
     let shutdown_for_device_manager = shutdown_rx.clone();
+    let clipboard_cmd_tx_for_device_manager = clipboard_cmd_tx.clone();
     tasks.push(tokio::spawn(async move {
         device_manager
             .run(
@@ -212,6 +214,7 @@ where
                 device_rx,
                 peer_event_rx,
                 clipboard_out_rx,
+                clipboard_cmd_tx_for_device_manager.clone(),
             )
             .await;
     }));
@@ -237,6 +240,9 @@ where
                                         crate::platform::PairingEventState::Succeeded => 2,
                                     };
                                     events.on_pairing_change(device_id, state, message);
+                                }
+                                crate::platform::CoreEvent::FileTransferChanged { entry_id, file_id, done, total, state, message } => {
+                                    events.on_file_transfer(entry_id, file_id, done, total, state, message);
                                 }
                             },
                             Err(broadcast::error::RecvError::Lagged(_)) => continue,

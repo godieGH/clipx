@@ -1,28 +1,39 @@
 syntax = "proto3";
 package clipx;
 
+message Hello { uint32 proto_version = 1; }
 
-// ---------------------------------
-// Clipboard types
-// ---------------------------------
-message Hello {
-    uint32 proto_version = 1;
-}
-
+// Clipboard payloads intentionally separate ordinary clipboard content from
+// file offers. Text/rich-text/images can be delivered immediately. Files are
+// represented by a short-lived offer and fetched only after the receiver asks.
 message ClipboardMessage {
     oneof content {
         string text = 1;
+        RichText rich_text = 2;
+        ImageContent image = 3;
+        FileOffer file_offer = 4;
     }
 }
-
-// -----------------------------------------
-// Device Discovery types
-// ----------------------------------------
-message Announce {
-  bytes fingerprint = 1;
-  string device_name = 2;
-  DeviceType device_type = 3;
-  uint32 ws_port = 4;
+message RichText { string text = 1; string html = 2; }
+message ImageContent {
+    uint32 width = 1;
+    uint32 height = 2;
+    bytes rgba = 3;
+}
+message FileOffer {
+    string file_id = 1;
+    string name = 2;
+    string mime_type = 3;
+    uint64 size = 4;
+    uint64 expires_at_ms = 5;
+}
+message FileDownloadRequest { string file_id = 1; }
+message FileChunk {
+    string file_id = 1;
+    uint32 seq = 2;
+    bytes data = 3;
+    bool eof = 4;
+    uint64 total_size = 5;
 }
 
 enum DeviceType {
@@ -34,50 +45,21 @@ enum DeviceType {
   IOS = 5;
 }
 
-// -----------------------------
-// Device pairing and Connection
-// -----------------------------
-message PeerPairRequest {
-  string name = 1;
-  bytes public_key = 2;
-  bytes fingerprint = 3; // lets an inbound responder key its connection without recomputing
+message Announce {
+  bytes fingerprint = 1;
+  string device_name = 2;
+  DeviceType device_type = 3;
+  uint32 ws_port = 4;
 }
-
-message PeerPairResponse {
-  bytes public_key = 1;
-  string name = 2;
-}
-
-message PeerPairChallenge {
-  bytes nonce = 1;
-}
-
-message PeerPairChallengeResponse {
-  bytes signature = 1;
-}
-
+message PeerPairRequest { string name = 1; bytes public_key = 2; bytes fingerprint = 3; }
+message PeerPairResponse { bytes public_key = 1; string name = 2; }
+message PeerPairChallenge { bytes nonce = 1; }
+message PeerPairChallengeResponse { bytes signature = 1; }
 message PairAck {}
-
-// ---- Connect: 3-way, already-trusted devices only ----
-message PeerConnectChallenge {
-  bytes nonce = 1;
-  bytes initiator_fingerprint = 2; // lets an inbound responder look up who's calling
-}
-
-message PeerConnectChallengeResponse {
-  bytes signature = 1;
-}
-
+message PeerConnectChallenge { bytes nonce = 1; bytes initiator_fingerprint = 2; }
+message PeerConnectChallengeResponse { bytes signature = 1; }
 message ConnectAck {}
-
-// ---- Shared pre-transport control (4xxx fixed codes — see pairing::control) ----
-message PreTransportControl {
-  uint32 code = 1;
-  string message = 2;
-}
-
-// Single wire envelope for the peer TCP+WS transport. Pre-transport variants
-// are handled today; Clipboard is defined but not yet routed anywhere.
+message PreTransportControl { uint32 code = 1; string message = 2; }
 message PeerMessage {
   oneof body {
     PeerPairRequest pair_request = 1;
@@ -90,12 +72,11 @@ message PeerMessage {
     ConnectAck connect_ack = 8;
     PreTransportControl control = 9;
     ClipboardMessage clipboard = 10;
+    FileDownloadRequest file_download_request = 11;
+    FileChunk file_chunk = 12;
   }
 }
 
-// --------------------------------------------------------------
-// IPC based types - will split them later into different package
-// --------------------------------------------------------------
 message IpcRequest {
   oneof request {
     SeenRequest seen = 1;
@@ -113,9 +94,14 @@ message IpcRequest {
     ClipboardHistoryRequest clipboard_history = 13;
     ClipboardRemoveRequest clipboard_remove = 14;
     ClipboardClearRequest clipboard_clear = 15;
+    SendTextRequest send_text = 16;
+    SendRichTextRequest send_rich_text = 17;
+    SendImageRequest send_image = 18;
+    SendFileRequest send_file = 19;
+    DownloadClipboardFileRequest download_clipboard_file = 20;
+    SendFilePathRequest send_file_path = 21;
   }
 }
-
 message IpcResponse {
   oneof response {
     SeenResponse seen = 1;
@@ -134,200 +120,72 @@ message IpcResponse {
     ClipboardHistoryResponse clipboard_history = 14;
     ClipboardRemoveResponse clipboard_remove = 15;
     ClipboardClearResponse clipboard_clear = 16;
+    SendResponse send = 17;
+    DownloadClipboardFileResponse download_clipboard_file = 18;
   }
 }
-
-message SeenRequest {
-  enum Mode {
-    ALL = 0;
-    TRUSTED = 1;
-    UNTRUSTED = 2;
-  }
-
-  Mode mode = 1;
-}
-
-message SeenResponse {
-  repeated DeviceInfo devices = 1;
-}
-
+message SeenRequest { enum Mode { ALL = 0; TRUSTED = 1; UNTRUSTED = 2; } Mode mode = 1; }
+message SeenResponse { repeated DeviceInfo devices = 1; }
 message TrustedRequest {}
-
-message TrustedResponse {
-  repeated DeviceInfo devices = 1;
-}
-
+message TrustedResponse { repeated DeviceInfo devices = 1; }
 message IdentityRequest {}
-
-message IdentityResponse {
-  string device_id = 1;
-  string device_name = 2;
-  string public_key_hex = 3;
-  uint32 ws_port = 4;
-  DeviceType device_type = 5;
-  string ip_address = 6;
-}
-
-message ErrorResponse {
-  string message = 1;
-}
-
-message PairRequest {
-  string device_id = 1;
-}
-
-message PairResponse {
-  string device_id = 1;
-  string status = 2;
-  string message = 3;
-  string pairing_code = 4;
-}
-
+message IdentityResponse { string device_id = 1; string device_name = 2; string public_key_hex = 3; uint32 ws_port = 4; DeviceType device_type = 5; string ip_address = 6; }
+message ErrorResponse { string message = 1; }
+message PairRequest { string device_id = 1; }
+message PairResponse { string device_id = 1; string status = 2; string message = 3; string pairing_code = 4; }
 message PairPendingRequest {}
-message PairPendingResponse {
-  repeated PairPendingSession pending = 1;
-}
-message PairPendingSession {
-  string device_id = 1;
-  string device_name = 2;
-  string stage = 3; // "awaiting_approval" | "awaiting_code_confirm"
-  string code = 4;  // set only when stage == awaiting_code_confirm
-}
-
-message PairApproveRequest {
-  string device_id = 1;
-  bool approve = 2;
-}
-message PairApproveResponse {
-  string device_id = 1;
-  string status = 2;
-  string message = 3;
-}
-
-message ConnectRequest {
-  string device_id = 1;
-}
-
-message ConnectResponse {
-  string device_id = 1;
-  string status = 2;
-  string message = 3;
-}
-
+message PairPendingResponse { repeated PairPendingSession pending = 1; }
+message PairPendingSession { string device_id = 1; string device_name = 2; string stage = 3; string code = 4; }
+message PairApproveRequest { string device_id = 1; bool approve = 2; }
+message PairApproveResponse { string device_id = 1; string status = 2; string message = 3; }
+message ConnectRequest { string device_id = 1; }
+message ConnectResponse { string device_id = 1; string status = 2; string message = 3; }
 message ConnectedRequest {}
-
-message ConnectedResponse {
-  repeated DeviceInfo devices = 1;
-}
-
-enum ConnectionState {
-  DISCONNECTED = 0;
-  CONNECTING = 1;
-  CONNECTED = 2;
-  UNAVAILABLE = 3;
-}
-
-message DeviceInfo {
-  string id = 1;
-  string name = 2;
-  DeviceType device_type = 3;
-  string address = 4;
-  uint64 last_seen_ms = 5;
-  uint32 ws_port = 6;
-  ConnectionState connection = 7;
-  bool auto_connect = 8;
-  bool trusted = 9;
-}
-
+message ConnectedResponse { repeated DeviceInfo devices = 1; }
+enum ConnectionState { DISCONNECTED = 0; CONNECTING = 1; CONNECTED = 2; UNAVAILABLE = 3; }
+message DeviceInfo { string id = 1; string name = 2; DeviceType device_type = 3; string address = 4; uint64 last_seen_ms = 5; uint32 ws_port = 6; ConnectionState connection = 7; bool auto_connect = 8; bool trusted = 9; }
 message GetPairedRequest {}
-message GetPairedResponse {
-  repeated DeviceInfo devices = 1;
-}
-
+message GetPairedResponse { repeated DeviceInfo devices = 1; }
 message DisconnectRequest { string device_id = 1; }
-message DisconnectResponse {
-  string device_id = 1;
-  string status = 2;
-  string message = 3;
-}
-
-message SetAutoConnectRequest {
-  string device_id = 1;
-  bool auto_connect = 2;
-}
-message SetAutoConnectResponse {
-  string device_id = 1;
-  bool auto_connect = 2;
-}
-
+message DisconnectResponse { string device_id = 1; string status = 2; string message = 3; }
+message SetAutoConnectRequest { string device_id = 1; bool auto_connect = 2; }
+message SetAutoConnectResponse { string device_id = 1; bool auto_connect = 2; }
 message ForgetDeviceRequest { string device_id = 1; }
-message ForgetDeviceResponse {
-  string device_id = 1;
-  string status = 2;
-}
+message ForgetDeviceResponse { string device_id = 1; string status = 2; }
 
-// -----------------------------
-// Clipboard history (IPC-only — not sent over the peer wire)
-// -----------------------------
 message ClipHistoryEntry {
   string id = 1;
   string content = 2;
   string source_device_name = 3;
   uint64 received_at_ms = 4;
+  string kind = 5;
+  string html = 6;
+  string file_id = 7;
+  string file_name = 8;
+  string mime_type = 9;
+  uint64 file_size = 10;
+  uint64 file_expires_at_ms = 11;
+  bool file_downloaded = 12;
+  string local_file_path = 13;
 }
-
-message ClipboardHistoryRequest {
-  uint32 limit = 1; // 0 = no limit
-}
-message ClipboardHistoryResponse {
-  repeated ClipHistoryEntry entries = 1;
-}
-
+message ClipboardHistoryRequest { uint32 limit = 1; }
+message ClipboardHistoryResponse { repeated ClipHistoryEntry entries = 1; }
 message ClipboardRemoveRequest { string id = 1; }
 message ClipboardRemoveResponse { bool removed = 1; }
-
 message ClipboardClearRequest {}
 message ClipboardClearResponse {}
+message SendTextRequest { string content = 1; }
+message SendRichTextRequest { string text = 1; string html = 2; }
+message SendImageRequest { uint32 width = 1; uint32 height = 2; bytes rgba = 3; }
+message SendFileRequest { string name = 1; string mime_type = 2; bytes data = 3; }
+message SendFilePathRequest { string name = 1; string mime_type = 2; string path = 3; }
+message SendResponse { bool sent = 1; string message = 2; }
+message DownloadClipboardFileRequest { string entry_id = 1; }
+message DownloadClipboardFileResponse { bool started = 1; string message = 2; }
 
-
-// -----------------------------------------------------------
-// Push events (server -> client, unsolicited — not a reply to
-// any IpcRequest). Payload-free by design: each is a "something
-// changed, go re-fetch" ping, not a snapshot, so it can never go
-// stale relative to what GetPaired/ClipboardHistory would return.
-// -----------------------------------------------------------
 message DevicesChangedEvent {}
 message ClipboardChangedEvent {}
-
-message PairingEvent {
-  string device_id = 1;
-
-  enum State {
-    STARTED = 0;
-    FAILED = 1;
-    SUCCEEDED = 2;
-  }
-
-  State state = 2;
-  string message = 3;
-}
-
-message IpcEvent {
-  oneof event {
-    DevicesChangedEvent devices_changed = 1;
-    ClipboardChangedEvent clipboard_changed = 2;
-    PairingEvent pairing_event = 3;
-  }
-}
-
-// Every server->client frame is one of these now, not a bare
-// IpcResponse. `response` answers the request that was just sent;
-// `event` is unsolicited and can arrive at any time, including
-// while a request is in flight. The client must decode frames as
-// IpcServerMessage at the top level, not as IpcResponse directly.
-message IpcServerMessage {
-  oneof payload {
-    IpcResponse response = 1;
-    IpcEvent event = 2;
-  }
-}
+message PairingEvent { string device_id = 1; enum State { STARTED = 0; FAILED = 1; SUCCEEDED = 2; } State state = 2; string message = 3; }
+message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; }
+message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; } }
+message IpcServerMessage { oneof payload { IpcResponse response = 1; IpcEvent event = 2; } }
