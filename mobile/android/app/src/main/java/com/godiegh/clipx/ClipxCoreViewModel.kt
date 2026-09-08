@@ -325,8 +325,10 @@ class ClipxCoreViewModel(
                     item.isText -> bridge?.sendClipboard(item.text.orEmpty()) ?: error("Clipx core is not ready")
                     else -> error("Clipboard content is not supported")
                 }
-            }.onSuccess { withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage("Clipboard sent"); onDone() } }
-                .onFailure { withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage(it.message ?: "Could not send clipboard") } }
+            }.onSuccess {
+                AndroidClipboardPlatform.setLastSyncedMarker(context, AndroidClipboardPlatform.markerFor(item))
+                withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage("Clipboard sent"); onDone() }
+            }.onFailure { withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage(it.message ?: "Could not send clipboard") } }
         }
     }
 
@@ -408,7 +410,10 @@ class ClipxCoreViewModel(
                 return@launch
             }
             runCatching { service.sendClipboard(content) }
-                .onSuccess { emitMessage("Clipboard sent") }
+                .onSuccess {
+                    AndroidClipboardPlatform.setLastSyncedMarker(application, "text:$content")
+                    emitMessage("Clipboard sent")
+                }
                 .onFailure { emitMessage(it.message ?: "Could not send clipboard") }
         }
     }

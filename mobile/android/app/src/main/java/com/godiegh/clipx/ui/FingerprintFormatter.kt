@@ -8,6 +8,6 @@ package com.godiegh.clipx.ui
  */
 fun formatFingerprint(raw: String): String {
     val hex = raw.filter { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
-    val display = hex.take(28).uppercase()
+    val display = hex.take(28)
     return display.chunked(4).joinToString("-")
 }

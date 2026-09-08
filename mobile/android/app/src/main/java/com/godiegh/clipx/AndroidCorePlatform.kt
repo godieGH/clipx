@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import androidx.core.content.edit
+import kotlinx.coroutines.sync.withLock
 
 /** System clipboard adapter used by core for *incoming* clipboard decisions. */
 class AndroidClipboardPlatform(
@@ -31,7 +33,6 @@ class AndroidClipboardPlatform(
 ) : ClipboardPlatform {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    private var lastAutoSyncMarker: String? = null
 
     private val listener = ClipboardManager.OnPrimaryClipChangedListener {
         val app = context.applicationContext as ClipxApplication
@@ -39,15 +40,17 @@ class AndroidClipboardPlatform(
         scope.launch { sendCurrentClipboardIfNeeded(force = false) }
     }
 
-    private suspend fun sendCurrentClipboardIfNeeded(force: Boolean) {
+    private val syncMutex = kotlinx.coroutines.sync.Mutex()
+
+    private suspend fun sendCurrentClipboardIfNeeded(force: Boolean) = syncMutex.withLock {
         val items = readPrimaryClipboard(context)
         for (item in items) {
             if (!item.canSend) continue
             if (item.isText && globalSuppressed.getAndSet(null) == item.text) continue
             val marker = markerFor(item)
-            if (!force && marker == lastAutoSyncMarker) continue
+            if (!force && marker == getLastSyncedMarker(context)) continue
             runCatching { sendItem(item) }
-                .onSuccess { lastAutoSyncMarker = marker }
+                .onSuccess { setLastSyncedMarker(context, marker) }
                 .onFailure { showError(it.message ?: "Could not auto-sync clipboard") }
         }
     }
@@ -279,13 +282,37 @@ class AndroidClipboardPlatform(
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_SYNC_ON_RESUME, true)
 
         fun setAutoSyncOnResumeEnabled(context: Context, enabled: Boolean) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTO_SYNC_ON_RESUME, enabled).apply()
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+                putBoolean(
+                    KEY_AUTO_SYNC_ON_RESUME,
+                    enabled
+                )
+            }
         }
 
         fun copyWithoutSync(context: Context, content: String) {
             globalSuppressed.set(content)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Clipx", content))
+        }
+
+        private const val KEY_LAST_SYNCED_MARKER = "last_synced_marker"
+
+        fun getLastSyncedMarker(context: Context): String? =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_LAST_SYNCED_MARKER, null)
+
+        fun setLastSyncedMarker(context: Context, marker: String) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit { putString(KEY_LAST_SYNCED_MARKER, marker) }
+        }
+
+        // make markerFor accessible from outside the class too
+        fun markerFor(item: SystemClipboardItem): String = when {
+            item.isFile -> "file:${item.fileUri}:${item.fileSize}"
+            item.isImage -> "image:${item.fileUri ?: item.mimeTypes.joinToString()}:${item.fileSize}"
+            item.isRichText -> "rich:${item.text}:${item.htmlText}"
+            else -> "text:${item.text}"
         }
     }
 }
