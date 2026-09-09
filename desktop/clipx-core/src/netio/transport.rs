@@ -11,7 +11,6 @@ use tokio_tungstenite::{
 
 use crate::message::proto::{self, peer_message::Body};
 
-#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct ConnectedDevice {
     pub id: String,
@@ -32,7 +31,6 @@ pub enum TransportEvent {
     },
 }
 
-#[allow(unused)]
 #[derive(Debug)]
 pub enum TransportCommand {
     Connect {

@@ -41,7 +41,6 @@ pub enum IncomingClipboardKind {
     File,
 }
 
-#[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum Prompt {
     PairRequest {

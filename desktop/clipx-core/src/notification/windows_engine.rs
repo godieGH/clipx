@@ -13,7 +13,6 @@ const APP_ID: &str = if cfg!(debug_assertions) {Toast::POWERSHELL_APP_ID } else 
 #[derive(Clone)]
 pub struct NotificationEngine;
 
-#[allow(unused)]
 impl NotificationEngine {
     pub fn new() -> Self {
         Self
