@@ -16,6 +16,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 |--------|--------|---------|
 | [0001](#0001) | fixed | Deterministic auto-connect initiator arbitration by device fingerprint. |
 | [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
+| [0003](#0002) | report | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.
@@ -33,3 +34,10 @@ Fixed by deterministic connection arbitration: when both trusted peers have auto
     [0909/155249.920:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412
 ```
 Fixed in the application lifecycle by shutting down the IPC client on Tauri `ExitRequested`, before WebView teardown. If the Chromium/WebView2 diagnostic still appears on a particular Windows runtime after this change, it should be treated as an upstream WebView2 teardown diagnostic rather than a reason to move IPC cleanup later.
+
+**Note:** This bug is not solved fixed yet it still shows — remove this note when fixed completely
+the terminal still shows this
+```
+[0910/013145.061:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412
+```
+*If it is something to be handled/fixed on code it has to be fixed right a way.*
