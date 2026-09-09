@@ -21,6 +21,7 @@
         "sess",
         "tauri",
         "termux",
+        "uniffi",
         "USERPROFILE",
         "winrt"
     ]

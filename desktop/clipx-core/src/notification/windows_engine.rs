@@ -19,8 +19,7 @@ impl NotificationEngine {
         Self
     }
 
-        /// Shared implementation for all interactive Windows notifications.
-    ///
+    /// Shared implementation for all interactive Windows notifications.
     /// The platform-specific toast mechanics live here exactly once.
     /// Individual notification types only provide their buttons,
     /// action mapping, and fallback decision.

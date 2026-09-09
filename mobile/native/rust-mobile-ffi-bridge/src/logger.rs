@@ -34,7 +34,7 @@ pub fn init_logging() {
         #[cfg(target_os = "ios")]
         {
             // could use the oslog crate, or tracing-oslog layer when we get there
-            todo!("Not implemeted yet")
+            todo!("Not implemented yet")
         }
     });
 }

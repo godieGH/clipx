@@ -18,7 +18,6 @@ pub struct ConnectedDevice {
     pub addr: SocketAddr,
 }
 
-#[allow(unused)]
 #[derive(Debug)]
 pub enum TransportEvent {
     Connected(ConnectedDevice),
