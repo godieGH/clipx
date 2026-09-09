@@ -661,6 +661,8 @@ button.device-hit:active {
   opacity: 0.3;
 }
 
+.icon-button:disabled { opacity: .45; cursor: not-allowed; }
+
 .icon-button.button-disable:hover {
   background: none;
   opacity: 0.3;
@@ -1109,6 +1111,7 @@ button.device-hit:active {
 .file-inline { margin-top:7px; font-size:11px; opacity:.78; }
 .file-progress { height:3px; margin-top:5px; border-radius:999px; background:rgba(255,255,255,.09); overflow:hidden; }
 .file-progress > span { display:block; height:100%; background:currentColor; transition:width .2s ease; }
+.file-status { margin-top:4px; font-size:11px; opacity:.68; }
 
 /* ---- sync workspace --------------------------------------------------- */
 .sync-screen {

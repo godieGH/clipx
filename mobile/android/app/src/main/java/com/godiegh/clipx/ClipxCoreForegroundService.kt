@@ -24,6 +24,7 @@ class ClipxCoreForegroundService : Service() {
         private const val CHANNEL_ID = "clipx_core"
         private const val NOTIFICATION_ID = 1001
         const val PROMPT_CHANNEL_ID = "clipx_prompts"
+        const val TRANSFER_CHANNEL_ID = "clipx_transfers"
         private const val ACTION_KILL_CLIPX = "com.godiegh.clipx.action.KILL_PROCESS"
 
         fun start(context: android.content.Context) {
@@ -172,6 +173,13 @@ class ClipxCoreForegroundService : Service() {
                 PROMPT_CHANNEL_ID,
                 "Clipx requests",
                 NotificationManager.IMPORTANCE_HIGH,
+            ).apply { setShowBadge(true) },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                TRANSFER_CHANNEL_ID,
+                "Clipx transfers",
+                NotificationManager.IMPORTANCE_LOW,
             ).apply { setShowBadge(true) },
         )
     }

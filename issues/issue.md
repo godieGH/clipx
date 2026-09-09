@@ -14,8 +14,8 @@ Developers of this codebase must ensure to report any observed issues in here, a
 
 | issues | status | comment |
 |--------|--------|---------|
-| [0001](#0001) | report | — |
-| [0002](#0002) | report | — |
+| [0001](#0001) | fixed | Deterministic auto-connect initiator arbitration by device fingerprint. |
+| [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.
@@ -25,11 +25,11 @@ Developers of this codebase must ensure to report any observed issues in here, a
 
 ## 0001
 **Observation:** when two devices start and both have already trusted each other they both simultaneously try to connect if auto-connect is turned on for both of them — sometimes one might win but sometimes both can stuck is the connecting state which delay/stops the connection.
-This is a bug and should be fixed — both devices have to be able to know if the other has already requested for connecting hence one should stop connecting
+Fixed by deterministic connection arbitration: when both trusted peers have auto-connect enabled, only the lexicographically smaller device fingerprint initiates the connection. The other peer stays passive and accepts the inbound handshake.
 
 ## 0002
-**Observation:** When the desktop app is opened they're two or three ways to stop it or shut-it-down. the close button on the reactUI is only used to hide the app to a tray. to close/quit/shutdown the app one has to ether close it through taskbar-close or through the tray menus where they can click `Quit`. the bug is shown in that second option(the tray `Quit`). it closes/shutdown the app but something is failing so the terminals show an error.
+**Observation:** When the desktop app is opened they're two or three ways to stop it or shut-it-down. the close button on the reactUI is only used to hide the app to a tray. to close/quit/shutdown the app one has to either close it through taskbar-close or through the tray menus where they can click `Quit`. the bug is shown in that second option(the tray `Quit`). it closes/shutdown the app but something is failing so the terminals show an error.
 ```
     [0909/155249.920:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412
 ```
-This observation has been seen happening on windows desktops.
+Fixed in the application lifecycle by shutting down the IPC client on Tauri `ExitRequested`, before WebView teardown. If the Chromium/WebView2 diagnostic still appears on a particular Windows runtime after this change, it should be treated as an upstream WebView2 teardown diagnostic rather than a reason to move IPC cleanup later.

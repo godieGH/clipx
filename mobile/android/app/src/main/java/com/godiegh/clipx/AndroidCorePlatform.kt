@@ -484,6 +484,7 @@ class AndroidCoreEventListener(
 
     override fun onFileTransfer(entryId: String, fileId: String, done: ULong, total: ULong, state: String, message: String) {
         application.publishCoreEvent(CoreUiEvent.FileTransferChanged(entryId, fileId, done.toLong(), total.toLong(), state, message))
+        application.transferNotifications.update(fileId, done.toLong(), total.toLong(), state, message)
     }
 }
 

@@ -1,8 +1,8 @@
 use super::{platform::{NotificationEngine as Engine, NotificationFuture}, IncomingClipboardDecision, PairDecision, Prompt};
-use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 use std::time::Duration;
 
-use tauri_winrt_notification::Toast;
+use tauri_winrt_notification::{Progress, Toast};
 use tokio::sync::oneshot;
 
 // TODO: swap for ClipX's own registered AUMID once the installer creates a
@@ -11,11 +11,13 @@ use tokio::sync::oneshot;
 const APP_ID: &str = if cfg!(debug_assertions) {Toast::POWERSHELL_APP_ID } else {"com.godiegh.clipx"};
 
 #[derive(Clone)]
-pub struct NotificationEngine;
+pub struct NotificationEngine {
+    transfer_titles: Arc<Mutex<HashMap<String, String>>>,
+}
 
 impl NotificationEngine {
     pub fn new() -> Self {
-        Self
+        Self { transfer_titles: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     /// Shared implementation for all interactive Windows notifications.
@@ -99,6 +101,81 @@ impl NotificationEngine {
             Err(_) => map_action(None),
         }
     }
+
+    fn transfer_notification(&self, file_id: String, done: u64, total: u64, state: String, message: String) {
+        let title = {
+            let mut titles = self.transfer_titles.lock().unwrap();
+            if matches!(state.as_str(), "complete" | "failed" | "expired") {
+                titles.remove(&file_id).unwrap_or_else(|| message.clone())
+            } else {
+                let title = message
+                    .strip_prefix("Requesting ")
+                    .or_else(|| message.strip_prefix("Receiving "))
+                    .or_else(|| message.strip_prefix("Sending "))
+                    .unwrap_or(&message)
+                    .split(" · ")
+                    .next()
+                    .unwrap_or(&message)
+                    .to_string();
+                titles.entry(file_id.clone()).or_insert_with(|| title.clone()).clone()
+            }
+        };
+
+        let tag = format!("clipx-transfer-{file_id}");
+        let fraction = if total == 0 { 0.0 } else { (done as f64 / total as f64).clamp(0.0, 1.0) as f32 };
+        let terminal = matches!(state.as_str(), "complete" | "failed" | "expired");
+        let successful = state == "complete";
+
+        if terminal {
+            let toast = Toast::new(APP_ID)
+                .title(&title)
+                .text1(if successful { "Downloaded successfully" } else { &message });
+            let result = if successful && std::path::Path::new(&message).is_file() {
+                let path = message.clone();
+                toast
+                    .add_button("Show in folder", "open")
+                    .on_activated(move |action| {
+                        if action.as_deref() == Some("open") {
+                            let _ = std::process::Command::new("explorer.exe")
+                                .arg(format!("/select,{path}"))
+                                .spawn();
+                        }
+                        Ok(())
+                    })
+                    .show()
+            } else {
+                toast.show()
+            };
+            if let Err(error) = result {
+                tracing::error!(?error, "failed to show file transfer completion toast");
+            }
+            return;
+        }
+
+        let progress = Progress {
+            tag,
+            title,
+            status: match state.as_str() {
+                "requesting" => "Starting download…".to_string(),
+                "receiving" => "Downloading…".to_string(),
+                "sending" => "Sending…".to_string(),
+                "saving" => "Saving…".to_string(),
+                _ => message,
+            },
+            value: fraction,
+            value_string: if total > 0 { format!("{fraction:.0}%") } else { String::new() },
+        };
+
+        let result = if done == 0 || state == "requesting" {
+            Toast::new(APP_ID).progress(&progress).show()
+        } else {
+            Toast::new(APP_ID).set_progress(&progress).map(|_| ())
+        };
+        if let Err(error) = result {
+            tracing::debug!(?error, "file transfer notification update failed");
+            let _ = Toast::new(APP_ID).progress(&progress).show();
+        }
+    }
 }
 
 impl Engine for NotificationEngine {
@@ -169,6 +246,22 @@ impl Engine for NotificationEngine {
                     .title(&title)
                     .text1(&body)
                     .show();
+            });
+        })
+    }
+
+    fn notify_file_transfer<'a>(
+        &'a self,
+        file_id: String,
+        done: u64,
+        total: u64,
+        state: String,
+        message: String,
+    ) -> NotificationFuture<'a, ()> {
+        let this = self.clone();
+        Box::pin(async move {
+            tokio::task::block_in_place(|| {
+                this.transfer_notification(file_id, done, total, state, message);
             });
         })
     }

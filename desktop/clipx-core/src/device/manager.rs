@@ -9,7 +9,7 @@ use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{platform::NotificationEngine as Engine, PairDecision, Prompt};
 use crate::platform::CoreEvent;
-use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::Write, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::Write, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,8 +41,14 @@ pub struct DeviceManager<E: Engine> {
     /// receiving/fan-out side.
     events_tx: broadcast::Sender<CoreEvent>,
 
-    // tracks current download file(s) — file_id -> entry_id
-    pending_downloads: HashMap<String, String>, 
+    // Tracks active download sessions by file id. Keeping the entry metadata
+    // here avoids releasing the guard before the clipboard manager finishes
+    // saving the fully received temporary file.
+    pending_downloads: HashMap<String, PendingDownload>,
+    // Last UI percentage reported for each direction/file. Core events use a
+    // broadcast channel, so emitting once per 1 MiB chunk can overwhelm a
+    // slower subscriber and make a large transfer appear stuck.
+    transfer_progress: HashMap<String, (String, u8)>,
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -50,6 +56,15 @@ pub struct DeviceManager<E: Engine> {
 /// always spawned as its own task rather than awaited inline; awaiting it
 /// directly would stall every other device-manager operation for as long
 /// as the popup is on screen.
+#[derive(Debug, Clone)]
+struct PendingDownload {
+    device_id: String,
+    entry_id: String,
+    file_name: String,
+    total_size: u64,
+    received_complete: bool,
+}
+
 struct IncomingFileAssembly {
     next_seq: u32,
     total_size: u64,
@@ -155,6 +170,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             clipboard_tx,
             events_tx,
             pending_downloads: HashMap::new(),
+            transfer_progress: HashMap::new(),
         }
     }
 
@@ -253,9 +269,31 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             ClipboardOutbound::FileOffer { file_id, name, mime_type, size, expires_at_ms } => {
                 self.broadcast_clipboard(ClipboardPayload::FileBytes { name: name.clone(), mime_type: mime_type.clone(), data: Vec::new() }, Some(proto::FileOffer { file_id, name, mime_type, size, expires_at_ms }));
             }
-            ClipboardOutbound::FileRequest { device_id, file_id, entry_id } => {
-                self.pending_downloads.insert(file_id.clone(), entry_id);
+            ClipboardOutbound::FileRequest { device_id, file_id, entry_id, file_name, total_size } => {
+                if self.pending_downloads.contains_key(&file_id) {
+                    tracing::debug!(%file_id, "ignoring duplicate file download request");
+                    return;
+                }
+                if !self.connected.contains_key(&device_id) {
+                    let _ = self.clipboard_tx.send(ClipboardCommand::FileDownloadReleased { file_id: file_id.clone() });
+                    let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
+                        entry_id: entry_id.clone(), file_id: file_id.clone(), done: 0, total: total_size,
+                        state: "failed".into(), message: "Device is not connected".into(),
+                    });
+                    return;
+                }
+                self.pending_downloads.insert(file_id.clone(), PendingDownload {
+                    device_id: device_id.clone(),
+                    entry_id: entry_id.clone(),
+                    file_name: file_name.clone(),
+                    total_size,
+                    received_complete: false,
+                });
+                self.notify_transfer(&entry_id, &file_id, 0, total_size, "requesting", format!("Requesting {file_name}"));
                 self.send_peer(&device_id, Body::FileDownloadRequest(proto::FileDownloadRequest { file_id }));
+            }
+            ClipboardOutbound::FileDownloadFinished { file_id } => {
+                self.pending_downloads.remove(&file_id);
             }
             ClipboardOutbound::FileStream { device_id, file_id, path, total_size } => self.stream_file_to_peer(device_id, file_id, path, total_size),
         }
@@ -301,10 +339,16 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
         if just_appeared {
             if let Some(td) = self.trusted.get(&device_id) {
+                let own_id = hex::encode(self.identity.get_this_device_fingerprint());
+                let this_device_is_auto_connect_owner = should_auto_connect(&own_id, &device_id);
                 if td.auto_connect
+                    && this_device_is_auto_connect_owner
                     && !self.connected.contains_key(&device_id)
                     && !self.connect_sessions.contains_key(&device_id)
                 {
+                    // Both trusted peers observe the same announce. Only the
+                    // lexicographically smaller fingerprint is allowed to dial.
+                    // The other side stays passive and accepts that connection.
                     let _ = self.handle_connect(&device_id);
                 }
             }
@@ -447,6 +491,18 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn on_transport_disconnected(&mut self, device_id: String) {
+        let interrupted: Vec<(String, PendingDownload)> = self
+            .pending_downloads
+            .iter()
+            .filter(|(_, pending)| pending.device_id == device_id && !pending.received_complete)
+            .map(|(file_id, pending)| (file_id.clone(), pending.clone()))
+            .collect();
+        for (file_id, pending) in interrupted {
+            self.pending_downloads.remove(&file_id);
+            self.notify_transfer(&pending.entry_id, &file_id, 0, pending.total_size, "failed", "Connection lost while downloading");
+            let _ = self.clipboard_tx.send(ClipboardCommand::FileDownloadReleased { file_id });
+        }
+
         if self.pair_sessions.remove(&device_id).is_some() {
             tracing::info!("pair session with {device_id} ended (connection closed)");
             self.notify_pair_events(
@@ -950,6 +1006,16 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     // ---------------- Connect: responder side ----------------
 
     fn on_connect_challenge(&mut self, device_id: String, c: proto::PeerConnectChallenge) {
+        if self.connected.contains_key(&device_id) {
+            tracing::debug!(%device_id, "ignoring connect challenge from already-connected peer");
+            return;
+        }
+        if self.connect_sessions.get(&device_id).is_some_and(|session| session.role == Role::Initiator && session.stage != ConnectStage::Dialing) {
+            // We already progressed our own outbound handshake. Do not overwrite
+            // that session with the peer's simultaneous inbound challenge.
+            tracing::debug!(%device_id, "ignoring overlapping inbound connect challenge");
+            return;
+        }
         if !self.trusted.is_trusted(&device_id) {
             self.send_control(
                 &device_id,
@@ -1088,15 +1154,29 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn on_file_chunk(&mut self, device_id: String, chunk: proto::FileChunk) {
-        if uuid::Uuid::parse_str(&chunk.file_id).is_err() { return; }
-        let entry_id = self.pending_downloads.get(&chunk.file_id).cloned().unwrap_or_else(|| chunk.file_id.clone());
+        let Some(pending) = self.pending_downloads.get(&chunk.file_id).cloned() else {
+            tracing::debug!(file_id = %chunk.file_id, %device_id, "ignoring unsolicited file chunk");
+            return;
+        };
+        if pending.device_id != device_id {
+            tracing::warn!(
+                file_id = %chunk.file_id,
+                expected_device = %pending.device_id,
+                actual_device = %device_id,
+                "rejecting file chunk from unexpected device"
+            );
+            return;
+        }
+        let entry_id = pending.entry_id.clone();
         const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+        if chunk.total_size != pending.total_size {
+            self.release_pending_download(&chunk.file_id);
+            self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", "Received a file with an unexpected size");
+            return;
+        }
         if chunk.total_size > MAX_FILE_SIZE || chunk.data.len() as u64 > MAX_FILE_SIZE {
-            self.pending_downloads.remove(&chunk.file_id);
-            let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: 0, total: chunk.total_size,
-                state: "failed".into(), message: "File exceeds the 512 MiB transfer limit".into(),
-            });
+            self.release_pending_download(&chunk.file_id);
+            self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", "File exceeds the 4 GiB transfer limit");
             return;
         }
         let key = (device_id.clone(), chunk.file_id.clone());
@@ -1107,55 +1187,54 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             let incoming_dir = self.incoming_files_dir.clone();
             if let Err(e) = std::fs::create_dir_all(&incoming_dir) {
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: 0, total: chunk.total_size,
-                    state: "failed".into(), message: format!("Could not prepare incoming storage: {e}"),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", format!("Could not prepare incoming storage: {e}"));
                 return;
             }
             if chunk.data.len() as u64 > chunk.total_size {
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: 0, total: chunk.total_size,
-                    state: "failed".into(), message: "Received more data than advertised".into(),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", "Received more data than advertised");
                 return;
             }
             let temp_path = incoming_dir.join(format!("clipx-{}-{}", device_id, chunk.file_id));
             let Ok(mut file) = OpenOptions::new().create_new(true).write(true).open(&temp_path) else {
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: 0, total: chunk.total_size,
-                    state: "failed".into(), message: "Could not create incoming file".into(),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", "Could not create incoming file");
                 return;
             };
             if let Err(e) = file.write_all(&chunk.data) {
                 let _ = std::fs::remove_file(&temp_path);
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: 0, total: chunk.total_size,
-                    state: "failed".into(), message: format!("Could not write incoming file: {e}"),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", format!("Could not write incoming file: {e}"));
                 return;
             }
             let received = chunk.data.len() as u64;
             if chunk.eof {
                 if received != chunk.total_size {
                     let _ = std::fs::remove_file(&temp_path);
-                    self.pending_downloads.remove(&chunk.file_id);
-                    let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                        entry_id: entry_id.clone(), file_id: chunk.file_id.clone(), done: received, total: chunk.total_size,
-                        state: "failed".into(), message: "File ended before all data arrived".into(),
-                    });
+                    self.release_pending_download(&chunk.file_id);
+                    self.notify_transfer(&entry_id, &chunk.file_id, received, chunk.total_size, "failed", "File ended before all data arrived");
                     return;
                 }
-                let _ = file.sync_all();
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.clipboard_tx.send(ClipboardCommand::IncomingFilePath {
-                    source_device_id: device_id, file_id: chunk.file_id, path: temp_path,
-                });
+                if let Err(e) = file.sync_all() {
+                    let _ = std::fs::remove_file(&temp_path);
+                    self.release_pending_download(&chunk.file_id);
+                    self.notify_transfer(&entry_id, &chunk.file_id, received, chunk.total_size, "failed", format!("Could not finalize incoming file: {e}"));
+                    return;
+                }
+                if let Some(active) = self.pending_downloads.get_mut(&chunk.file_id) {
+                    active.received_complete = true;
+                }
+                self.notify_transfer(&entry_id, &chunk.file_id, received, chunk.total_size, "receiving", format!("Receiving {}", pending.file_name));
+                if self.clipboard_tx.send(ClipboardCommand::IncomingFilePath {
+                    source_device_id: device_id,
+                    file_id: chunk.file_id.clone(),
+                    path: temp_path.clone(),
+                }).is_err() {
+                    let _ = fs::remove_file(&temp_path);
+                    self.release_pending_download(&chunk.file_id);
+                    self.notify_transfer(&entry_id, &chunk.file_id, received, chunk.total_size, "failed", "Clipboard manager is unavailable");
+                }
                 return;
             }
             self.incoming_files.insert(key, IncomingFileAssembly {
@@ -1165,58 +1244,61 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 temp_path,
                 file,
             });
-            let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                entry_id: entry_id.clone(), file_id: chunk.file_id, done: received, total: chunk.total_size,
-                state: "receiving".into(), message: "Receiving file".into(),
-            });
+            self.notify_transfer(&entry_id, &chunk.file_id, received, chunk.total_size, "receiving", format!("Receiving {}", pending.file_name));
             return;
         }
 
         let (expected_seq, total_size, received_size) = match self.incoming_files.get(&key) {
             Some(state) => (state.next_seq, state.total_size, state.received_size),
             None => {
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id, done: 0, total: chunk.total_size,
-                    state: "failed".into(), message: "Incoming file session is missing".into(),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, 0, chunk.total_size, "failed", "Incoming file session is missing");
                 return;
             }
         };
         let chunk_len = chunk.data.len() as u64;
         if chunk.seq != expected_seq || chunk.total_size != total_size || received_size.saturating_add(chunk_len) > total_size {
             if let Some(old) = self.incoming_files.remove(&key) { let _ = std::fs::remove_file(old.temp_path); }
-            self.pending_downloads.remove(&chunk.file_id);
-            let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                entry_id: entry_id.clone(), file_id: chunk.file_id, done: received_size, total: total_size,
-                state: "failed".into(), message: "Invalid file chunk sequence or size".into(),
-            });
+            self.release_pending_download(&chunk.file_id);
+            self.notify_transfer(&entry_id, &chunk.file_id, received_size, total_size, "failed", "Invalid file chunk sequence or size");
             return;
         }
         let write_ok = self.incoming_files.get_mut(&key).map(|state| state.file.write_all(&chunk.data).is_ok()).unwrap_or(false);
         if !write_ok {
             if let Some(old) = self.incoming_files.remove(&key) { let _ = std::fs::remove_file(old.temp_path); }
-            self.pending_downloads.remove(&chunk.file_id);
-            let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                entry_id: entry_id.clone(), file_id: chunk.file_id, done: received_size, total: total_size,
-                state: "failed".into(), message: "Could not write incoming file".into(),
-            });
+            self.release_pending_download(&chunk.file_id);
+            self.notify_transfer(&entry_id, &chunk.file_id, received_size, total_size, "failed", "Could not write incoming file");
             return;
         }
         let done = received_size + chunk_len;
         if chunk.eof {
             if done != total_size {
                 if let Some(old) = self.incoming_files.remove(&key) { let _ = std::fs::remove_file(old.temp_path); }
-                self.pending_downloads.remove(&chunk.file_id);
-                let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: entry_id.clone(), file_id: chunk.file_id, done, total: total_size,
-                    state: "failed".into(), message: "File ended before all data arrived".into(),
-                });
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, done, total_size, "failed", "File ended before all data arrived");
                 return;
             }
             let Some(done_state) = self.incoming_files.remove(&key) else { return; };
-            let _ = done_state.file.sync_all();
-            self.pending_downloads.remove(&chunk.file_id);
-            let _ = self.clipboard_tx.send(ClipboardCommand::IncomingFilePath { source_device_id: device_id, file_id: chunk.file_id, path: done_state.temp_path });
+            if let Err(e) = done_state.file.sync_all() {
+                let _ = std::fs::remove_file(&done_state.temp_path);
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, done, total_size, "failed", format!("Could not finalize incoming file: {e}"));
+                return;
+            }
+            if let Some(active) = self.pending_downloads.get_mut(&chunk.file_id) {
+                active.received_complete = true;
+            }
+            self.notify_transfer(&entry_id, &chunk.file_id, done, total_size, "receiving", format!("Receiving {}", pending.file_name));
+            let temp_path = done_state.temp_path;
+            if self.clipboard_tx.send(ClipboardCommand::IncomingFilePath {
+                source_device_id: device_id,
+                file_id: chunk.file_id.clone(),
+                path: temp_path.clone(),
+            }).is_err() {
+                let _ = fs::remove_file(&temp_path);
+                self.release_pending_download(&chunk.file_id);
+                self.notify_transfer(&entry_id, &chunk.file_id, done, total_size, "failed", "Clipboard manager is unavailable");
+            }
             return;
         }
         if let Some(state) = self.incoming_files.get_mut(&key) {
@@ -1224,10 +1306,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             state.received_size = done;
         }
 
-        let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
-            entry_id: entry_id.clone(), file_id: chunk.file_id, done, total: total_size,
-            state: "receiving".into(), message: "Receiving file".into(),
-        });
+        self.notify_transfer(&entry_id, &chunk.file_id, done, total_size, "receiving", format!("Receiving {}", pending.file_name));
     }
 
     fn stream_file_to_peer(&self, device_id: String, file_id: String, path: PathBuf, total_size: u64) {
@@ -1235,30 +1314,27 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         };
         let events_tx = self.events_tx.clone();
+        let notification = self.notification.clone();
+        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file").to_string();
         tokio::spawn(async move {
             const CHUNK_SIZE: usize = 1024 * 1024;
             const QUEUE_TIMEOUT: Duration = Duration::from_secs(15);
             let mut file = match tokio::fs::File::open(&path).await {
                 Ok(v) => v,
                 Err(e) => {
-                    let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                        entry_id: file_id.clone(), file_id: file_id.clone(), done: 0, total: total_size,
-                        state: "failed".into(), message: format!("Could not open file: {e}"),
-                    });
+                    Self::emit_transfer(&events_tx, &notification, &file_id, 0, total_size, "failed", format!("Could not open file: {e}")).await;
                     return;
                 }
             };
             let mut buf = vec![0u8; CHUNK_SIZE];
             let mut seq = 0u32;
             let mut sent = 0u64;
+            let mut last_percent = None::<u8>;
             loop {
                 let n = match file.read(&mut buf).await {
                     Ok(n) => n,
                     Err(e) => {
-                        let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                            entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                            state: "failed".into(), message: format!("Could not read file: {e}"),
-                        });
+                        Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", format!("Could not read file: {e}")).await;
                         return;
                     }
                 };
@@ -1273,37 +1349,22 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                             message: proto::PeerMessage { body: Some(body) },
                             reply_to: reply_tx,
                         }).is_err() {
-                            let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                                entry_id: file_id.clone(), file_id: file_id.clone(), done: 0, total: 0,
-                                state: "failed".into(), message: "Transport is unavailable".into(),
-                            });
+                            Self::emit_transfer(&events_tx, &notification, &file_id, 0, 0, "failed", "Transport is unavailable".into()).await;
                             return;
                         }
                         if !matches!(tokio::time::timeout(QUEUE_TIMEOUT, reply_rx).await, Ok(Ok(true))) {
-                            let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                                entry_id: file_id.clone(), file_id: file_id.clone(), done: 0, total: 0,
-                                state: "failed".into(), message: "Timed out while queuing empty file".into(),
-                            });
+                            Self::emit_transfer(&events_tx, &notification, &file_id, 0, 0, "failed", "Timed out while queuing empty file".into()).await;
                             return;
                         }
-                        let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                            entry_id: file_id.clone(), file_id: file_id.clone(), done: 0, total: 0,
-                            state: "complete".into(), message: "File sent".into(),
-                        });
+                        Self::emit_transfer(&events_tx, &notification, &file_id, 0, 0, "complete", format!("Sent {file_name}")).await;
                         break;
                     }
-                    let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                        entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                        state: "failed".into(), message: "Source file ended before the advertised size".into(),
-                    });
+                    Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", "Source file ended before the advertised size".into()).await;
                     return;
                 }
                 let end_pos = sent.saturating_add(n as u64);
                 if end_pos > total_size {
-                    let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                        entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                        state: "failed".into(), message: "Source file grew beyond the offered size".into(),
-                    });
+                    Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", "Source file grew beyond the offered size".into()).await;
                     return;
                 }
                 let eof = end_pos == total_size;
@@ -1316,39 +1377,85 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     message: proto::PeerMessage { body: Some(body) },
                     reply_to: reply_tx,
                 }).is_err() {
-                    let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                        entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                        state: "failed".into(), message: "Transport is unavailable".into(),
-                    });
+                    Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", "Transport is unavailable".into()).await;
                     return;
                 }
                 match tokio::time::timeout(QUEUE_TIMEOUT, reply_rx).await {
                     Ok(Ok(true)) => {}
                     Ok(Ok(false)) => {
-                        let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                            entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                            state: "failed".into(), message: "Transport rejected the file chunk".into(),
-                        });
+                        Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", "Transport rejected the file chunk".into()).await;
                         return;
                     }
                     _ => {
-                        let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                            entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                            state: "failed".into(), message: "Timed out while queuing file data".into(),
-                        });
+                        Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, "failed", "Timed out while queuing file data".into()).await;
                         return;
                     }
                 }
                 sent = end_pos;
-                let _ = events_tx.send(CoreEvent::FileTransferChanged {
-                    entry_id: file_id.clone(), file_id: file_id.clone(), done: sent, total: total_size,
-                    state: if eof { "complete" } else { "sending" }.into(),
-                    message: if eof { "File sent" } else { "Sending file" }.into(),
-                });
+                let percent = if total_size == 0 { 100 } else { ((sent.saturating_mul(100)) / total_size).min(100) as u8 };
+                if eof || last_percent != Some(percent) {
+                    let state = if eof { "complete" } else { "sending" };
+                    let message = if eof { format!("Sent {file_name}") } else { format!("Sending {file_name} · {percent}%") };
+                    Self::emit_transfer(&events_tx, &notification, &file_id, sent, total_size, state, message).await;
+                    last_percent = Some(percent);
+                }
                 if eof { break; }
                 seq = seq.saturating_add(1);
             }
         });
+    }
+
+    fn release_pending_download(&mut self, file_id: &str) -> Option<PendingDownload> {
+        let pending = self.pending_downloads.remove(file_id);
+        if pending.is_some() {
+            let _ = self.clipboard_tx.send(ClipboardCommand::FileDownloadReleased { file_id: file_id.to_string() });
+        }
+        pending
+    }
+
+    fn notify_transfer(&mut self, entry_id: &str, file_id: &str, done: u64, total: u64, state: &str, message: impl Into<String>) {
+        let message = message.into();
+        let terminal = matches!(state, "complete" | "failed" | "expired");
+        let should_emit = if terminal || total == 0 || !matches!(state, "receiving" | "sending") {
+            true
+        } else {
+            let percent = ((done.saturating_mul(100)) / total).min(100) as u8;
+            let key = (state.to_string(), percent);
+            if self.transfer_progress.get(file_id) == Some(&key) {
+                false
+            } else {
+                self.transfer_progress.insert(file_id.to_string(), key);
+                true
+            }
+        };
+        if !should_emit { return; }
+        if terminal { self.transfer_progress.remove(file_id); }
+        let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
+            entry_id: entry_id.to_string(),
+            file_id: file_id.to_string(),
+            done,
+            total,
+            state: state.to_string(),
+            message: message.clone(),
+        });
+        let notification = self.notification.clone();
+        let file_id = file_id.to_string();
+        let state = state.to_string();
+        tokio::spawn(async move {
+            notification.notify_file_transfer(file_id, done, total, state, message).await;
+        });
+    }
+
+    async fn emit_transfer(events_tx: &broadcast::Sender<CoreEvent>, notification: &E, file_id: &str, done: u64, total: u64, state: &'static str, message: String) {
+        let _ = events_tx.send(CoreEvent::FileTransferChanged {
+            entry_id: file_id.to_string(),
+            file_id: file_id.to_string(),
+            done,
+            total,
+            state: state.to_string(),
+            message: message.clone(),
+        });
+        notification.notify_file_transfer(file_id.to_string(), done, total, state.to_string(), message).await;
     }
 
     fn send_peer(&self, device_id: &str, body: Body) {
@@ -1453,6 +1560,26 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 .then_with(|| a.name.cmp(&b.name))
         });
         devices
+    }
+}
+
+fn should_auto_connect(own_id: &str, peer_id: &str) -> bool {
+    own_id < peer_id
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::should_auto_connect;
+
+    #[test]
+    fn only_lexicographically_smaller_device_initiates() {
+        assert!(should_auto_connect("0abc", "9def"));
+        assert!(!should_auto_connect("9def", "0abc"));
+    }
+
+    #[test]
+    fn equal_ids_never_auto_connect() {
+        assert!(!should_auto_connect("same", "same"));
     }
 }
 

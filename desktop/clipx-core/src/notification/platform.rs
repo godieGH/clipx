@@ -29,6 +29,19 @@ pub trait NotificationEngine: Send + Sync {
         title: &'a str,
         body: String,
     ) -> NotificationFuture<'a, ()>;
+
+    /// Optional native transfer notification. Platforms without a native
+    /// progress notification simply inherit this no-op implementation.
+    fn notify_file_transfer<'a>(
+        &'a self,
+        _file_id: String,
+        _done: u64,
+        _total: u64,
+        _state: String,
+        _message: String,
+    ) -> NotificationFuture<'a, ()> {
+        Box::pin(async {})
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

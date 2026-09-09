@@ -32,14 +32,17 @@ pub enum ClipboardPayload {
 pub enum ClipboardOutbound {
     Payload(ClipboardPayload),
     FileOffer { file_id: String, name: String, mime_type: String, size: u64, expires_at_ms: u64 },
-    FileRequest { device_id: String, file_id: String, entry_id: String },
+    FileRequest { device_id: String, file_id: String, entry_id: String, file_name: String, total_size: u64 },
+    FileDownloadFinished { file_id: String },
     FileStream { device_id: String, file_id: String, path: PathBuf, total_size: u64 },
 }
 
+#[allow(unused)]
 struct IncomingResolved {
     payload: IncomingPayload,
     source_device_name: String,
     source_device_id: String,
+    entry_id: String,
     decision: IncomingClipboardDecision,
 }
 
@@ -56,6 +59,7 @@ pub enum ClipboardCommand {
     SendFilePath { name: String, mime_type: String, path: PathBuf, reply_to: oneshot::Sender<Result<(), String>> },
     PeerFileDownloadRequest { device_id: String, file_id: String },
     DownloadHistoryFile { entry_id: String, reply_to: oneshot::Sender<String> },
+    FileDownloadReleased { file_id: String },
 }
 
 pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
@@ -68,6 +72,7 @@ pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
     resolved_rx: mpsc::UnboundedReceiver<IncomingResolved>,
     events_tx: broadcast::Sender<CoreEvent>,
     files_dir: PathBuf,
+    active_downloads: std::collections::HashSet<String>,
 }
 
 impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E, S> {
@@ -76,7 +81,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         let _ = fs::create_dir_all(&files_dir);
         let store = ClipboardStore::load(history_path, max_history);
         let (resolved_tx, resolved_rx) = mpsc::unbounded_channel();
-        Self { store, notification, clipboard_sink, recent_hashes: VecDeque::with_capacity(8), outbound_tx, resolved_tx, resolved_rx, events_tx, files_dir }
+        Self { store, notification, clipboard_sink, recent_hashes: VecDeque::with_capacity(8), outbound_tx, resolved_tx, resolved_rx, events_tx, files_dir, active_downloads: std::collections::HashSet::new() }
     }
 
 
@@ -125,7 +130,8 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 let _ = reply_to.send(result);
             }
             ClipboardCommand::PeerFileDownloadRequest { device_id, file_id } => self.send_file_for_peer(device_id, file_id),
-            ClipboardCommand::DownloadHistoryFile { entry_id, reply_to } => { let _ = reply_to.send(self.start_download(&entry_id)); },
+            ClipboardCommand::DownloadHistoryFile { entry_id, reply_to } => { let _ = reply_to.send(self.start_download(&entry_id)); }
+            ClipboardCommand::FileDownloadReleased { file_id } => { self.release_download(&file_id); },
         }
     }
 
@@ -206,30 +212,49 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
 
     fn spawn_incoming_prompt(&mut self, payload: IncomingPayload, source_device_name: String, source_device_id: String) {
+        // Persist the received item before waiting for the prompt. The prompt is an
+        // action on an already-received item, not the gate that determines whether
+        // history knows about it. This also makes a dismissed prompt recoverable
+        // from history later.
+        let item = match &payload {
+            IncomingPayload::Text(content) => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: content.clone(), source_device: source_device_name.clone(), source_device_id: source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::Text, html: None, file_id: None, file_name: None, mime_type: None, file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
+            IncomingPayload::RichText { text, html } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: text.clone(), source_device: source_device_name.clone(), source_device_id: source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::RichText, html: Some(html.clone()), file_id: None, file_name: None, mime_type: None, file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
+            IncomingPayload::Image { .. } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: "Image clipboard content".into(), source_device: source_device_name.clone(), source_device_id: source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::Image, html: None, file_id: None, file_name: None, mime_type: Some("image/raw".into()), file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
+            IncomingPayload::FileOffer { file } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: file.name.clone(), source_device: source_device_name.clone(), source_device_id: source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::File, html: None, file_id: Some(file.file_id.clone()), file_name: Some(file.name.clone()), mime_type: Some(file.mime_type.clone()), file_size: file.size, file_expires_at_ms: file.expires_at_ms, file_downloaded: false, local_file_path: None },
+        };
+        let proposed_entry_id = item.id.clone();
+        let added = self.store.add(item);
+        let entry_id = if added {
+            self.notify_clipboard_changed();
+            proposed_entry_id
+        } else {
+            // ClipboardStore only rejects a duplicate when it is already the
+            // history head, so the existing head is the authoritative entry.
+            self.store.history.front().map(|item| item.id.clone()).unwrap_or(proposed_entry_id)
+        };
+
         let engine = self.notification.clone();
         let resolved_tx = self.resolved_tx.clone();
-        let content = match &payload { IncomingPayload::Text(v) => v.clone(), IncomingPayload::RichText { text, .. } => text.clone(), IncomingPayload::Image { .. } => "Image clipboard content".into(), IncomingPayload::FileOffer { file } => format!("{} ({}, {})", file.name, file.mime_type, format_size(file.size)) };
+        let content = match &payload {
+            IncomingPayload::Text(v) => v.clone(),
+            IncomingPayload::RichText { text, .. } => text.clone(),
+            IncomingPayload::Image { .. } => "Image clipboard content".into(),
+            IncomingPayload::FileOffer { file } => format!("{} ({}, {})", file.name, file.mime_type, format_size(file.size)),
+        };
+        let kind = match &payload {
+            IncomingPayload::Text(_) => IncomingClipboardKind::Text,
+            IncomingPayload::RichText { .. } => IncomingClipboardKind::RichText,
+            IncomingPayload::Image { .. } => IncomingClipboardKind::Image,
+            IncomingPayload::FileOffer { .. } => IncomingClipboardKind::File,
+        };
         tokio::spawn(async move {
-            let kind = match &payload {
-                IncomingPayload::Text(_) => IncomingClipboardKind::Text,
-                IncomingPayload::RichText { .. } => IncomingClipboardKind::RichText,
-                IncomingPayload::Image { .. } => IncomingClipboardKind::Image,
-                IncomingPayload::FileOffer { .. } => IncomingClipboardKind::File,
-            };
-            let decision = engine.ask_clipboard(Prompt::IncomingClipboard { peer_name: source_device_name.clone(), content: content.clone(), kind }, Duration::from_secs(30)).await;
-            let _ = resolved_tx.send(IncomingResolved { payload, source_device_name, source_device_id, decision });
+            let decision = engine.ask_clipboard(Prompt::IncomingClipboard { peer_name: source_device_name.clone(), content, kind }, Duration::from_secs(30)).await;
+            let _ = resolved_tx.send(IncomingResolved { payload, source_device_name, source_device_id, entry_id, decision });
         });
     }
 
     fn on_incoming_resolved(&mut self, resolved: IncomingResolved) {
-        let item = match &resolved.payload {
-            IncomingPayload::Text(content) => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: content.clone(), source_device: resolved.source_device_name.clone(), source_device_id: resolved.source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::Text, html: None, file_id: None, file_name: None, mime_type: None, file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
-            IncomingPayload::RichText { text, html } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: text.clone(), source_device: resolved.source_device_name.clone(), source_device_id: resolved.source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::RichText, html: Some(html.clone()), file_id: None, file_name: None, mime_type: None, file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
-            IncomingPayload::Image { .. } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: "Image clipboard content".into(), source_device: resolved.source_device_name.clone(), source_device_id: resolved.source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::Image, html: None, file_id: None, file_name: None, mime_type: Some("image/raw".into()), file_size: 0, file_expires_at_ms: 0, file_downloaded: false, local_file_path: None },
-            IncomingPayload::FileOffer { file } => ClipItem { id: uuid::Uuid::new_v4().to_string(), content: file.name.clone(), source_device: resolved.source_device_name.clone(), source_device_id: resolved.source_device_id.clone(), received_at_ms: now_ms(), kind: ClipKind::File, html: None, file_id: Some(file.file_id.clone()), file_name: Some(file.name.clone()), mime_type: Some(file.mime_type.clone()), file_size: file.size, file_expires_at_ms: file.expires_at_ms, file_downloaded: false, local_file_path: None },
-        };
-        let entry_id = item.id.clone();
-        if self.store.add(item) { self.notify_clipboard_changed(); }
+        let entry_id = resolved.entry_id;
         if resolved.decision != IncomingClipboardDecision::Copy { return; }
         match resolved.payload {
             IncomingPayload::Text(content) => { self.remember_hash(payload_hash(&ClipboardPayload::Text(content.clone()))); self.clipboard_sink.write_text(content); }
@@ -265,17 +290,28 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
 
     fn finish_file_download(&mut self, source_device_id: String, file_id: String, path: PathBuf) {
-        let Some(item) = self.store.history.iter().find(|i| i.file_id.as_deref() == Some(file_id.as_str())).cloned() else { return; };
+        let Some(item) = self.store.history.iter().find(|i| i.file_id.as_deref() == Some(file_id.as_str())).cloned() else {
+            let _ = fs::remove_file(&path);
+            self.release_download(&file_id);
+            return;
+        };
         let entry_id = item.id.clone();
         if item.source_device_id != source_device_id {
+            let _ = fs::remove_file(&path);
             self.notify_transfer(&entry_id, &file_id, 0, item.file_size, "failed", "File data came from an unexpected device");
+            self.release_download(&file_id);
             return;
         }
-        if item.file_expires_at_ms < now_ms() { let _ = fs::remove_file(&path); self.notify_transfer(&entry_id, &file_id, 0, item.file_size, "expired", "File offer expired"); return; }
+        if item.file_expires_at_ms < now_ms() {
+            let _ = fs::remove_file(&path);
+            self.notify_transfer(&entry_id, &file_id, 0, item.file_size, "expired", "File offer expired");
+            self.release_download(&file_id);
+            return;
+        }
         let name = item.file_name.clone().unwrap_or_else(|| "clipx-file".into());
         let mime_type = item.mime_type.clone().unwrap_or_else(|| "application/octet-stream".into());
         let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        self.notify_transfer(&entry_id, &file_id, 0, size, "saving", "Saving file");
+        self.notify_transfer(&entry_id, &file_id, size, size, "saving", format!("Saving {name}"));
         let result = self.clipboard_sink.save_file_from_path(&name, &mime_type, &path);
         let _ = fs::remove_file(&path);
         match result {
@@ -288,19 +324,39 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 let _ = self.store.update(updated);
                 self.notify_clipboard_changed();
                 self.notify_transfer(&entry_id, &file_id, size, size, "complete", path);
+                self.release_download(&file_id);
             }
-            Err(e) => self.notify_transfer(&entry_id, &file_id, 0, size, "failed", e),
+            Err(e) => {
+                self.notify_transfer(&entry_id, &file_id, 0, size, "failed", e);
+                self.release_download(&file_id);
+            }
         }
     }
 
     fn start_download(&mut self, entry_id: &str) -> String {
         let Some(item) = self.store.history.iter().find(|i| i.id == entry_id).cloned() else { return "Clipboard history item not found".into(); };
         if item.kind != ClipKind::File { return "Only file items can be downloaded".into(); }
+        if item.file_downloaded { return "File is already downloaded".into(); }
         if item.file_expires_at_ms < now_ms() { return "File offer expired".into(); }
-        let Some(file_id) = item.file_id else { return "File metadata is missing".into(); };
-        let _ = self.outbound_tx.send(ClipboardOutbound::FileRequest { device_id: item.source_device_id, file_id: file_id.clone(), entry_id: entry_id.to_string() });
-        self.notify_transfer(entry_id, &file_id, 0, item.file_size, "requesting", "Requesting file");
+        let Some(file_id) = item.file_id.clone() else { return "File metadata is missing".into(); };
+        if !self.active_downloads.insert(file_id.clone()) { return "File download is already in progress".into(); }
+        if self.outbound_tx.send(ClipboardOutbound::FileRequest {
+            device_id: item.source_device_id,
+            file_id: file_id.clone(),
+            entry_id: entry_id.to_string(),
+            file_name: item.file_name.clone().unwrap_or_else(|| "file".to_string()),
+            total_size: item.file_size,
+        }).is_err() {
+            self.active_downloads.remove(&file_id);
+            return "Device manager is stopped".into();
+        }
         "download requested".into()
+    }
+
+    fn release_download(&mut self, file_id: &str) {
+        if self.active_downloads.remove(file_id) {
+            let _ = self.outbound_tx.send(ClipboardOutbound::FileDownloadFinished { file_id: file_id.to_string() });
+        }
     }
 
     fn cleanup_expired_files(&self) {

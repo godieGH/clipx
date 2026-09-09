@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 
 class ClipxApplication : Application() {
     val sheetController = ClipxSheetController()
+    val transferNotifications by lazy { AndroidTransferNotificationController(this) }
 
 
     private val unreadClipboardPromptIds = mutableSetOf<String>()

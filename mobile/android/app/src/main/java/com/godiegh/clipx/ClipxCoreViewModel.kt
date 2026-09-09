@@ -387,7 +387,9 @@ class ClipxCoreViewModel(
     }
 
     fun downloadHistoryFile(item: ClipxHistoryItem) {
-        if (item.type != ClipType.FILE) return
+        if (item.type != ClipType.FILE || item.fileDownloaded) return
+        val transfer = fileTransfers[item.id] ?: item.fileId?.let { fileTransfers[it] }
+        if (transfer != null && transfer.state in setOf("requesting", "receiving", "sending", "saving")) return
         viewModelScope.launch {
             bridge?.let { service ->
                 runCatching { service.downloadClipboardFile(item.id) }

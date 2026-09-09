@@ -533,6 +533,16 @@ function timeAgo(ts: number, locale = "en-US"): string {
 
 function ClipRow({ item, onCopy, onRemove, onDownload, onReveal, transfer, nowMs }: { item: ClipItem; onCopy: (content: string) => void; onRemove: (id: string) => void; onDownload: (id: string) => void; onReveal: (path: string) => void; transfer?: { done: number; total: number; state: string; message: string }; nowMs: number }) {
   const expired = item.kind === "file" && !item.fileDownloaded && !!item.fileExpiresAtMs && nowMs >= item.fileExpiresAtMs;
+  const transferActive = transfer?.state === "requesting" || transfer?.state === "receiving" || transfer?.state === "sending" || transfer?.state === "saving";
+  const transferPercent = transfer?.total ? Math.round((transfer.done / transfer.total) * 100) : 0;
+  const disabled = expired || item.fileDownloaded || transferActive;
+  const status = transfer?.state === "requesting" ? "Starting download…"
+    : transfer?.state === "receiving" ? `Downloading · ${transferPercent}%`
+    : transfer?.state === "saving" ? "Saving file…"
+    : transfer?.state === "complete" || item.fileDownloaded ? "Downloaded"
+    : transfer?.state === "failed" ? "Download failed · Retry"
+    : expired ? "Offer expired"
+    : "Available for download for up to 24 hours";
   return (
     <div className="clip-row">
       <div className="clip-main">
@@ -542,13 +552,16 @@ function ClipRow({ item, onCopy, onRemove, onDownload, onReveal, transfer, nowMs
         </div>
         {item.kind === "file" && (
           <div className="file-inline">
-            <div>{item.fileName || item.content} · {Math.ceil((item.fileSize || 0) / 1024)} KB {transfer?.message ? `· ${transfer.message}` : ""}</div>
-            <div className="file-progress"><span style={{ width: `${item.fileDownloaded ? 100 : transfer?.total ? Math.round((transfer.done / transfer.total) * 100) : 0}%` }} /></div>
+            <div>{item.fileName || item.content} · {Math.ceil((item.fileSize || 0) / 1024)} KB</div>
+            <div className="file-progress" aria-label={status} aria-valuemin={0} aria-valuemax={100} aria-valuenow={transfer?.total ? transferPercent : item.fileDownloaded ? 100 : undefined}>
+              <span style={{ width: `${item.fileDownloaded ? 100 : transfer?.total ? transferPercent : 0}%` }} />
+            </div>
+            <div className="file-status">{status}</div>
           </div>
         )}
       </div>
       <div className="clip-actions">
-        {item.kind === "file" && <button className="icon-button" title={expired ? "Offer expired" : "Download file"} onClick={() => onDownload(item.id)} disabled={expired}>
+        {item.kind === "file" && <button className="icon-button" title={disabled ? status : "Download file"} onClick={() => onDownload(item.id)} disabled={disabled}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
             <path d="M12 3v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -729,7 +742,6 @@ function App() {
       appWindow.show();
       handleScan();
     }
-    getThisDeviceIdenty();
     getThisDeviceIdenty();
     refreshPaired();
     refreshHistory();
@@ -1168,7 +1180,7 @@ function App() {
             <ScrollFade className="history-scroll">
               <div className="device-list">
                 {history.map((item) => (
-                  <ClipRow key={item.id} item={item} onCopy={handleCopy} onRemove={handleRemoveHistory} onDownload={handleDownloadHistoryFile} onReveal={handleRevealHistoryFile} transfer={downloadProgress[item.id]} nowMs={nowMs} />
+                  <ClipRow key={item.id} item={item} onCopy={handleCopy} onRemove={handleRemoveHistory} onDownload={handleDownloadHistoryFile} onReveal={handleRevealHistoryFile} transfer={downloadProgress[item.id] ?? (item.fileId ? downloadProgress[item.fileId] : undefined)} nowMs={nowMs} />
                 ))}
               </div>
             </ScrollFade>

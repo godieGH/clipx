@@ -745,6 +745,9 @@ private fun HistoryListItem(
     onActions: () -> Unit,
 ) {
     val palette = LocalClipxPalette.current
+    val transferActive = transfer?.state == "requesting" || transfer?.state == "receiving" || transfer?.state == "sending" || transfer?.state == "saving"
+    val transferPercent = transfer?.let { if (it.total > 0) ((it.done.toFloat() / it.total.toFloat()).coerceIn(0f, 1f)) else 0f } ?: 0f
+    val downloadDisabled = item.fileDownloaded || transferActive
     var offerExpired by remember(item.id, item.fileExpiresAtMs, item.fileDownloaded) {
         mutableStateOf(item.type == ClipType.FILE && !item.fileDownloaded && item.fileExpiresAtMs > 0L && System.currentTimeMillis() >= item.fileExpiresAtMs)
     }
@@ -779,7 +782,7 @@ private fun HistoryListItem(
                     modifier = Modifier.padding(top = 3.dp),
                 )
             }
-            IconButton(onClick = onCopy, enabled = !offerExpired, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = onCopy, enabled = !offerExpired && !downloadDisabled, modifier = Modifier.size(40.dp)) {
                 if (item.type == ClipType.FILE) Icon(Icons.Filled.FileDownload, contentDescription = "File Download", tint = MaterialTheme.colorScheme.onSurface) else Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = onActions, modifier = Modifier.size(36.dp)) {
@@ -787,16 +790,27 @@ private fun HistoryListItem(
             }
         }
         if (item.type == ClipType.FILE) {
-            val progress = transfer?.let { if (it.total > 0) (it.done.toFloat() / it.total.toFloat()).coerceIn(0f, 1f) else 0f } ?: if (item.fileDownloaded) 1f else 0f
-            androidx.compose.material3.LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp),
-            )
+            when {
+                transfer?.state == "requesting" || transfer?.state == "saving" -> {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp),
+                    )
+                }
+                else -> {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { if (item.fileDownloaded || transfer?.state == "complete") 1f else transferPercent },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp),
+                    )
+                }
+            }
             Text(
                 when {
+                    transfer?.state == "requesting" -> "Starting download…"
+                    transfer?.state == "receiving" -> "Downloading · ${"%.0f".format(transferPercent * 100)}%"
+                    transfer?.state == "saving" -> "Saving file…"
                     transfer?.state == "expired" -> "Offer expired"
                     transfer?.state == "complete" || item.fileDownloaded -> "Downloaded"
-                    transfer != null -> transfer.message
+                    transfer?.state == "failed" -> "Download failed · tap to retry"
                     else -> "Available for download for up to 24 hours"
                 },
                 style = MaterialTheme.typography.labelSmall,
