@@ -133,14 +133,14 @@ impl BridgeService {
         let clipboard_adapter = ClipboardSinkAdapter(clipboard);
         let notifier_adapter = NotificationAdapter(notifier);
         let notification_engine = PlatformNotificationEngine::new(Arc::new(notifier_adapter));
-        let event_listener: Arc<dyn clipx_core::platform::CoreEventListener> =
+        let core_event_listener: Arc<dyn clipx_core::platform::CoreEventListener> =
             Arc::new(crate::platform::ClipxEventAdapter(event));
 
-        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, _events_tx) =
+        let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, _core_events_tx) =
             clipx_core::service::spawn_core_tasks(
                 clipboard_adapter,
                 notification_engine,
-                Some(event_listener),
+                Some(core_event_listener),
             );
 
         inner.tasks = tasks;

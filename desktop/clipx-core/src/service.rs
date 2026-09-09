@@ -133,7 +133,7 @@ mod tests {
 pub fn spawn_core_tasks<S, N>(
     clipboard_sink: S,
     notification_engine: N,
-    events: Option<Arc<dyn CoreEventListener>>,
+    core_events: Option<Arc<dyn CoreEventListener>>,
 ) -> (
     Vec<JoinHandle<()>>,
     watch::Sender<bool>,
@@ -157,7 +157,7 @@ where
     let (device_tx, device_rx) = mpsc::unbounded_channel();
     let (transport_tx, transport_rx) = mpsc::unbounded_channel();
     let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
-    let (events_tx, _) = broadcast::channel::<CoreEvent>(32);
+    let (core_events_tx, _) = broadcast::channel::<CoreEvent>(32);
 
     let shutdown_for_transport = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -177,7 +177,7 @@ where
         notification_engine.clone(),
         clipboard_sink,
         clipboard_out_tx,
-        events_tx.clone(),
+        core_events_tx.clone(),
     );
     let shutdown_for_clipboard = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
@@ -202,7 +202,7 @@ where
         Some(transport_tx),
         notification_engine,
         clipboard_cmd_tx.clone(),
-        events_tx.clone(),
+        core_events_tx.clone(),
     );
     let shutdown_for_device_manager = shutdown_rx.clone();
     let clipboard_cmd_tx_for_device_manager = clipboard_cmd_tx.clone();
@@ -219,8 +219,8 @@ where
             .await;
     }));
 
-    if let Some(events) = events {
-        let mut events_rx = events_tx.subscribe();
+    if let Some(events) = core_events {
+        let mut events_rx = core_events_tx.subscribe();
         let mut shutdown_for_events = shutdown_rx.clone();
         tasks.push(tokio::spawn(async move {
             loop {
@@ -254,5 +254,5 @@ where
         }));
     }
 
-    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, events_tx)
+    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx)
 }
