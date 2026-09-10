@@ -1,6 +1,7 @@
 mod error_dialog;
 
 use clipx_lib::{clipx, ipc, message::types, message::IpcCmdBridge};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use windows::core::Interface;
 #[cfg(windows)]
@@ -15,6 +16,8 @@ use tauri::{
 pub struct AppState {
     ipc: Mutex<ipc::non_blocking::Client>,
 }
+
+static EXIT_SHUTDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn mime_from_name(name: &str) -> String {
     match std::path::Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
@@ -181,12 +184,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                let state = app_handle.state::<AppState>();
-                tauri::async_runtime::block_on(async {
-                    let mut lock = state.ipc.lock().await;
-                    let _ = lock.shutdown().await;
-                });
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                // Keep WebView teardown from racing the IPC shutdown. Tauri's
+                // documented ExitRequested API lets us defer the actual exit
+                // until the IPC client has closed cleanly. The second exit
+                // request is allowed through by the atomic guard below.
+                if !EXIT_SHUTDOWN_STARTED.swap(true, Ordering::AcqRel) {
+                    api.prevent_exit();
+                    let app_handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<AppState>();
+                        let mut lock = state.ipc.lock().await;
+                        let _ = lock.shutdown().await;
+                        app_handle.exit(0);
+                    });
+                }
             }
         });
 }
@@ -194,11 +206,39 @@ pub fn run() {
 #[tauri::command]
 fn reveal_file_location(path: String) -> Result<(), String> {
     let path = std::path::PathBuf::from(path);
-    if !path.is_file() { return Err("The saved file is no longer available".into()); }
-    #[cfg(windows)] { std::process::Command::new("explorer.exe").arg(format!("/select,{}", path.display())).spawn().map_err(|e| format!("Could not open File Explorer: {e}"))?; return Ok(()); }
-    #[cfg(target_os = "macos")] { std::process::Command::new("open").arg("-R").arg(&path).spawn().map_err(|e| format!("Could not reveal file: {e}"))?; return Ok(()); }
-    #[cfg(all(unix, not(target_os = "macos")))] { std::process::Command::new("xdg-open").arg(path.parent().unwrap_or_else(|| std::path::Path::new("."))).spawn().map_err(|e| format!("Could not open file location: {e}"))?; return Ok(()); }
-    #[allow(unreachable_code)] Err("Opening file locations is not supported on this platform".into())
+    if !path.is_file() {
+        return Err("The saved file is no longer available".into());
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let escaped = path.to_string_lossy().replace('"', r#"\""#);
+        std::process::Command::new("explorer.exe")
+            .raw_arg(format!(r#"/select,"{}""#, escaped))
+            .spawn()
+            .map_err(|e| format!("Could not open File Explorer: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Could not reveal file: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or_else(|| std::path::Path::new(".")))
+            .spawn()
+            .map_err(|e| format!("Could not open file location: {e}"))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Err("Opening file locations is not supported on this platform".into())
 }
 
 #[tauri::command]

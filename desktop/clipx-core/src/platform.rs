@@ -97,7 +97,7 @@ pub enum CoreEvent {
     DevicesChanged,
     ClipboardChanged,
     PairingChanged { device_id: String, state: PairingEventState, message: String },
-    FileTransferChanged { entry_id: String, file_id: String, done: u64, total: u64, state: String, message: String },
+    FileTransferChanged { entry_id: String, file_id: String, file_name: String, direction: String, done: u64, total: u64, state: String, message: String },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -107,5 +107,5 @@ pub trait CoreEventListener: Send + Sync {
     fn on_device_change(&self);
     fn on_clipboard_change(&self);
     fn on_pairing_change(&self, _device_id: String, _state: u8, _message: String) {}
-    fn on_file_transfer(&self, _entry_id: String, _file_id: String, _done: u64, _total: u64, _state: String, _message: String) {}
+    fn on_file_transfer(&self, _entry_id: String, _file_id: String, _file_name: String, _direction: String, _done: u64, _total: u64, _state: String, _message: String) {}
 }

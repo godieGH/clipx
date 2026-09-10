@@ -49,5 +49,5 @@ impl clipx_core::platform::CoreEventListener for ClipxEventAdapter {
     }
 
     fn on_pairing_change(&self, device_id: String, state: u8, message: String) { self.0.on_pairing_change(device_id, state, message); }
-    fn on_file_transfer(&self, entry_id: String, file_id: String, done: u64, total: u64, state: String, message: String) { self.0.on_file_transfer(entry_id, file_id, done, total, state, message); }
+    fn on_file_transfer(&self, entry_id: String, file_id: String, file_name: String, direction: String, done: u64, total: u64, state: String, message: String) { self.0.on_file_transfer(entry_id, file_id, file_name, direction, done, total, state, message); }
 }

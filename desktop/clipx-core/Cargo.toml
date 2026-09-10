@@ -8,6 +8,7 @@ directories = "6.0.0"
 futures-util = "0.3.31"
 hostname = "0.4.2"
 prost = "0.14.4"
+png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full"] }
@@ -32,6 +33,17 @@ arboard = "3.6.1"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8.1"
+# Used directly (alongside tauri-winrt-notification) only for the file
+# transfer progress toast: tauri-winrt-notification's own
+# Toast::set_progress() hardcodes the WinRT update sequence number to a
+# fixed non-zero value on every call, so after the very first progress
+# update the shell sees the same sequence number again, treats it as
+# already-applied, and silently drops it — the progress bar freezes. A
+# sequence number of 0 tells the shell "always apply this", so we call
+# NotificationData/ToastNotificationManager ourselves for progress updates.
+# Feature list and version pinned to match tauri-winrt-notification 0.8.1's
+# own `windows` dependency.
+windows = { version = "0.62", features = ["UI_Notifications", "Foundation_Collections", "Data_Xml_Dom"] }
 
 [build-dependencies]
 prost-build = "0.14.4"

@@ -782,8 +782,14 @@ private fun HistoryListItem(
                     modifier = Modifier.padding(top = 3.dp),
                 )
             }
+            val downloading = item.type == ClipType.FILE && transferActive
             IconButton(onClick = onCopy, enabled = !offerExpired && !downloadDisabled, modifier = Modifier.size(40.dp)) {
-                if (item.type == ClipType.FILE) Icon(Icons.Filled.FileDownload, contentDescription = "File Download", tint = MaterialTheme.colorScheme.onSurface) else Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
+                when {
+                    item.type != ClipType.FILE -> Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
+                    downloading -> androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    item.fileDownloaded -> Icon(Icons.Filled.FileOpen, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.primary)
+                    else -> Icon(Icons.Filled.FileDownload, contentDescription = "Download file", tint = MaterialTheme.colorScheme.onSurface)
+                }
             }
             IconButton(onClick = onActions, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -809,7 +815,8 @@ private fun HistoryListItem(
                     transfer?.state == "receiving" -> "Downloading · ${"%.0f".format(transferPercent * 100)}%"
                     transfer?.state == "saving" -> "Saving file…"
                     transfer?.state == "expired" -> "Offer expired"
-                    transfer?.state == "complete" || item.fileDownloaded -> "Downloaded"
+                    item.fileDownloaded -> "Download finished"
+                    transfer?.state == "complete" -> "Download finished"
                     transfer?.state == "failed" -> "Download failed · tap to retry"
                     else -> "Available for download for up to 24 hours"
                 },

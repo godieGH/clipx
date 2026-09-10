@@ -696,6 +696,7 @@ dependencies = [
  "humantime-serde",
  "if-addrs",
  "interprocess",
+ "png 0.18.1",
  "prost",
  "prost-build",
  "rand 0.8.7",
@@ -710,6 +711,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows 0.62.2",
 ]
 
 [[package]]

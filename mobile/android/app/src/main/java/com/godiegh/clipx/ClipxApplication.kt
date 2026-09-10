@@ -88,5 +88,5 @@ sealed interface CoreUiEvent {
     data object DevicesChanged : CoreUiEvent
     data object ClipboardChanged : CoreUiEvent
     data class PairingChanged(val deviceId: String, val state: Int, val message: String) : CoreUiEvent
-    data class FileTransferChanged(val entryId: String, val fileId: String, val done: Long, val total: Long, val state: String, val message: String) : CoreUiEvent
+    data class FileTransferChanged(val entryId: String, val fileId: String, val fileName: String, val direction: String, val done: Long, val total: Long, val state: String, val message: String) : CoreUiEvent
 }

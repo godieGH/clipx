@@ -52,6 +52,7 @@ pub struct MobileClipItem {
     pub file_size: u64,
     pub file_expires_at_ms: u64,
     pub file_downloaded: bool,
+    pub local_file_path: String,
 }
 
 fn device_type_name(value: DeviceType) -> String {
@@ -379,6 +380,7 @@ impl BridgeService {
             kind: match item.kind { clipx_core::clipboard::clipstore::ClipKind::Text => "text", clipx_core::clipboard::clipstore::ClipKind::RichText => "rich_text", clipx_core::clipboard::clipstore::ClipKind::Image => "image", clipx_core::clipboard::clipstore::ClipKind::File => "file" }.into(),
             html: item.html.unwrap_or_default(), file_id: item.file_id.unwrap_or_default(), file_name: item.file_name.unwrap_or_default(), mime_type: item.mime_type.unwrap_or_default(),
             file_size: item.file_size, file_expires_at_ms: item.file_expires_at_ms, file_downloaded: item.file_downloaded,
+            local_file_path: item.local_file_path.unwrap_or_default(),
         }).collect())
     }
 

@@ -35,6 +35,8 @@ pub trait NotificationEngine: Send + Sync {
     fn notify_file_transfer<'a>(
         &'a self,
         _file_id: String,
+        _file_name: String,
+        _direction: String,
         _done: u64,
         _total: u64,
         _state: String,

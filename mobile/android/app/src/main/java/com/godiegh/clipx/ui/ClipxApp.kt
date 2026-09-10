@@ -211,6 +211,12 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                         }
                         selectedHistory = null
                     },
+                    onDownload = if (item.type == ClipType.FILE) {
+                        {
+                            viewModel.downloadHistoryFile(item)
+                            selectedHistory = null
+                        }
+                    } else null,
                     onRemove = {
                         viewModel.removeHistory(item.id)
                         selectedHistory = null

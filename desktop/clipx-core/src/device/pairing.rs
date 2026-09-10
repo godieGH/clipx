@@ -12,6 +12,11 @@ pub mod control {
     pub const ALREADY_TRUSTED: u32 = 4005;
     pub const UNKNOWN_DEVICE: u32 = 4006;
     pub const PROTOCOL_ERROR: u32 = 4007;
+    /// Sent by the responder side of a connect-challenge race to tell the
+    /// losing initiator to stand down: a connect request for this device is
+    /// already in flight on a different socket, so the caller should drop
+    /// its own attempt instead of treating this as a hard failure.
+    pub const CONNECT_IN_PROGRESS: u32 = 4008;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,17 +123,23 @@ pub struct ConnectSession {
     pub peer_addr: SocketAddr,
     pub nonce: Option<[u8; 32]>,
     pub retry_count: u8,
+    /// The transport connection this session's handshake is bound to. `None`
+    /// while an initiator is still dialing (no socket yet). Once set, every
+    /// message for this session must arrive on this exact connection_id —
+    /// this is what lets a duplicate simultaneous connection be told apart
+    /// from the one actually carrying this handshake.
+    pub connection_id: Option<String>,
 }
 
 impl ConnectSession {
     pub const MAX_RETRIES: u8 = 2;
 
     pub fn new_initiator(addr: SocketAddr) -> Self {
-        Self { role: Role::Initiator, stage: ConnectStage::Dialing, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0 }
+        Self { role: Role::Initiator, stage: ConnectStage::Dialing, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0, connection_id: None }
     }
 
     pub fn new_responder(addr: SocketAddr) -> Self {
-        Self { role: Role::Responder, stage: ConnectStage::AwaitingAck, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0 }
+        Self { role: Role::Responder, stage: ConnectStage::AwaitingAck, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0, connection_id: None }
     }
 
     pub fn is_expired(&self, ttl: Duration) -> bool {

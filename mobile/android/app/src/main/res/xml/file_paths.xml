@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="clipboard_images" path="clipboard-images/" />
+    <!-- Pre-API29 fallback save location used by
+         ClipboardPlatform.saveFile / saveFileFromPath. On API 29+ those go
+         through MediaStore instead and are opened via a content:// Uri that
+         doesn't need FileProvider at all. -->
+    <external-files-path name="downloads" path="Download/Clipx/" />
 </paths>

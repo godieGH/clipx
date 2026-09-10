@@ -1,6 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use uuid::Uuid;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, watch},
@@ -14,19 +15,21 @@ use crate::message::proto::{self, peer_message::Body};
 #[derive(Debug, Clone)]
 pub struct ConnectedDevice {
     pub id: String,
+    pub connection_id: String,
     pub addr: SocketAddr,
 }
 
 #[derive(Debug)]
 pub enum TransportEvent {
     Connected(ConnectedDevice),
-    Disconnected(String),
+    Disconnected { device_id: String, connection_id: String },
     ConnectFailed(String),
     /// A decoded PeerMessage from an identified device. Pre-transport
     /// variants are consumed by DeviceManager; Body::Clipboard is defined
     /// but not routed anywhere yet.
     PeerMessage {
         device_id: String,
+        connection_id: String,
         message: proto::PeerMessage,
     },
 }
@@ -42,8 +45,24 @@ pub enum TransportCommand {
         device_id: String,
         reply_to: oneshot::Sender<bool>,
     },
+    DisconnectOnConnection {
+        device_id: String,
+        connection_id: String,
+        reply_to: oneshot::Sender<bool>,
+    },
+    PromoteConnection {
+        device_id: String,
+        connection_id: String,
+        reply_to: oneshot::Sender<bool>,
+    },
     SendPeerMessage {
         device_id: String,
+        message: proto::PeerMessage,
+        reply_to: oneshot::Sender<bool>,
+    },
+    SendPeerMessageOnConnection {
+        device_id: String,
+        connection_id: String,
         message: proto::PeerMessage,
         reply_to: oneshot::Sender<bool>,
     },
@@ -55,9 +74,11 @@ pub enum TransportCommand {
 enum Registration {
     Ok {
         device_id: String,
+        connection_id: String,
         addr: SocketAddr,
         outbound_tx: mpsc::Sender<WsMessage>,
         reply_to: Option<oneshot::Sender<bool>>,
+        allow_duplicate: bool,
     },
     Failed {
         device_id: String,
@@ -65,10 +86,12 @@ enum Registration {
     },
     Closed {
         device_id: String,
+        connection_id: String,
     },
 }
 
 struct Conn {
+    connection_id: String,
     addr: SocketAddr,
     outbound_tx: mpsc::Sender<WsMessage>,
 }
@@ -76,6 +99,10 @@ struct Conn {
 pub struct Transport {
     listener: TcpListener,
     connections: HashMap<String, Conn>,
+    // A duplicate inbound ConnectChallenge gets a temporary connection so the
+    // device manager can see the competing request and explicitly resolve it.
+    // These are never used for clipboard/file traffic until promoted.
+    pending_connections: HashMap<String, (String, Conn)>,
     shutdown_rx: watch::Receiver<bool>,
     command_rx: mpsc::UnboundedReceiver<TransportCommand>,
     event_tx: mpsc::UnboundedSender<TransportEvent>,
@@ -98,6 +125,7 @@ impl Transport {
         Self {
             listener,
             connections: HashMap::new(),
+            pending_connections: HashMap::new(),
             shutdown_rx,
             command_rx,
             event_tx,
@@ -150,7 +178,58 @@ impl Transport {
                 // Dropping outbound_tx is what tells the connection's task
                 // to stop and close the socket — see run_connection.
                 let removed = self.connections.remove(&device_id).is_some();
+                self.pending_connections.retain(|_, (pending_device_id, _)| pending_device_id != &device_id);
                 let _ = reply_to.send(removed);
+            }
+            TransportCommand::DisconnectOnConnection {
+                device_id,
+                connection_id,
+                reply_to,
+            } => {
+                let remove_active = self
+                    .connections
+                    .get(&device_id)
+                    .is_some_and(|conn| conn.connection_id == connection_id);
+                let remove_pending = self
+                    .pending_connections
+                    .get(&connection_id)
+                    .is_some_and(|(pending_device_id, conn)| pending_device_id == &device_id && conn.connection_id == connection_id);
+                let _ = if remove_active {
+                    self.connections.remove(&device_id);
+                    let _ = self.event_tx.send(TransportEvent::Disconnected {
+                        device_id: device_id.clone(),
+                        connection_id: connection_id.clone(),
+                    });
+                    reply_to.send(true)
+                } else if remove_pending {
+                    self.pending_connections.remove(&connection_id);
+                    reply_to.send(true)
+                } else {
+                    reply_to.send(false)
+                };
+            }
+            TransportCommand::PromoteConnection {
+                device_id,
+                connection_id,
+                reply_to,
+            } => {
+                let Some((pending_device_id, pending_conn)) = self.pending_connections.remove(&connection_id) else {
+                    let _ = reply_to.send(false);
+                    return;
+                };
+                if pending_device_id != device_id {
+                    self.pending_connections.insert(connection_id, (pending_device_id, pending_conn));
+                    let _ = reply_to.send(false);
+                    return;
+                }
+
+                // The manager explicitly chose this competing connection for
+                // the handshake. Drop the former active connection without
+                // emitting another disconnect event; the manager is already
+                // switching its logical session to this connection.
+                self.connections.remove(&device_id);
+                self.connections.insert(device_id, pending_conn);
+                let _ = reply_to.send(true);
             }
             TransportCommand::SendPeerMessage {
                 device_id,
@@ -171,12 +250,42 @@ impl Transport {
                     let _ = reply_to.send(ok);
                 });
             }
+            TransportCommand::SendPeerMessageOnConnection { device_id, connection_id, message, reply_to } => {
+                let mut buf = Vec::new();
+                if message.encode(&mut buf).is_err() {
+                    let _ = reply_to.send(false);
+                    return;
+                }
+                let outbound_tx = if let Some(conn) = self.connections.get(&device_id) {
+                    if conn.connection_id == connection_id {
+                        Some(conn.outbound_tx.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }.or_else(|| {
+                    self.pending_connections
+                        .get(&connection_id)
+                        .filter(|(pending_device_id, conn)| pending_device_id == &device_id && conn.connection_id == connection_id)
+                        .map(|(_, conn)| conn.outbound_tx.clone())
+                });
+                let Some(outbound_tx) = outbound_tx else {
+                    let _ = reply_to.send(false);
+                    return;
+                };
+                tokio::spawn(async move {
+                    let ok = outbound_tx.send(WsMessage::binary(buf)).await.is_ok();
+                    let _ = reply_to.send(ok);
+                });
+            }
             TransportCommand::ListConnections { reply_to } => {
                 let devices = self
                     .connections
                     .iter()
                     .map(|(id, c)| ConnectedDevice {
                         id: id.clone(),
+                        connection_id: c.connection_id.clone(),
                         addr: c.addr,
                     })
                     .collect();
@@ -189,21 +298,30 @@ impl Transport {
         match reg {
             Registration::Ok {
                 device_id,
+                connection_id,
                 addr,
                 outbound_tx,
                 reply_to,
+                allow_duplicate,
             } => {
-                self.connections
-                    .insert(device_id.clone(), Conn { addr, outbound_tx });
-                if let Some(r) = reply_to {
-                    let _ = r.send(true);
+                if self.connections.contains_key(&device_id) {
+                    if allow_duplicate {
+                        self.pending_connections.insert(
+                            connection_id.clone(),
+                            (device_id.clone(), Conn { connection_id: connection_id.clone(), addr, outbound_tx }),
+                        );
+                        if let Some(r) = reply_to { let _ = r.send(true); }
+                        tracing::debug!(%device_id, %connection_id, "duplicate inbound connect connection retained for handshake arbitration");
+                    } else {
+                        drop(outbound_tx);
+                        if let Some(r) = reply_to { let _ = r.send(false); }
+                        tracing::debug!(%device_id, %connection_id, "duplicate transport connection rejected");
+                    }
+                    return;
                 }
-                let _ = self
-                    .event_tx
-                    .send(TransportEvent::Connected(ConnectedDevice {
-                        id: device_id,
-                        addr,
-                    }));
+                self.connections.insert(device_id.clone(), Conn { connection_id: connection_id.clone(), addr, outbound_tx });
+                if let Some(r) = reply_to { let _ = r.send(true); }
+                let _ = self.event_tx.send(TransportEvent::Connected(ConnectedDevice { id: device_id, connection_id, addr }));
             }
             Registration::Failed {
                 device_id,
@@ -214,8 +332,13 @@ impl Transport {
                 }
                 let _ = self.event_tx.send(TransportEvent::ConnectFailed(device_id));
             }
-            Registration::Closed { device_id } => {
-                self.connections.remove(&device_id);
+            Registration::Closed { device_id, connection_id } => {
+                if self.connections.get(&device_id).is_some_and(|c| c.connection_id == connection_id) {
+                    self.connections.remove(&device_id);
+                    let _ = self.event_tx.send(TransportEvent::Disconnected { device_id, connection_id });
+                } else if self.pending_connections.remove(&connection_id).is_some() {
+                    tracing::debug!(%device_id, %connection_id, "pending handshake connection closed");
+                }
             }
         }
     }
@@ -260,14 +383,17 @@ impl Transport {
                     return;
                 }
             };
+            let connection_id = Uuid::new_v4().to_string();
             let (outbound_tx, outbound_rx) = mpsc::channel(8);
             let _ = register_tx.send(Registration::Ok {
                 device_id: device_id.clone(),
+                connection_id: connection_id.clone(),
                 addr,
                 outbound_tx,
                 reply_to: Some(reply_to),
+                allow_duplicate: false,
             });
-            run_connection(ws, device_id, outbound_rx, event_tx, register_tx.clone()).await;
+            run_connection(ws, device_id, connection_id, outbound_rx, event_tx, register_tx.clone()).await;
         });
     }
 
@@ -306,6 +432,7 @@ impl Transport {
                     return;
                 }
             };
+            let allow_duplicate = matches!(message.body, Some(Body::ConnectChallenge(_)));
             let device_id = match &message.body {
                 Some(Body::PairRequest(req)) => hex::encode(&req.fingerprint),
                 Some(Body::ConnectChallenge(c)) => hex::encode(&c.initiator_fingerprint),
@@ -315,19 +442,34 @@ impl Transport {
                 }
             };
 
+            let connection_id = Uuid::new_v4().to_string();
             let (outbound_tx, outbound_rx) = mpsc::channel(8);
-            let _ = register_tx.send(Registration::Ok {
+            let (accepted_tx, accepted_rx) = oneshot::channel();
+            if register_tx.send(Registration::Ok {
                 device_id: device_id.clone(),
+                connection_id: connection_id.clone(),
                 addr,
                 outbound_tx,
-                reply_to: None,
-            });
+                reply_to: Some(accepted_tx),
+                allow_duplicate,
+            }).is_err() {
+                return;
+            }
+
+            // Do not feed the first handshake frame to DeviceManager unless
+            // transport actually accepted this connection. Otherwise a
+            // rejected duplicate could still mutate the connection session.
+            if !accepted_rx.await.unwrap_or(false) {
+                return;
+            }
+
             let _ = event_tx.send(TransportEvent::PeerMessage {
                 device_id: device_id.clone(),
+                connection_id: connection_id.clone(),
                 message,
             });
 
-            run_connection(ws, device_id, outbound_rx, event_tx, register_tx.clone()).await;
+            run_connection(ws, device_id, connection_id, outbound_rx, event_tx, register_tx.clone()).await;
         });
     }
 }
@@ -337,6 +479,7 @@ impl Transport {
 async fn run_connection(
     mut ws: WebSocketStream<TcpStream>,
     device_id: String,
+    connection_id: String,
     mut outbound_rx: mpsc::Receiver<WsMessage>,
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
@@ -357,7 +500,7 @@ async fn run_connection(
                 match incoming {
                     Some(Ok(WsMessage::Binary(bytes))) => {
                         match proto::PeerMessage::decode(bytes.as_ref()) {
-                            Ok(message) => { let _ = event_tx.send(TransportEvent::PeerMessage { device_id: device_id.clone(), message }); }
+                            Ok(message) => { let _ = event_tx.send(TransportEvent::PeerMessage { device_id: device_id.clone(), connection_id: connection_id.clone(), message }); }
                             Err(e) => tracing::warn!("undecodable frame from {device_id}: {e}"),
                         }
                     }
@@ -371,6 +514,6 @@ async fn run_connection(
     let _ = ws.close(None).await;
     let _ = register_tx.send(Registration::Closed {
         device_id: device_id.clone(),
+        connection_id: connection_id.clone(),
     });
-    let _ = event_tx.send(TransportEvent::Disconnected(device_id));
 }

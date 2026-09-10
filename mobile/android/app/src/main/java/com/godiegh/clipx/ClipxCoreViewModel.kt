@@ -2,6 +2,7 @@ package com.godiegh.clipx
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -86,7 +87,7 @@ class ClipxCoreViewModel(
                 }
             }
             is CoreUiEvent.FileTransferChanged -> {
-                fileTransfers = fileTransfers + (event.entryId to FileTransferUi(event.fileId, event.done, event.total, event.state, event.message)) + (event.fileId to FileTransferUi(event.fileId, event.done, event.total, event.state, event.message))
+                fileTransfers = fileTransfers + (event.entryId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message)) + (event.fileId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message))
             }
         }
     }
@@ -179,7 +180,8 @@ class ClipxCoreViewModel(
                             mimeType = it.mimeType.ifBlank { null },
                             fileSize = it.fileSize.toLong(),
                             fileExpiresAtMs = it.fileExpiresAtMs.toLong(),
-                            fileDownloaded = it.fileDownloaded,
+                            fileDownloaded = it.fileDownloaded && isLocalFileAvailable(it.localFilePath),
+                            localFilePath = it.localFilePath.ifBlank { null },
                         )
                     }
                 }
@@ -386,6 +388,18 @@ class ClipxCoreViewModel(
         }
     }
 
+    private fun isLocalFileAvailable(path: String): Boolean {
+        if (path.isBlank()) return false
+        return runCatching {
+            val uri = Uri.parse(path)
+            when (uri.scheme?.lowercase()) {
+                "content" -> application.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+                "file", null -> java.io.File(uri.path ?: path).isFile
+                else -> false
+            }
+        }.getOrDefault(false)
+    }
+
     fun downloadHistoryFile(item: ClipxHistoryItem) {
         if (item.type != ClipType.FILE || item.fileDownloaded) return
         val transfer = fileTransfers[item.id] ?: item.fileId?.let { fileTransfers[it] }
@@ -500,7 +514,7 @@ private fun timeAgo(timestampMs: ULong): String {
 }
 
 
-data class FileTransferUi(val fileId: String, val done: Long, val total: Long, val state: String, val message: String)
+data class FileTransferUi(val fileId: String, val fileName: String, val direction: String, val done: Long, val total: Long, val state: String, val message: String)
 
 private fun readImage(context: Context, uri: android.net.Uri): Triple<Int, Int, ByteArray>? {
     val bitmap = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null

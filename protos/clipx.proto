@@ -27,14 +27,18 @@ message FileOffer {
     uint64 size = 4;
     uint64 expires_at_ms = 5;
 }
-message FileDownloadRequest { string file_id = 1; }
+message FileDownloadRequest { string file_id = 1; uint64 offset = 2; }
 message FileChunk {
     string file_id = 1;
-    uint32 seq = 2;
+    uint64 seq = 2;
     bytes data = 3;
     bool eof = 4;
     uint64 total_size = 5;
+    uint64 offset = 6;
+    bytes sha256 = 7;
 }
+message FileChunkAck { string file_id = 1; uint64 confirmed_offset = 2; }
+message FileTransferCancel { string file_id = 1; }
 
 enum DeviceType {
   UNSPECIFIED = 0;
@@ -74,6 +78,8 @@ message PeerMessage {
     ClipboardMessage clipboard = 10;
     FileDownloadRequest file_download_request = 11;
     FileChunk file_chunk = 12;
+    FileChunkAck file_chunk_ack = 13;
+    FileTransferCancel file_transfer_cancel = 14;
   }
 }
 
@@ -186,6 +192,6 @@ message DownloadClipboardFileResponse { bool started = 1; string message = 2; }
 message DevicesChangedEvent {}
 message ClipboardChangedEvent {}
 message PairingEvent { string device_id = 1; enum State { STARTED = 0; FAILED = 1; SUCCEEDED = 2; } State state = 2; string message = 3; }
-message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; }
+message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; string file_name = 7; string direction = 8; }
 message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; } }
 message IpcServerMessage { oneof payload { IpcResponse response = 1; IpcEvent event = 2; } }

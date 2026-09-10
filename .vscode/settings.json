@@ -9,6 +9,7 @@
         "dalek",
         "Deque",
         "DGRAM",
+        "HSTRING",
         "humantime",
         "IDAT",
         "IEND",

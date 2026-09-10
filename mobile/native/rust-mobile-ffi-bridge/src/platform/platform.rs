@@ -26,5 +26,5 @@ pub trait ClipxEventListener: Send + Sync {
     fn on_device_change(&self);
     fn on_clipboard_change(&self);
     fn on_pairing_change(&self, device_id: String, state: u8, message: String);
-    fn on_file_transfer(&self, entry_id: String, file_id: String, done: u64, total: u64, state: String, message: String);
+    fn on_file_transfer(&self, entry_id: String, file_id: String, file_name: String, direction: String, done: u64, total: u64, state: String, message: String);
 }

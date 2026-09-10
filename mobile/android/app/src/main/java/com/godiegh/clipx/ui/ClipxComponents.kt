@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.DevicesOther
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileCopy
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
@@ -513,6 +515,7 @@ fun HistoryActionsSheet(
     item: ClipxHistoryItem,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
+    onDownload: (() -> Unit)? = null,
     onRemove: () -> Unit,
 ) {
     val palette = LocalClipxPalette.current
@@ -543,7 +546,11 @@ fun HistoryActionsSheet(
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = palette.divider)
-            if (item.type == ClipType.FILE) null else HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
+            if (item.type == ClipType.FILE && onDownload != null) {
+                HistoryActionRow("Download", Icons.Filled.FileDownload, onDownload)
+            } else if (item.type != ClipType.FILE) {
+                HistoryActionRow("Copy to clipboard", Icons.Filled.ContentCopy, onCopy)
+            }
             HistoryActionRow("Remove from history", Icons.Filled.DeleteForever, onRemove, danger = true)
         }
     }
@@ -612,6 +619,7 @@ data class ClipxHistoryItem(
     val fileSize: Long = 0L,
     val fileExpiresAtMs: Long = 0L,
     val fileDownloaded: Boolean = false,
+    val localFilePath: String? = null,
 )
 
 data class ClipxSheetAction(
