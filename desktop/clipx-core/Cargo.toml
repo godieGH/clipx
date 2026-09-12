@@ -43,7 +43,12 @@ tauri-winrt-notification = "0.8.1"
 # NotificationData/ToastNotificationManager ourselves for progress updates.
 # Feature list and version pinned to match tauri-winrt-notification 0.8.1's
 # own `windows` dependency.
-windows = { version = "0.62", features = ["UI_Notifications", "Foundation_Collections", "Data_Xml_Dom"] }
+windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "Foundation_Collections",
+    "UI_Notifications",
+    "Win32_System_Com",
+] }
 
 [build-dependencies]
 prost-build = "0.14.4"

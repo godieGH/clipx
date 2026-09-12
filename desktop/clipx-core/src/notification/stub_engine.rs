@@ -5,7 +5,10 @@
 //! Just as windows does to ensure consistency but this stub still is important for non-windows, 
 //! non-Linux, and Non-macos desktops
 
-use super::{platform::{NotificationEngine as Engine, NotificationFuture}, IncomingClipboardDecision, PairDecision, Prompt};
+use super::{
+    platform::{NotificationEngine as Engine, NotificationFuture},
+    IncomingClipboardDecision, NotificationConfig, PairDecision, Prompt, TransferNotificationOverride,
+};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -14,6 +17,10 @@ pub struct NotificationEngine;
 impl NotificationEngine {
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn with_config(_config: NotificationConfig) -> Self {
+        Self::new()
     }
 }
 
@@ -52,5 +59,19 @@ impl Engine for NotificationEngine {
         Box::pin(async move {
             tracing::info!("[{title}] {body}");
         })
+    }
+
+    fn notify_file_transfer(
+        &self,
+        _file_id: String,
+        _file_name: String,
+        _direction: String,
+        _done: u64,
+        _total: u64,
+        _state: String,
+        _message: String,
+        _override: Option<TransferNotificationOverride>,
+    ) -> NotificationFuture<'static, ()> {
+        Box::pin(async {})
     }
 }

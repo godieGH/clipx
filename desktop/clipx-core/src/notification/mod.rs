@@ -42,6 +42,45 @@ pub enum IncomingClipboardKind {
 }
 
 #[derive(Debug, Clone)]
+pub enum ProgressText {
+    /// Render the authoritative progress value as a percentage, e.g. `47%`.
+    Percentage,
+    /// Render the authoritative byte counters, e.g. `47 MB / 100 MB`.
+    Bytes,
+    /// Render caller-provided presentation text without changing the progress value.
+    Custom(String),
+    /// Do not render a value string next to the progress bar.
+    Hidden,
+}
+
+impl Default for ProgressText {
+    fn default() -> Self {
+        Self::Percentage
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NotificationConfig {
+    pub transfer_title: String,
+    pub progress_text: ProgressText,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            transfer_title: "File Transfer".to_string(),
+            progress_text: ProgressText::Percentage,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TransferNotificationOverride {
+    pub transfer_title: Option<String>,
+    pub progress_text: Option<ProgressText>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Prompt {
     PairRequest {
         peer_name: String,

@@ -10,7 +10,7 @@ use crate::platform::NotificationPrompter;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::{IncomingClipboardDecision, IncomingClipboardKind, PairDecision, Prompt};
+use super::{IncomingClipboardDecision, IncomingClipboardKind, PairDecision, Prompt, TransferNotificationOverride};
 
 pub type NotificationFuture<'a, T> =
     Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -32,8 +32,8 @@ pub trait NotificationEngine: Send + Sync {
 
     /// Optional native transfer notification. Platforms without a native
     /// progress notification simply inherit this no-op implementation.
-    fn notify_file_transfer<'a>(
-        &'a self,
+    fn notify_file_transfer(
+        &self,
         _file_id: String,
         _file_name: String,
         _direction: String,
@@ -41,7 +41,8 @@ pub trait NotificationEngine: Send + Sync {
         _total: u64,
         _state: String,
         _message: String,
-    ) -> NotificationFuture<'a, ()> {
+        _override: Option<TransferNotificationOverride>,
+    ) -> NotificationFuture<'static, ()> {
         Box::pin(async {})
     }
 }

@@ -2328,16 +2328,21 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             state: state.to_string(),
             message: message.clone(),
         });
-        let notification = self.notification.clone();
-        let file_id = file_id.to_string();
-        let file_name = file_name.to_string();
-        let direction = direction.to_string();
-        let state = state.to_string();
-        tokio::spawn(async move {
-            notification
-                .notify_file_transfer(file_id, file_name, direction, done, total, state, message)
-                .await;
-        });
+        let notification_future = self.notification.notify_file_transfer(
+            file_id.to_string(),
+            file_name.to_string(),
+            direction.to_string(),
+            done,
+            total,
+            state.to_string(),
+            message,
+            None,
+        );
+        // The native notification event is enqueued synchronously above.
+        // Only the acknowledgment wait is spawned, so a later transfer state
+        // cannot overtake an earlier one merely because Tokio scheduled its
+        // wrapper task first.
+        tokio::spawn(notification_future);
     }
 
     async fn emit_transfer(
@@ -2370,6 +2375,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 total,
                 state.to_string(),
                 message,
+                None,
             )
             .await;
     }

@@ -98,13 +98,35 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         tokio::spawn(async move { notification.notify_info(title, body).await; });
     }
     fn notify_transfer(&self, entry_id: &str, file_id: &str, file_name: &str, direction: &str, done: u64, total: u64, state: &str, message: impl Into<String>) {
+        let message = message.into();
         let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
             entry_id: entry_id.to_string(),
             file_id: file_id.to_string(),
             file_name: file_name.to_string(),
             direction: direction.to_string(),
-            done, total, state: state.to_string(), message: message.into(),
+            done,
+            total,
+            state: state.to_string(),
+            message: message.clone(),
         });
+
+        // ClipboardManager owns the post-transfer stages (saving/complete)
+        // after DeviceManager has finished receiving the bytes. Forward those
+        // stages to the native notification engine too, otherwise the Windows
+        // progress toast can remain at 100% with a "Downloading…" status.
+        let notification_future = self.notification.notify_file_transfer(
+            file_id.to_string(),
+            file_name.to_string(),
+            direction.to_string(),
+            done,
+            total,
+            state.to_string(),
+            message,
+            None,
+        );
+        // Queue the native event before yielding to Tokio. This preserves the
+        // state order: requesting -> receiving -> saving -> complete.
+        tokio::spawn(notification_future);
     }
 
     pub async fn run(mut self, shutdown_rx: watch::Receiver<bool>, mut command_rx: mpsc::UnboundedReceiver<ClipboardCommand>) {
@@ -424,7 +446,10 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             self.active_downloads.remove(&file_id);
             return "Device manager is stopped".into();
         }
-        self.notify_transfer(entry_id, &file_id, &file_name, "download", 0, item.file_size, "requesting", "Downloading file");
+        // DeviceManager owns the actual transfer lifecycle notification.
+        // Emitting the same initial state here creates two independent
+        // producers, which can race on very small files and briefly reset
+        // the UI back to 0%.
         "download requested".into()
     }
 
