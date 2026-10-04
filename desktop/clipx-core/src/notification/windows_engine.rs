@@ -7,8 +7,11 @@
 //   - Slow downloads get a progress toast even when the file itself is tiny.
 //   - Zero/unknown-sized downloads never display 0/0 progress.
 //   - Download progress never displays 100%; completion owns the final state.
-//   - A download entering "saving" with all bytes received is completed from
-//     the notification layer so it cannot remain stuck at "Saving...".
+//   - A download that has received all bytes waits for the explicit "complete"
+//     event, which carries the real saved path for the completion toast.
+//   - Progress toast updates are throttled, and only terminal events are
+//     awaited by callers, so a fast sender never floods the notification thread.
+//   - A progress toast the user dismissed is not re-created on later updates.
 //   - Progress and completion notifications use separate tags.
 
 use super::{
@@ -316,6 +319,7 @@ fn show_due_progress(states: &mut HashMap<String, FileToastState>, file_id: &str
         Ok(()) => {
             if let Some(state) = states.get_mut(file_id) {
                 state.phase = ToastPhase::Shown { sequence: 1 };
+                state.last_toast_update = Instant::now();
 
                 if let Some(pending) = state.pending_progress.as_mut() {
                     pending.progress_shown = true;
@@ -400,7 +404,13 @@ fn handle_transfer_notification_inner(
         states.get(file_id).map(|state| &state.phase),
         Some(ToastPhase::Done)
     ) {
-        return Ok(());
+        // The same file id can be downloaded again later; a new "requesting"
+        // starts a fresh lifecycle, anything else is a stale event.
+        if state == "requesting" {
+            states.remove(file_id);
+        } else {
+            return Ok(());
+        }
     }
 
     if !terminal {
@@ -451,6 +461,7 @@ fn handle_transfer_notification_inner(
                 title: title.clone(),
                 last_done: done,
                 started_at: Instant::now(),
+                last_toast_update: Instant::now(),
                 phase: ToastPhase::Pending,
                 pending_progress: Some(PendingProgress {
                     direction: direction.to_string(),
@@ -525,24 +536,8 @@ fn handle_transfer_notification_inner(
 
         // Do not show a 100% progress notification.
         if done >= total {
-            // Once the file has reached its final byte and enters saving,
-            // finish the notification lifecycle instead of leaving the UI
-            // stuck at "Saving...".
-            if state == "saving" {
-                return finalize_download_notification(
-                    states,
-                    file_id,
-                    &title,
-                    &progress_tag,
-                    &completion_tag,
-                    notification_title,
-                    message,
-                    done,
-                );
-            }
-
-            // For receiving at exactly total bytes, wait for the transfer's
-            // explicit terminal state unless it enters saving.
+            // All bytes received (including the "saving" stage): wait for the
+            // explicit "complete" event, which carries the real saved path.
             return Ok(());
         }
 
@@ -557,7 +552,7 @@ fn handle_transfer_notification_inner(
     // ------------------------------------------------------------------------
 
     if progress_already_shown {
-        update_existing_progress(states, file_id, notification_title);
+        update_existing_progress(states, file_id);
     }
 
     Ok(())
@@ -571,11 +566,11 @@ fn handle_terminal_notification(
     completion_tag: &str,
     direction: &str,
     done: u64,
-    total: u64,
+    _total: u64,
     state: &str,
     message: &str,
     notification_title: &str,
-    progress_text: &ProgressText,
+    _progress_text: &ProgressText,
 ) -> windows::core::Result<()> {
     let previous = states.remove(file_id);
 
@@ -591,6 +586,7 @@ fn handle_terminal_notification(
                 title: title.to_string(),
                 last_done: done,
                 started_at: Instant::now(),
+                last_toast_update: Instant::now(),
                 phase: ToastPhase::Done,
                 pending_progress: None,
             },
@@ -619,60 +615,34 @@ fn handle_terminal_notification(
         }
 
         "complete" => {
-            if let Some(sequence) = previous_sequence {
-                let mut final_progress = Progress {
-                    tag: progress_tag.to_string(),
-                    title: title.to_string(),
-                    status: "Sending finished".to_string(),
-                    value: 1.0,
-                    value_string: format_progress_text(
-                        progress_text,
-                        total,
-                        total,
-                        1.0,
-                    ),
-                };
-
-                final_progress.tag = progress_tag.to_string();
-
-                match set_progress_always(
-                    APP_ID,
-                    &final_progress,
-                    sequence.saturating_add(1),
-                ) {
-                    Ok(NotificationUpdateResult::Succeeded)
-                    | Ok(NotificationUpdateResult::NotificationNotFound) => {}
-                    Ok(result) => tracing::debug!(
-                        ?result,
-                        %file_id,
-                        "final upload progress update did not apply"
-                    ),
-                    Err(error) => tracing::debug!(
+            // Upload finished: replace the progress toast with a plain
+            // completion toast, so it can never be left stuck mid-way.
+            if previous_sequence.is_some() {
+                if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
+                    tracing::debug!(
                         ?error,
                         %file_id,
-                        "final upload progress update failed"
-                    ),
-                }
-            } else {
-                let toast = Toast::new(APP_ID)
-                    .title(notification_title)
-                    .text1(&format!("{title} — Sending finished"));
-
-                toast.show().map_err(|error| {
-                    tracing::error!(
-                        ?error,
-                        %file_id,
-                        "failed to show upload completion toast"
+                        "could not remove previous upload progress toast"
                     );
-
-                    windows::core::Error::new(
-                        windows::core::HRESULT(0x80004005u32 as i32),
-                        format!(
-                            "failed to show upload completion toast: {error}"
-                        ),
-                    )
-                })?;
+                }
             }
+
+            let toast = Toast::new(APP_ID)
+                .title(notification_title)
+                .text1(&format!("{title} — Sending finished"));
+
+            toast.show().map_err(|error| {
+                tracing::error!(
+                    ?error,
+                    %file_id,
+                    "failed to show upload completion toast"
+                );
+
+                windows::core::Error::new(
+                    windows::core::HRESULT(0x80004005u32 as i32),
+                    format!("failed to show upload completion toast: {error}"),
+                )
+            })?;
         }
 
         _ => {
@@ -708,7 +678,6 @@ fn handle_terminal_notification(
 fn update_existing_progress(
     states: &mut HashMap<String, FileToastState>,
     file_id: &str,
-    notification_title: &str,
 ) {
     let Some(state) = states.get(file_id) else {
         return;
@@ -722,6 +691,12 @@ fn update_existing_progress(
         ToastPhase::Shown { sequence } => sequence,
         _ => return,
     };
+
+    // Throttle: drop updates that arrive too quickly. The next one carries
+    // the newest values, and terminal events are never throttled.
+    if state.last_toast_update.elapsed() < MIN_TOAST_UPDATE_INTERVAL {
+        return;
+    }
 
     let progress_tag = progress_tag(file_id);
 
@@ -752,25 +727,15 @@ fn update_existing_progress(
                 state.phase = ToastPhase::Shown {
                     sequence: next_sequence,
                 };
+                state.last_toast_update = Instant::now();
             }
         }
 
         Ok(NotificationUpdateResult::NotificationNotFound) => {
-            match show_progress_toast(
-                APP_ID,
-                notification_title,
-                &progress,
-            ) {
-                Ok(()) => {
-                    if let Some(state) = states.get_mut(file_id) {
-                        state.phase = ToastPhase::Shown { sequence: 1 };
-                    }
-                }
-                Err(error) => tracing::error!(
-                    ?error,
-                    %file_id,
-                    "failed to recreate Windows progress toast"
-                ),
+            // The user dismissed the toast (or Windows removed it). Do not
+            // pop it back up on every later update.
+            if let Some(state) = states.get_mut(file_id) {
+                state.phase = ToastPhase::Dismissed;
             }
         }
 
@@ -846,54 +811,11 @@ fn build_progress(
     })
 }
 
-fn finalize_download_notification(
-    states: &mut HashMap<String, FileToastState>,
-    file_id: &str,
-    title: &str,
-    progress_tag: &str,
-    completion_tag: &str,
-    notification_title: &str,
-    file_path: &str,
-    done: u64,
-) -> windows::core::Result<()> {
-    let previous = states.remove(file_id);
-
-    if matches!(
-        previous.as_ref().map(|state| &state.phase),
-        Some(ToastPhase::Shown { .. })
-    ) {
-        if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
-            tracing::debug!(
-                ?error,
-                %file_id,
-                "could not remove completed download progress toast"
-            );
-        }
-    }
-
-    states.insert(
-        file_id.to_string(),
-        FileToastState {
-            title: title.to_string(),
-            last_done: done,
-            started_at: Instant::now(),
-            phase: ToastPhase::Done,
-            pending_progress: None,
-        },
-    );
-
-    show_completion_toast(
-        APP_ID,
-        completion_tag,
-        notification_title,
-        title,
-        file_path,
-    )
-}
-
 enum ToastPhase {
     Pending,
     Shown { sequence: u32 },
+    /// The user dismissed the progress toast; never bring it back.
+    Dismissed,
     Done,
 }
 
@@ -912,9 +834,13 @@ struct FileToastState {
     title: String,
     last_done: u64,
     started_at: Instant,
+    last_toast_update: Instant,
     phase: ToastPhase,
     pending_progress: Option<PendingProgress>,
 }
+
+// Minimum gap between two updates of the same progress toast.
+const MIN_TOAST_UPDATE_INTERVAL: Duration = Duration::from_millis(300);
 
 fn progress_tag(file_id: &str) -> String {
     format!("clipx-transfer-progress-{file_id}")
@@ -1422,7 +1348,20 @@ impl Engine for NotificationEngine {
             .and_then(|config| config.progress_text)
             .unwrap_or_else(|| self.transfer_config.progress_text.clone());
 
-        let (completion_tx, completion_rx) = oneshot::channel();
+        // Only terminal events are awaited by callers. Progress events are
+        // fire-and-forget so a fast sender is never slowed down (or able to
+        // flood the notification thread with acknowledgements).
+        let terminal = matches!(
+            state.as_str(),
+            "complete" | "failed" | "expired" | "cancelled" | "interrupted"
+        );
+
+        let (completion, wait) = if terminal {
+            let (tx, rx) = oneshot::channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
 
         let event = TransferNotification {
             file_id,
@@ -1434,7 +1373,7 @@ impl Engine for NotificationEngine {
             message,
             notification_title: transfer_title,
             progress_text,
-            completion: Some(completion_tx),
+            completion,
         };
 
         let Some(sender) = self.worker.tx.as_ref() else {
@@ -1454,7 +1393,9 @@ impl Engine for NotificationEngine {
         }
 
         Box::pin(async move {
-            let _ = completion_rx.await;
+            if let Some(rx) = wait {
+                let _ = rx.await;
+            }
         })
     }
 }
