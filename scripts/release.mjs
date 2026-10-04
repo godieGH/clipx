@@ -72,9 +72,13 @@ function gitChecks(tag) {
   if (git("status", "--porcelain")) die("working tree not clean — commit or stash first");
   const br = git("rev-parse", "--abbrev-ref", "HEAD");
   if (br !== "main" && !has("--allow-branch")) die(`on '${br}', expected main (--allow-branch to override)`);
-  if (out("git", ["fetch", "origin", "--tags", "--quiet"]).status !== 0) console.log("  ! fetch failed, skipping remote checks");
-  const behind = out("git", ["rev-list", "--count", "HEAD..@{u}"]);
-  if (behind.status === 0 && behind.stdout.trim() !== "0") die("branch is behind remote — pull first");
+  const fetched = out("git", ["fetch", "origin", "--tags", "--quiet"]);
+  if (fetched.status !== 0) {
+    console.log(`  ! fetch failed, skipping behind check\n    ${(fetched.stderr || "").trim()}`);
+  } else {
+    const behind = out("git", ["rev-list", "--count", "HEAD..@{u}"]);
+    if (behind.status === 0 && behind.stdout.trim() !== "0") die("branch is behind remote — pull first");
+  }
   if (out("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`]).status === 0) die(`tag ${tag} already exists`);
 }
 
