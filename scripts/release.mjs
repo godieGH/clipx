@@ -74,7 +74,9 @@ function gitChecks(tag) {
   if (br !== "main" && !has("--allow-branch")) die(`on '${br}', expected main (--allow-branch to override)`);
   const fetched = out("git", ["fetch", "origin", "--tags", "--quiet"]);
   if (fetched.status !== 0) {
-    console.log(`  ! fetch failed, skipping behind check\n    ${(fetched.stderr || "").trim()}`);
+    const msg = `fetch failed:\n    ${(fetched.stderr || "").trim()}`;
+    if (!has("--dry-run") && !has("--no-push")) die(msg);
+    console.log(`  ! ${msg}`);
   } else {
     const behind = out("git", ["rev-list", "--count", "HEAD..@{u}"]);
     if (behind.status === 0 && behind.stdout.trim() !== "0") die("branch is behind remote — pull first");
@@ -103,7 +105,7 @@ function verify() {
 }
 
 function build() {
-  if (has("--skip-build")) return;
+  if (!has("--build")) return;
   step("Build");
   prep();
   const app = at("desktop/clipx-app");
