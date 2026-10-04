@@ -57,7 +57,8 @@ fn spawn_child() -> Result<Child, String> {
         }
     }
 
-    cmd.spawn().map_err(|e| format!("could not launch clipx-core: {e}"))
+    cmd.spawn()
+        .map_err(|e| format!("could not launch clipx-core: {e}"))
 }
 
 async fn connect_with_retry(client: &mut Client, tries: u32) -> Result<(), String> {

@@ -1,7 +1,7 @@
 use crate::message::proto::DeviceType;
 use directories::ProjectDirs;
-use std::{fs, path::PathBuf};
 use std::sync::OnceLock;
+use std::{fs, path::PathBuf};
 
 const MACHINE_DEVICE_ID_FILE: &str = "device_id";
 const TRUSTED_DEVICES_FILE: &str = "trusted_devices.json";

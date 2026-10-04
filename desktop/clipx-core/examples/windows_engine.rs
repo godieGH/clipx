@@ -1,6 +1,6 @@
 use clipx_core::{
     logging,
-    notification::{platform::NotificationEngine as _, NotificationEngine},
+    notification::{NotificationEngine, platform::NotificationEngine as _},
 };
 use std::time::Duration;
 
@@ -12,12 +12,21 @@ async fn main() {
     let id = "test-file-1".to_string();
     let name = "movie.mkv".to_string();
     let total: u64 = 100_000_000;
-    let step_ms: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(50);
+    let step_ms: u64 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
 
     let send = |done: u64, state: &str, msg: &str| {
         engine.notify_file_transfer(
-            id.clone(), name.clone(), "download".into(),
-            done, total, state.into(), msg.into(), None,
+            id.clone(),
+            name.clone(),
+            "download".into(),
+            done,
+            total,
+            state.into(),
+            msg.into(),
+            None,
         )
     };
 

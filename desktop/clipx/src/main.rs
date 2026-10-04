@@ -1,11 +1,16 @@
 mod commands;
-use clipx_lib::ipc;
-use clipx_lib::clipx;
 use clap::{Parser, Subcommand};
-use commands::{seen::SeenArgs, trusted::TrustedArgs, identity::IdentityArgs, pair::PairArgs, connect::ConnectArgs};
+use clipx_lib::clipx;
+use clipx_lib::ipc;
+use commands::{
+    connect::ConnectArgs, identity::IdentityArgs, pair::PairArgs, seen::SeenArgs,
+    trusted::TrustedArgs,
+};
 
 #[derive(Parser)]
-#[command(about = "clipx is a cli tool to manage devices or work with clipx-core through a command line tool")]
+#[command(
+    about = "clipx is a cli tool to manage devices or work with clipx-core through a command line tool"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -13,16 +18,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-   #[command(about = "Displays all currently discovered devices")]
-   Seen(SeenArgs),
-   #[command(about = "Display all trusted devices(paired devices)")]
-   Trusted(TrustedArgs),
-   #[command(about = "Displays this device Identity")]
-   Identity(IdentityArgs),
-   #[command(about = "Pair with another devices")]
-   Pair(PairArgs),
-   #[command(about = "Connect to a trusted device")]
-   Connect(ConnectArgs),
+    #[command(about = "Displays all currently discovered devices")]
+    Seen(SeenArgs),
+    #[command(about = "Display all trusted devices(paired devices)")]
+    Trusted(TrustedArgs),
+    #[command(about = "Displays this device Identity")]
+    Identity(IdentityArgs),
+    #[command(about = "Pair with another devices")]
+    Pair(PairArgs),
+    #[command(about = "Connect to a trusted device")]
+    Connect(ConnectArgs),
 }
 
 fn main() {

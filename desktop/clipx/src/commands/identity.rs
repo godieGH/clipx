@@ -1,5 +1,5 @@
-use clap::Args;
 use crate::{clipx, ipc::Client};
+use clap::Args;
 
 #[derive(Args)]
 pub struct IdentityArgs {
@@ -9,10 +9,19 @@ pub struct IdentityArgs {
     #[arg(long, help = "Display only the device name")]
     name: bool,
 
-    #[arg(short, long, alias = "pub", help = "Display only the device public key")]
+    #[arg(
+        short,
+        long,
+        alias = "pub",
+        help = "Display only the device public key"
+    )]
     pub_key: bool,
 
-    #[arg(long, alias = "ws-port", help = "Shows only the current websocket port")]
+    #[arg(
+        long,
+        alias = "ws-port",
+        help = "Shows only the current websocket port"
+    )]
     ws_port: bool,
 
     #[arg(long, alias = "type", help = "Displays only the device type")]
@@ -22,7 +31,9 @@ pub struct IdentityArgs {
 impl IdentityArgs {
     pub fn run(args: IdentityArgs, ipc: &mut Client) {
         let ipcreq = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Identity(clipx::IdentityRequest {})),
+            request: Some(clipx::ipc_request::Request::Identity(
+                clipx::IdentityRequest {},
+            )),
         };
 
         if let Ok(res) = ipc.send(ipcreq) {

@@ -34,7 +34,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2

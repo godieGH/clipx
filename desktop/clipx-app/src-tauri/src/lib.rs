@@ -242,7 +242,8 @@ pub fn run() {
                         if let Err(e) = res {
                             eprintln!("ClipX: autostart toggle failed: {e}");
                         }
-                        let _ = autostart_item_for_event.set_checked(al.is_enabled().unwrap_or(false));
+                        let _ =
+                            autostart_item_for_event.set_checked(al.is_enabled().unwrap_or(false));
                     }
                     "quit" => {
                         app.exit(0);

@@ -3,7 +3,12 @@ use std::{collections::VecDeque, fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ClipKind { Text, RichText, Image, File }
+pub enum ClipKind {
+    Text,
+    RichText,
+    Image,
+    File,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClipItem {
@@ -33,7 +38,9 @@ pub struct ClipItem {
     pub local_file_path: Option<String>,
 }
 
-fn default_kind() -> ClipKind { ClipKind::Text }
+fn default_kind() -> ClipKind {
+    ClipKind::Text
+}
 
 pub struct ClipboardStore {
     path: PathBuf,
@@ -47,21 +54,33 @@ impl ClipboardStore {
             .ok()
             .and_then(|data| serde_json::from_str(&data).ok())
             .unwrap_or_default();
-        Self { path, history, max_capacity }
+        Self {
+            path,
+            history,
+            max_capacity,
+        }
     }
 
     pub fn add(&mut self, item: ClipItem) -> bool {
-        if self.history.front().is_some_and(|top| same_clip(top, &item)) {
+        if self
+            .history
+            .front()
+            .is_some_and(|top| same_clip(top, &item))
+        {
             return false;
         }
         self.history.push_front(item);
-        while self.history.len() > self.max_capacity { self.history.pop_back(); }
+        while self.history.len() > self.max_capacity {
+            self.history.pop_back();
+        }
         self.persist();
         true
     }
 
     pub fn update(&mut self, item: ClipItem) -> bool {
-        let Some(pos) = self.history.iter().position(|v| v.id == item.id) else { return false; };
+        let Some(pos) = self.history.iter().position(|v| v.id == item.id) else {
+            return false;
+        };
         self.history[pos] = item;
         self.persist();
         true
@@ -71,15 +90,22 @@ impl ClipboardStore {
         let before = self.history.len();
         self.history.retain(|i| i.id != id);
         let removed = self.history.len() != before;
-        if removed { self.persist(); }
+        if removed {
+            self.persist();
+        }
         removed
     }
 
-    pub fn clear(&mut self) { self.history.clear(); self.persist(); }
+    pub fn clear(&mut self) {
+        self.history.clear();
+        self.persist();
+    }
 
     pub(super) fn persist(&self) {
         if let Ok(json) = serde_json::to_string_pretty(&self.history) {
-            if let Err(e) = fs::write(&self.path, json) { tracing::error!("failed to persist clipboard history: {e}"); }
+            if let Err(e) = fs::write(&self.path, json) {
+                tracing::error!("failed to persist clipboard history: {e}");
+            }
         } else {
             tracing::error!("failed to serialize clipboard history");
         }

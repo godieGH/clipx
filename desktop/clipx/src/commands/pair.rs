@@ -14,7 +14,7 @@ enum PairSubcmd {
     #[command(about = "List pending pairing requests")]
     Pending,
     #[command(about = "Approve a pending pairing request")]
-    Approve { 
+    Approve {
         device_id: String,
         #[arg(long, default_value_t = false, help = "Reject instead of approve")]
         deny: bool,
@@ -34,9 +34,12 @@ impl PairArgs {
                     clipx::PairPendingRequest {},
                 )),
             },
-            Some(PairSubcmd::Approve { device_id , deny}) => clipx::IpcRequest {
+            Some(PairSubcmd::Approve { device_id, deny }) => clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::PairApprove(
-                    clipx::PairApproveRequest { device_id, approve: !deny },
+                    clipx::PairApproveRequest {
+                        device_id,
+                        approve: !deny,
+                    },
                 )),
             },
             None => clipx::IpcRequest {

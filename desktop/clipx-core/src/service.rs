@@ -88,8 +88,9 @@ impl CoreService {
             core_events_tx,
             stop_tx,
         );
-        self.tasks.push(tokio::spawn(async move { ipc_service.start().await }));
-        
+        self.tasks
+            .push(tokio::spawn(async move { ipc_service.start().await }));
+
         tokio::select! {
             r = signal::ctrl_c() => { r?; }
             _ = stop_rx.recv() => {
@@ -98,7 +99,7 @@ impl CoreService {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
         }
-        
+
         self.stop();
         self.shutdown().await;
         Ok(())
@@ -197,15 +198,11 @@ where
     }));
 
     let shutdown_for_discovery = shutdown_rx.clone();
-    let discovery_tasks = netio::discovery::spawn(
-        shutdown_for_discovery,
-        identity.clone(),
-        discovered_tx,
-    )
-    .expect("failed to start discovery");
+    let discovery_tasks =
+        netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx)
+            .expect("failed to start discovery");
     tasks.extend(discovery_tasks);
 
-    
     let device_manager = crate::device::manager::DeviceManager::new(
         device::config::trusted_devices_path(),
         identity,
@@ -264,5 +261,11 @@ where
         }));
     }
 
-    (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx)
+    (
+        tasks,
+        shutdown_tx,
+        clipboard_cmd_tx,
+        device_tx,
+        core_events_tx,
+    )
 }

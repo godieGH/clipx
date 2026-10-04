@@ -1,14 +1,21 @@
-use clap::Args;
-use crate::ipc::Client;
 use crate::clipx;
+use crate::ipc::Client;
+use clap::Args;
 
 #[derive(Args, Debug)]
 pub struct SeenArgs {
-
-    #[arg(short, long, help = "Display all the untrusted currently discovered devices")]
+    #[arg(
+        short,
+        long,
+        help = "Display all the untrusted currently discovered devices"
+    )]
     untrusted: bool,
 
-    #[arg(short, long, help = "Display all the trusted currently discovered devices")]
+    #[arg(
+        short,
+        long,
+        help = "Display all the trusted currently discovered devices"
+    )]
     trusted: bool,
 
     #[arg(long, help = "Display with extra verbose information")]

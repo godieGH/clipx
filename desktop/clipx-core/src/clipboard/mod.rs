@@ -7,7 +7,7 @@ pub mod watcher;
 
 /// this is here to handle running clipx-core barely on environment arboard is not supported
 /// when clipx-core used as a library — the platform must implement the object that give core
-/// access of the system clipboard in any kind of mode — pull(watch and poll periodically) 
+/// access of the system clipboard in any kind of mode — pull(watch and poll periodically)
 /// or push(the platform pushes and core uses) modes
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 pub mod watcher {

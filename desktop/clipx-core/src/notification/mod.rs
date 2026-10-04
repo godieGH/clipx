@@ -108,15 +108,18 @@ impl Prompt {
 
             Prompt::ConfirmCode { peer_name, code } => (
                 "Confirm pairing code".to_string(),
-                format!(
-                    "Code from {peer_name}: {code}\nDoes this match on both devices?"
-                ),
+                format!("Code from {peer_name}: {code}\nDoes this match on both devices?"),
             ),
 
-            Prompt::IncomingClipboard { peer_name, content, kind } => {
+            Prompt::IncomingClipboard {
+                peer_name,
+                content,
+                kind,
+            } => {
                 let body = match kind {
-                    IncomingClipboardKind::Text | IncomingClipboardKind::RichText =>
-                        format!("{content}\n\nReceived from {peer_name}."),
+                    IncomingClipboardKind::Text | IncomingClipboardKind::RichText => {
+                        format!("{content}\n\nReceived from {peer_name}.")
+                    }
                     IncomingClipboardKind::Image => format!("Image received from {peer_name}."),
                     IncomingClipboardKind::File => format!("{content}\nReceived from {peer_name}."),
                 };

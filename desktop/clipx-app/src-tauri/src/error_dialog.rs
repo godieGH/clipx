@@ -4,9 +4,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_
 
 #[cfg(windows)]
 pub fn show_core_error(error: impl Display) {
-    let message = format!(
-        "Clipx core could not be started: {error}"
-    );
+    let message = format!("Clipx core could not be started: {error}");
 
     let message: Vec<u16> = std::ffi::OsStr::new(&message)
         .encode_wide()

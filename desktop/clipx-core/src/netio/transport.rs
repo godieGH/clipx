@@ -1,7 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
-use uuid::Uuid;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, watch},
@@ -9,6 +8,7 @@ use tokio::{
 use tokio_tungstenite::{
     WebSocketStream, accept_async, client_async, tungstenite::Message as WsMessage,
 };
+use uuid::Uuid;
 
 use crate::message::proto::{self, peer_message::Body};
 
@@ -22,7 +22,10 @@ pub struct ConnectedDevice {
 #[derive(Debug)]
 pub enum TransportEvent {
     Connected(ConnectedDevice),
-    Disconnected { device_id: String, connection_id: String },
+    Disconnected {
+        device_id: String,
+        connection_id: String,
+    },
     ConnectFailed(String),
     /// A decoded PeerMessage from an identified device. Pre-transport
     /// variants are consumed by DeviceManager; Body::Clipboard is defined
@@ -165,7 +168,9 @@ impl Transport {
                 reply_to,
             } => {
                 if self.connections.contains_key(&device_id) {
-                    tracing::warn!("dial requested for {device_id} which is already registered; ignoring (state caller)");
+                    tracing::warn!(
+                        "dial requested for {device_id} which is already registered; ignoring (state caller)"
+                    );
                     let _ = reply_to.send(true);
                     return;
                 }
@@ -178,7 +183,8 @@ impl Transport {
                 // Dropping outbound_tx is what tells the connection's task
                 // to stop and close the socket — see run_connection.
                 let removed = self.connections.remove(&device_id).is_some();
-                self.pending_connections.retain(|_, (pending_device_id, _)| pending_device_id != &device_id);
+                self.pending_connections
+                    .retain(|_, (pending_device_id, _)| pending_device_id != &device_id);
                 let _ = reply_to.send(removed);
             }
             TransportCommand::DisconnectOnConnection {
@@ -190,10 +196,11 @@ impl Transport {
                     .connections
                     .get(&device_id)
                     .is_some_and(|conn| conn.connection_id == connection_id);
-                let remove_pending = self
-                    .pending_connections
-                    .get(&connection_id)
-                    .is_some_and(|(pending_device_id, conn)| pending_device_id == &device_id && conn.connection_id == connection_id);
+                let remove_pending = self.pending_connections.get(&connection_id).is_some_and(
+                    |(pending_device_id, conn)| {
+                        pending_device_id == &device_id && conn.connection_id == connection_id
+                    },
+                );
                 let _ = if remove_active {
                     self.connections.remove(&device_id);
                     let _ = self.event_tx.send(TransportEvent::Disconnected {
@@ -213,12 +220,15 @@ impl Transport {
                 connection_id,
                 reply_to,
             } => {
-                let Some((pending_device_id, pending_conn)) = self.pending_connections.remove(&connection_id) else {
+                let Some((pending_device_id, pending_conn)) =
+                    self.pending_connections.remove(&connection_id)
+                else {
                     let _ = reply_to.send(false);
                     return;
                 };
                 if pending_device_id != device_id {
-                    self.pending_connections.insert(connection_id, (pending_device_id, pending_conn));
+                    self.pending_connections
+                        .insert(connection_id, (pending_device_id, pending_conn));
                     let _ = reply_to.send(false);
                     return;
                 }
@@ -241,7 +251,11 @@ impl Transport {
                     let _ = reply_to.send(false);
                     return;
                 }
-                let Some(outbound_tx) = self.connections.get(&device_id).map(|c| c.outbound_tx.clone()) else {
+                let Some(outbound_tx) = self
+                    .connections
+                    .get(&device_id)
+                    .map(|c| c.outbound_tx.clone())
+                else {
                     let _ = reply_to.send(false);
                     return;
                 };
@@ -250,7 +264,12 @@ impl Transport {
                     let _ = reply_to.send(ok);
                 });
             }
-            TransportCommand::SendPeerMessageOnConnection { device_id, connection_id, message, reply_to } => {
+            TransportCommand::SendPeerMessageOnConnection {
+                device_id,
+                connection_id,
+                message,
+                reply_to,
+            } => {
                 let mut buf = Vec::new();
                 if message.encode(&mut buf).is_err() {
                     let _ = reply_to.send(false);
@@ -264,10 +283,13 @@ impl Transport {
                     }
                 } else {
                     None
-                }.or_else(|| {
+                }
+                .or_else(|| {
                     self.pending_connections
                         .get(&connection_id)
-                        .filter(|(pending_device_id, conn)| pending_device_id == &device_id && conn.connection_id == connection_id)
+                        .filter(|(pending_device_id, conn)| {
+                            pending_device_id == &device_id && conn.connection_id == connection_id
+                        })
                         .map(|(_, conn)| conn.outbound_tx.clone())
                 });
                 let Some(outbound_tx) = outbound_tx else {
@@ -308,20 +330,46 @@ impl Transport {
                     if allow_duplicate {
                         self.pending_connections.insert(
                             connection_id.clone(),
-                            (device_id.clone(), Conn { connection_id: connection_id.clone(), addr, outbound_tx }),
+                            (
+                                device_id.clone(),
+                                Conn {
+                                    connection_id: connection_id.clone(),
+                                    addr,
+                                    outbound_tx,
+                                },
+                            ),
                         );
-                        if let Some(r) = reply_to { let _ = r.send(true); }
+                        if let Some(r) = reply_to {
+                            let _ = r.send(true);
+                        }
                         tracing::debug!(%device_id, %connection_id, "duplicate inbound connect connection retained for handshake arbitration");
                     } else {
                         drop(outbound_tx);
-                        if let Some(r) = reply_to { let _ = r.send(false); }
+                        if let Some(r) = reply_to {
+                            let _ = r.send(false);
+                        }
                         tracing::debug!(%device_id, %connection_id, "duplicate transport connection rejected");
                     }
                     return;
                 }
-                self.connections.insert(device_id.clone(), Conn { connection_id: connection_id.clone(), addr, outbound_tx });
-                if let Some(r) = reply_to { let _ = r.send(true); }
-                let _ = self.event_tx.send(TransportEvent::Connected(ConnectedDevice { id: device_id, connection_id, addr }));
+                self.connections.insert(
+                    device_id.clone(),
+                    Conn {
+                        connection_id: connection_id.clone(),
+                        addr,
+                        outbound_tx,
+                    },
+                );
+                if let Some(r) = reply_to {
+                    let _ = r.send(true);
+                }
+                let _ = self
+                    .event_tx
+                    .send(TransportEvent::Connected(ConnectedDevice {
+                        id: device_id,
+                        connection_id,
+                        addr,
+                    }));
             }
             Registration::Failed {
                 device_id,
@@ -332,10 +380,20 @@ impl Transport {
                 }
                 let _ = self.event_tx.send(TransportEvent::ConnectFailed(device_id));
             }
-            Registration::Closed { device_id, connection_id } => {
-                if self.connections.get(&device_id).is_some_and(|c| c.connection_id == connection_id) {
+            Registration::Closed {
+                device_id,
+                connection_id,
+            } => {
+                if self
+                    .connections
+                    .get(&device_id)
+                    .is_some_and(|c| c.connection_id == connection_id)
+                {
                     self.connections.remove(&device_id);
-                    let _ = self.event_tx.send(TransportEvent::Disconnected { device_id, connection_id });
+                    let _ = self.event_tx.send(TransportEvent::Disconnected {
+                        device_id,
+                        connection_id,
+                    });
                 } else if self.pending_connections.remove(&connection_id).is_some() {
                     tracing::debug!(%device_id, %connection_id, "pending handshake connection closed");
                 }
@@ -393,7 +451,15 @@ impl Transport {
                 reply_to: Some(reply_to),
                 allow_duplicate: false,
             });
-            run_connection(ws, device_id, connection_id, outbound_rx, event_tx, register_tx.clone()).await;
+            run_connection(
+                ws,
+                device_id,
+                connection_id,
+                outbound_rx,
+                event_tx,
+                register_tx.clone(),
+            )
+            .await;
         });
     }
 
@@ -445,14 +511,17 @@ impl Transport {
             let connection_id = Uuid::new_v4().to_string();
             let (outbound_tx, outbound_rx) = mpsc::channel(8);
             let (accepted_tx, accepted_rx) = oneshot::channel();
-            if register_tx.send(Registration::Ok {
-                device_id: device_id.clone(),
-                connection_id: connection_id.clone(),
-                addr,
-                outbound_tx,
-                reply_to: Some(accepted_tx),
-                allow_duplicate,
-            }).is_err() {
+            if register_tx
+                .send(Registration::Ok {
+                    device_id: device_id.clone(),
+                    connection_id: connection_id.clone(),
+                    addr,
+                    outbound_tx,
+                    reply_to: Some(accepted_tx),
+                    allow_duplicate,
+                })
+                .is_err()
+            {
                 return;
             }
 
@@ -469,7 +538,15 @@ impl Transport {
                 message,
             });
 
-            run_connection(ws, device_id, connection_id, outbound_rx, event_tx, register_tx.clone()).await;
+            run_connection(
+                ws,
+                device_id,
+                connection_id,
+                outbound_rx,
+                event_tx,
+                register_tx.clone(),
+            )
+            .await;
         });
     }
 }

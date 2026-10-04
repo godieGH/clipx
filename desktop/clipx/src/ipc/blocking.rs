@@ -1,8 +1,7 @@
-
-use interprocess::local_socket::{GenericNamespaced, Name, Stream, prelude::*, ToNsName};
-use tungstenite::{client, WebSocket};
 use crate::clipx;
+use interprocess::local_socket::{prelude::*, GenericNamespaced, Name, Stream, ToNsName};
 use prost::Message;
+use tungstenite::{client, WebSocket};
 
 pub struct Client {
     name: String,
@@ -17,7 +16,11 @@ enum State {
 
 impl Client {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), ws: None, state: State::Down }
+        Self {
+            name: name.into(),
+            ws: None,
+            state: State::Down,
+        }
     }
 
     pub fn start(mut self) -> Self {
@@ -71,7 +74,7 @@ impl Client {
                     }
                 }
                 Ok(tungstenite::Message::Close(_)) => {
-                    self.state =  State::Down;
+                    self.state = State::Down;
                     self.ws = None;
                     break;
                 }
@@ -104,7 +107,6 @@ impl Client {
         Ok(())
     }
 }
-
 
 impl Drop for Client {
     fn drop(&mut self) {

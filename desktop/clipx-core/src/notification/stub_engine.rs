@@ -2,12 +2,13 @@
 //! it ensures other parts of the app on all build target compiles
 //! Linux and Macos desktop later will provide a core baked provide a notification engine
 //! and gate the module at compile time — the stub then just says non of those three
-//! Just as windows does to ensure consistency but this stub still is important for non-windows, 
+//! Just as windows does to ensure consistency but this stub still is important for non-windows,
 //! non-Linux, and Non-macos desktops
 
 use super::{
+    IncomingClipboardDecision, NotificationConfig, PairDecision, Prompt,
+    TransferNotificationOverride,
     platform::{NotificationEngine as Engine, NotificationFuture},
-    IncomingClipboardDecision, NotificationConfig, PairDecision, Prompt, TransferNotificationOverride,
 };
 use std::time::Duration;
 
@@ -51,11 +52,7 @@ impl Engine for NotificationEngine {
         })
     }
 
-    fn notify_info<'a>(
-        &'a self,
-        title: &'a str,
-        body: String,
-    ) -> NotificationFuture<'a, ()> {
+    fn notify_info<'a>(&'a self, title: &'a str, body: String) -> NotificationFuture<'a, ()> {
         Box::pin(async move {
             tracing::info!("[{title}] {body}");
         })

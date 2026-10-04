@@ -5,7 +5,11 @@ use interprocess::local_socket::{ConnectOptions, GenericNamespaced, ToNsName};
 
 async fn already_running() -> bool {
     match "clipx".to_ns_name::<GenericNamespaced>() {
-        Ok(name) => ConnectOptions::new().name(name).connect_tokio().await.is_ok(),
+        Ok(name) => ConnectOptions::new()
+            .name(name)
+            .connect_tokio()
+            .await
+            .is_ok(),
         Err(_) => false,
     }
 }

@@ -1,5 +1,5 @@
-use clap::{Args, Subcommand};
 use crate::{clipx, ipc::Client};
+use clap::{Args, Subcommand};
 
 #[derive(Args)]
 pub struct TrustedArgs {
@@ -9,16 +9,19 @@ pub struct TrustedArgs {
 
 #[derive(Subcommand)]
 enum TrustedSubcmd {
-    #[command(alias = "unpair", about = "Disconnect, unpair and remove a device from trusted")]
-    Remove {
-        id: String
-    }
+    #[command(
+        alias = "unpair",
+        about = "Disconnect, unpair and remove a device from trusted"
+    )]
+    Remove { id: String },
 }
 
 impl TrustedArgs {
     pub fn run(args: TrustedArgs, ipc: &mut Client) {
         let ipcreq = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Trusted(clipx::TrustedRequest {})),
+            request: Some(clipx::ipc_request::Request::Trusted(
+                clipx::TrustedRequest {},
+            )),
         };
 
         if let Ok(res) = ipc.send(ipcreq) {

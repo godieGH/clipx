@@ -1,5 +1,5 @@
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Keep the returned guard alive for the whole process, or the tail of the log is lost.
 pub fn init() -> Option<WorkerGuard> {
@@ -30,7 +30,11 @@ pub fn init() -> Option<WorkerGuard> {
     };
 
     let (writer, guard) = tracing_appender::non_blocking(appender);
-    fmt().with_env_filter(filter).with_writer(writer).with_ansi(false).init();
+    fmt()
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .with_ansi(false)
+        .init();
 
     // panics bypass tracing, so route them into the log too
     std::panic::set_hook(Box::new(|info| tracing::error!("panic: {info}")));

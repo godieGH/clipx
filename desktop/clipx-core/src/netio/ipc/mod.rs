@@ -460,10 +460,13 @@ impl IpcService {
                                     received_at_ms: item.received_at_ms,
                                     kind: match item.kind {
                                         crate::clipboard::clipstore::ClipKind::Text => "text",
-                                        crate::clipboard::clipstore::ClipKind::RichText => "rich_text",
+                                        crate::clipboard::clipstore::ClipKind::RichText => {
+                                            "rich_text"
+                                        }
                                         crate::clipboard::clipstore::ClipKind::Image => "image",
                                         crate::clipboard::clipstore::ClipKind::File => "file",
-                                    }.into(),
+                                    }
+                                    .into(),
                                     html: item.html.unwrap_or_default(),
                                     file_id: item.file_id.unwrap_or_default(),
                                     file_name: item.file_name.unwrap_or_default(),
@@ -507,72 +510,172 @@ impl IpcService {
                 let (tx, rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::Connected { reply_to: tx });
                 if rx.await?.is_empty() {
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message: "No connected devices".into() })) }
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: false,
+                            message: "No connected devices".into(),
+                        })),
+                    }
                 } else {
-                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal { payload: crate::clipboard::manager::ClipboardPayload::Text(req.content) });
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: true, message: "sent".into() })) }
+                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal {
+                        payload: crate::clipboard::manager::ClipboardPayload::Text(req.content),
+                    });
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: true,
+                            message: "sent".into(),
+                        })),
+                    }
                 }
             }
             clipx::ipc_request::Request::SendRichText(req) => {
                 let (tx, rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::Connected { reply_to: tx });
                 if rx.await?.is_empty() {
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message: "No connected devices".into() })) }
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: false,
+                            message: "No connected devices".into(),
+                        })),
+                    }
                 } else {
-                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal { payload: crate::clipboard::manager::ClipboardPayload::RichText { text: req.text, html: req.html } });
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: true, message: "sent".into() })) }
+                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal {
+                        payload: crate::clipboard::manager::ClipboardPayload::RichText {
+                            text: req.text,
+                            html: req.html,
+                        },
+                    });
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: true,
+                            message: "sent".into(),
+                        })),
+                    }
                 }
             }
             clipx::ipc_request::Request::SendImage(req) => {
                 let (tx, rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::Connected { reply_to: tx });
                 if rx.await?.is_empty() {
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message: "No connected devices".into() })) }
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: false,
+                            message: "No connected devices".into(),
+                        })),
+                    }
                 } else {
-                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal { payload: crate::clipboard::manager::ClipboardPayload::Image { width: req.width, height: req.height, rgba: req.rgba } });
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: true, message: "sent".into() })) }
+                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal {
+                        payload: crate::clipboard::manager::ClipboardPayload::Image {
+                            width: req.width,
+                            height: req.height,
+                            rgba: req.rgba,
+                        },
+                    });
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: true,
+                            message: "sent".into(),
+                        })),
+                    }
                 }
             }
             clipx::ipc_request::Request::SendFile(req) => {
                 let (tx, rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::Connected { reply_to: tx });
                 if rx.await?.is_empty() {
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message: "No connected devices".into() })) }
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: false,
+                            message: "No connected devices".into(),
+                        })),
+                    }
                 } else {
-                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal { payload: crate::clipboard::manager::ClipboardPayload::FileBytes { name: req.name, mime_type: req.mime_type, data: req.data } });
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: true, message: "file offer sent".into() })) }
+                    let _ = clipboard_tx.send(ClipboardCommand::SendLocal {
+                        payload: crate::clipboard::manager::ClipboardPayload::FileBytes {
+                            name: req.name,
+                            mime_type: req.mime_type,
+                            data: req.data,
+                        },
+                    });
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: true,
+                            message: "file offer sent".into(),
+                        })),
+                    }
                 }
             }
             clipx::ipc_request::Request::SendFilePath(req) => {
                 let (tx, rx) = oneshot::channel();
                 let _ = device_tx.send(DeviceCommands::Connected { reply_to: tx });
                 if rx.await?.is_empty() {
-                    clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message: "No connected devices".into() })) }
+                    clipx::IpcResponse {
+                        response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse {
+                            sent: false,
+                            message: "No connected devices".into(),
+                        })),
+                    }
                 } else {
                     let (reply_tx, reply_rx) = oneshot::channel();
-                    clipboard_tx.send(ClipboardCommand::SendFilePath { name: req.name, mime_type: req.mime_type, path: std::path::PathBuf::from(req.path), reply_to: reply_tx }).map_err(|_| anyhow::anyhow!("clipboard manager stopped"))?;
-                    match reply_rx.await.map_err(|_| anyhow::anyhow!("clipboard manager stopped"))? {
-                        Ok(()) => clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: true, message: "file offer sent".into() })) },
-                        Err(message) => clipx::IpcResponse { response: Some(clipx::ipc_response::Response::Send(clipx::SendResponse { sent: false, message })) },
+                    clipboard_tx
+                        .send(ClipboardCommand::SendFilePath {
+                            name: req.name,
+                            mime_type: req.mime_type,
+                            path: std::path::PathBuf::from(req.path),
+                            reply_to: reply_tx,
+                        })
+                        .map_err(|_| anyhow::anyhow!("clipboard manager stopped"))?;
+                    match reply_rx
+                        .await
+                        .map_err(|_| anyhow::anyhow!("clipboard manager stopped"))?
+                    {
+                        Ok(()) => clipx::IpcResponse {
+                            response: Some(clipx::ipc_response::Response::Send(
+                                clipx::SendResponse {
+                                    sent: true,
+                                    message: "file offer sent".into(),
+                                },
+                            )),
+                        },
+                        Err(message) => clipx::IpcResponse {
+                            response: Some(clipx::ipc_response::Response::Send(
+                                clipx::SendResponse {
+                                    sent: false,
+                                    message,
+                                },
+                            )),
+                        },
                     }
                 }
             }
             clipx::ipc_request::Request::DownloadClipboardFile(req) => {
                 let (tx, rx) = oneshot::channel();
-                let _ = clipboard_tx.send(ClipboardCommand::DownloadHistoryFile { entry_id: req.entry_id, reply_to: tx });
+                let _ = clipboard_tx.send(ClipboardCommand::DownloadHistoryFile {
+                    entry_id: req.entry_id,
+                    reply_to: tx,
+                });
                 let message = rx.await?;
-                clipx::IpcResponse { response: Some(clipx::ipc_response::Response::DownloadClipboardFile(clipx::DownloadClipboardFileResponse { started: message == "download requested", message })) }
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::DownloadClipboardFile(
+                        clipx::DownloadClipboardFileResponse {
+                            started: message == "download requested",
+                            message,
+                        },
+                    )),
+                }
             }
             clipx::ipc_request::Request::Shutdown(_) => {
                 let _ = stop_tx.send(());
                 clipx::IpcResponse {
-                    response: Some(clipx::ipc_response::Response::Shutdown(clipx::ShutdownResponse {})),
+                    response: Some(clipx::ipc_response::Response::Shutdown(
+                        clipx::ShutdownResponse {},
+                    )),
                 }
             }
         };
 
         let envelope = clipx::IpcServerMessage {
-            payload: Some(clipx::ipc_server_message::Payload::Response(response))
+            payload: Some(clipx::ipc_server_message::Payload::Response(response)),
         };
 
         let mut buf = Vec::new();

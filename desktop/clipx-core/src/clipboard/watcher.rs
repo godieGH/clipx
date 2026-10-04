@@ -1,12 +1,24 @@
-use arboard::Clipboard;
-use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
-use tokio::{sync::{mpsc, watch}, time::{Duration, sleep}};
 use super::manager::ClipboardPayload;
+use arboard::Clipboard;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+use tokio::{
+    sync::{mpsc, watch},
+    time::{Duration, sleep},
+};
 
-pub async fn watch_clipboard(mut shutdown_rx: watch::Receiver<bool>, tx: mpsc::UnboundedSender<ClipboardPayload>) {
+pub async fn watch_clipboard(
+    mut shutdown_rx: watch::Receiver<bool>,
+    tx: mpsc::UnboundedSender<ClipboardPayload>,
+) {
     let mut clipboard = match Clipboard::new() {
         Ok(c) => c,
-        Err(e) => { tracing::warn!("Failed to init clipboard: {e}"); return; }
+        Err(e) => {
+            tracing::warn!("Failed to init clipboard: {e}");
+            return;
+        }
     };
 
     let mut last = String::new();
@@ -15,14 +27,21 @@ pub async fn watch_clipboard(mut shutdown_rx: watch::Receiver<bool>, tx: mpsc::U
             _ = shutdown_rx.changed() => { if *shutdown_rx.borrow() { break; } }
             _ = sleep(Duration::from_millis(500)) => {}
         }
-        if *shutdown_rx.borrow() { break; }
+        if *shutdown_rx.borrow() {
+            break;
+        }
 
         if let Ok(image) = clipboard.get_image() {
             let mut hasher = DefaultHasher::new();
             image.width.hash(&mut hasher);
             image.height.hash(&mut hasher);
             image.bytes.hash(&mut hasher);
-            let marker = format!("image:{}x{}:{:x}", image.width, image.height, hasher.finish());
+            let marker = format!(
+                "image:{}x{}:{:x}",
+                image.width,
+                image.height,
+                hasher.finish()
+            );
             if marker != last {
                 last = marker;
                 let _ = tx.send(ClipboardPayload::Image {
@@ -56,11 +75,20 @@ pub async fn watch_clipboard(mut shutdown_rx: watch::Receiver<bool>, tx: mpsc::U
 }
 
 fn parse_file_uris(text: &str) -> Option<Vec<String>> {
-    let lines = text.lines().map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>();
-    if lines.is_empty() || !lines.iter().all(|s| s.starts_with("file://")) { return None; }
-    let paths = lines.into_iter().filter_map(|uri| {
-        let raw = uri.strip_prefix("file://")?;
-        Some(raw.replace("%20", " "))
-    }).collect::<Vec<_>>();
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() || !lines.iter().all(|s| s.starts_with("file://")) {
+        return None;
+    }
+    let paths = lines
+        .into_iter()
+        .filter_map(|uri| {
+            let raw = uri.strip_prefix("file://")?;
+            Some(raw.replace("%20", " "))
+        })
+        .collect::<Vec<_>>();
     Some(paths)
 }

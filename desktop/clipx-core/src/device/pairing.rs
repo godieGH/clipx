@@ -1,6 +1,9 @@
 use crate::message::proto::DeviceType;
 use sha2::{Digest, Sha256};
-use std::{net::SocketAddr, time::{Duration, Instant}};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 /// Fixed 4xxx codes carried in PreTransportControl — the only vocabulary
 /// either side needs to explain why a pair/connect attempt stopped.
@@ -35,7 +38,6 @@ pub enum PairStage {
     AwaitingCodeConfirm,   // both: waiting local user to confirm the displayed code
     AwaitingAck,           // responder: signed + confirmed, waiting Ack
 }
-
 
 #[derive(Debug)]
 pub struct PairSession {
@@ -75,7 +77,12 @@ impl PairSession {
         }
     }
 
-    pub fn new_responder(addr: SocketAddr, peer_public_key: [u8; 32], peer_name: String, peer_device_type: DeviceType) -> Self {
+    pub fn new_responder(
+        addr: SocketAddr,
+        peer_public_key: [u8; 32],
+        peer_name: String,
+        peer_device_type: DeviceType,
+    ) -> Self {
         Self {
             role: Role::Responder,
             stage: PairStage::AwaitingLocalApproval,
@@ -98,7 +105,11 @@ impl PairSession {
     /// Order-independent so both sides compute the same code regardless of
     /// who's initiator — sorts the two public keys before hashing.
     pub fn compute_code(nonce: &[u8], pk_a: &[u8; 32], pk_b: &[u8; 32]) -> u32 {
-        let (first, second) = if pk_a <= pk_b { (pk_a, pk_b) } else { (pk_b, pk_a) };
+        let (first, second) = if pk_a <= pk_b {
+            (pk_a, pk_b)
+        } else {
+            (pk_b, pk_a)
+        };
         let mut hasher = Sha256::new();
         hasher.update(nonce);
         hasher.update(first);
@@ -135,11 +146,27 @@ impl ConnectSession {
     pub const MAX_RETRIES: u8 = 2;
 
     pub fn new_initiator(addr: SocketAddr) -> Self {
-        Self { role: Role::Initiator, stage: ConnectStage::Dialing, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0, connection_id: None }
+        Self {
+            role: Role::Initiator,
+            stage: ConnectStage::Dialing,
+            started_at: Instant::now(),
+            peer_addr: addr,
+            nonce: None,
+            retry_count: 0,
+            connection_id: None,
+        }
     }
 
     pub fn new_responder(addr: SocketAddr) -> Self {
-        Self { role: Role::Responder, stage: ConnectStage::AwaitingAck, started_at: Instant::now(), peer_addr: addr, nonce: None, retry_count: 0, connection_id: None }
+        Self {
+            role: Role::Responder,
+            stage: ConnectStage::AwaitingAck,
+            started_at: Instant::now(),
+            peer_addr: addr,
+            nonce: None,
+            retry_count: 0,
+            connection_id: None,
+        }
     }
 
     pub fn is_expired(&self, ttl: Duration) -> bool {
