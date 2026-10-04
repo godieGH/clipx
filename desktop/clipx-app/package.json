@@ -9,9 +9,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "pretauri:dev": "node manage-tauri.mjs --sync-icons",
+    "pretauri:dev": "node scripts/manage-tauri.mjs --sync-icons",
     "tauri:dev": "tauri dev",
-    "pretauri:build": "node manage-tauri.mjs --sync-icons",
+    "pretauri:build": "node scripts/manage-tauri.mjs --sync-icons",
     "tauri:build": "tauri build",
     "release": "tauri build --config src-tauri/tauri.release.conf.json"
   },

@@ -38,6 +38,7 @@ interface PickedFile {
 
 interface ClipItem {
   id: string;
+  fileId?: string | null,
   content: string;
   sourceDevice: string;
   receivedAt: number;

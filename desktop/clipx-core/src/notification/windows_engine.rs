@@ -33,9 +33,7 @@ use tokio::sync::oneshot;
 use windows::{
     Data::Xml::Dom::XmlDocument,
     Foundation::TypedEventHandler,
-    UI::Notifications::{
-        NotificationData, NotificationUpdateResult, ToastNotificationManager,
-    },
+    UI::Notifications::{NotificationData, NotificationUpdateResult, ToastNotificationManager},
     Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
     core::{HSTRING, IInspectable, Interface},
 };
@@ -49,6 +47,11 @@ const APP_ID: &str = if cfg!(debug_assertions) {
 // A progress toast is delayed briefly. Fast transfers only produce the final
 // completion notification; slow transfers get normal progress feedback.
 const PROGRESS_GRACE_PERIOD: Duration = Duration::from_millis(300);
+
+const PROGRESS_TOAST_GROUP: &str = "clipx-transfer-progress";
+
+// How long the finished "100% / Complete" state stays visible.
+const FINAL_PROGRESS_HOLD: Duration = Duration::from_millis(2000);
 
 // Keep useful clipboard preview text, but never send an entire clipboard
 // payload into a Windows toast.
@@ -176,9 +179,7 @@ impl NotificationEngine {
             Ok(Ok(decision)) => decision,
             Ok(Err(_)) => map_action(None),
             Err(_) => {
-                tracing::debug!(
-                    "notification prompt timed out while toast may still be visible"
-                );
+                tracing::debug!("notification prompt timed out while toast may still be visible");
                 map_action(None)
             }
         }
@@ -230,9 +231,11 @@ fn run_notification_host(transfer_rx: mpsc::Receiver<TransferNotification>) {
     tracing::debug!("Windows notification host stopped");
 }
 
-fn next_progress_deadline(
-    states: &HashMap<String, FileToastState>,
-) -> Option<Duration> {
+fn download_finished(pending: &PendingProgress) -> bool {
+    !is_upload_direction(&pending.direction) && pending.done >= pending.total
+}
+
+fn next_progress_deadline(states: &HashMap<String, FileToastState>) -> Option<Duration> {
     let now = Instant::now();
 
     states
@@ -240,43 +243,54 @@ fn next_progress_deadline(
         .filter_map(|state| {
             let pending = state.pending_progress.as_ref()?;
 
-            if pending.progress_shown || pending.total == 0 {
-                return None;
+            if !pending.progress_shown {
+                if pending.total == 0 || download_finished(pending) {
+                    return None;
+                }
+                let deadline = state.started_at + PROGRESS_GRACE_PERIOD;
+                return Some(deadline.saturating_duration_since(now));
             }
 
-            let deadline = state.started_at + PROGRESS_GRACE_PERIOD;
+            if state.dirty && matches!(state.phase, ToastPhase::Shown { .. }) {
+                let deadline = state.last_toast_update + MIN_TOAST_UPDATE_INTERVAL;
+                return Some(deadline.saturating_duration_since(now));
+            }
 
-            Some(if deadline <= now {
-                Duration::ZERO
-            } else {
-                deadline.duration_since(now)
-            })
+            None
         })
         .min()
 }
 
 fn fire_due_progress_notifications(states: &mut HashMap<String, FileToastState>) {
     let now = Instant::now();
+    let mut show_ids = Vec::new();
+    let mut flush_ids = Vec::new();
 
-    let due_ids: Vec<String> = states
-        .iter()
-        .filter_map(|(file_id, state)| {
-            let pending = state.pending_progress.as_ref()?;
+    for (file_id, state) in states.iter() {
+        let Some(pending) = state.pending_progress.as_ref() else {
+            continue;
+        };
 
-            if pending.progress_shown || pending.total == 0 {
-                return None;
+        if !pending.progress_shown {
+            if pending.total == 0 || download_finished(pending) {
+                continue;
             }
-
             if now >= state.started_at + PROGRESS_GRACE_PERIOD {
-                Some(file_id.clone())
-            } else {
-                None
+                show_ids.push(file_id.clone());
             }
-        })
-        .collect();
+        } else if state.dirty
+            && matches!(state.phase, ToastPhase::Shown { .. })
+            && now >= state.last_toast_update + MIN_TOAST_UPDATE_INTERVAL
+        {
+            flush_ids.push(file_id.clone());
+        }
+    }
 
-    for file_id in due_ids {
-        show_due_progress(states, &file_id);
+    for id in show_ids {
+        show_due_progress(states, &id);
+    }
+    for id in flush_ids {
+        update_existing_progress(states, &id, false);
     }
 }
 
@@ -473,6 +487,7 @@ fn handle_transfer_notification_inner(
                     progress_text: progress_text.clone(),
                     progress_shown: false,
                 }),
+                dirty: false,
             },
         );
 
@@ -522,9 +537,7 @@ fn handle_transfer_notification_inner(
 
         let still_in_grace = states
             .get(file_id)
-            .map(|state| {
-                Instant::now() < state.started_at + PROGRESS_GRACE_PERIOD
-            })
+            .map(|state| Instant::now() < state.started_at + PROGRESS_GRACE_PERIOD)
             .unwrap_or(false);
 
         if !progress_already_shown && still_in_grace {
@@ -534,10 +547,13 @@ fn handle_transfer_notification_inner(
             return Ok(());
         }
 
-        // Do not show a 100% progress notification.
         if done >= total {
-            // All bytes received (including the "saving" stage): wait for the
-            // explicit "complete" event, which carries the real saved path.
+            // All bytes are here. Show that on the toast (the "saving" stage is
+            // forced past the throttle) instead of freezing at the last percentage.
+            // The explicit "complete" event still ends the toast.
+            if progress_already_shown {
+                update_existing_progress(states, file_id, state == "saving");
+            }
             return Ok(());
         }
 
@@ -552,7 +568,7 @@ fn handle_transfer_notification_inner(
     // ------------------------------------------------------------------------
 
     if progress_already_shown {
-        update_existing_progress(states, file_id);
+        update_existing_progress(states, file_id, false);
     }
 
     Ok(())
@@ -572,6 +588,8 @@ fn handle_terminal_notification(
     notification_title: &str,
     _progress_text: &ProgressText,
 ) -> windows::core::Result<()> {
+    tracing::info!(%file_id, %state, %direction, %message, "terminal notification");
+
     let previous = states.remove(file_id);
 
     let previous_sequence = match previous.as_ref().map(|state| &state.phase) {
@@ -589,42 +607,37 @@ fn handle_terminal_notification(
                 last_toast_update: Instant::now(),
                 phase: ToastPhase::Done,
                 pending_progress: None,
+                dirty: false,
             },
         );
     }
 
     match state {
         "complete" if !is_upload_direction(direction) => {
-            if previous_sequence.is_some() {
-                if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
-                    tracing::debug!(
-                        ?error,
-                        %file_id,
-                        "could not remove previous progress toast"
-                    );
-                }
+            if let Some(sequence) = previous_sequence {
+                finish_progress_toast(
+                    file_id,
+                    title,
+                    progress_tag,
+                    sequence,
+                    _progress_text,
+                    _total,
+                );
             }
 
-            show_completion_toast(
-                APP_ID,
-                completion_tag,
-                notification_title,
-                title,
-                message,
-            )?;
+            show_completion_toast(APP_ID, completion_tag, notification_title, title, message)?;
         }
 
         "complete" => {
-            // Upload finished: replace the progress toast with a plain
-            // completion toast, so it can never be left stuck mid-way.
-            if previous_sequence.is_some() {
-                if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
-                    tracing::debug!(
-                        ?error,
-                        %file_id,
-                        "could not remove previous upload progress toast"
-                    );
-                }
+            if let Some(sequence) = previous_sequence {
+                finish_progress_toast(
+                    file_id,
+                    title,
+                    progress_tag,
+                    sequence,
+                    _progress_text,
+                    _total,
+                );
             }
 
             let toast = Toast::new(APP_ID)
@@ -632,11 +645,7 @@ fn handle_terminal_notification(
                 .text1(&format!("{title} — Sending finished"));
 
             toast.show().map_err(|error| {
-                tracing::error!(
-                    ?error,
-                    %file_id,
-                    "failed to show upload completion toast"
-                );
+                tracing::error!(?error, %file_id, "failed to show upload completion toast");
 
                 windows::core::Error::new(
                     windows::core::HRESULT(0x80004005u32 as i32),
@@ -678,25 +687,34 @@ fn handle_terminal_notification(
 fn update_existing_progress(
     states: &mut HashMap<String, FileToastState>,
     file_id: &str,
+    force: bool,
 ) {
+    // Throttle, but never lose the newest values: remember that one is
+    // waiting (dirty) and let the host loop send it when the window ends.
+    {
+        let Some(s) = states.get_mut(file_id) else {
+            return;
+        };
+        if !matches!(s.phase, ToastPhase::Shown { .. }) {
+            return;
+        }
+        if !force && s.last_toast_update.elapsed() < MIN_TOAST_UPDATE_INTERVAL {
+            s.dirty = true;
+            return;
+        }
+        s.dirty = false;
+    }
+
     let Some(state) = states.get(file_id) else {
         return;
     };
-
     let Some(pending) = state.pending_progress.as_ref() else {
         return;
     };
-
     let sequence = match state.phase {
         ToastPhase::Shown { sequence } => sequence,
         _ => return,
     };
-
-    // Throttle: drop updates that arrive too quickly. The next one carries
-    // the newest values, and terminal events are never throttled.
-    if state.last_toast_update.elapsed() < MIN_TOAST_UPDATE_INTERVAL {
-        return;
-    }
 
     let progress_tag = progress_tag(file_id);
 
@@ -713,12 +731,6 @@ fn update_existing_progress(
         return;
     };
 
-    if !is_upload_direction(&pending.direction)
-        && pending.done >= pending.total
-    {
-        return;
-    }
-
     let next_sequence = sequence.saturating_add(1);
 
     match set_progress_always(APP_ID, &progress, next_sequence) {
@@ -730,26 +742,13 @@ fn update_existing_progress(
                 state.last_toast_update = Instant::now();
             }
         }
-
         Ok(NotificationUpdateResult::NotificationNotFound) => {
-            // The user dismissed the toast (or Windows removed it). Do not
-            // pop it back up on every later update.
             if let Some(state) = states.get_mut(file_id) {
                 state.phase = ToastPhase::Dismissed;
             }
         }
-
-        Ok(result) => tracing::debug!(
-            ?result,
-            %file_id,
-            "progress update was not applied"
-        ),
-
-        Err(error) => tracing::debug!(
-            ?error,
-            %file_id,
-            "progress update failed"
-        ),
+        Ok(result) => tracing::warn!(?result, %file_id, "progress update was not applied"),
+        Err(error) => tracing::warn!(?error, %file_id, "progress update failed"),
     }
 }
 
@@ -769,8 +768,7 @@ fn build_progress(
 
     let is_upload = is_upload_direction(direction);
 
-    let mut fraction = (done as f64 / total as f64)
-        .clamp(0.0, 1.0) as f32;
+    let mut fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
 
     if !is_upload {
         fraction = fraction.min(0.999);
@@ -802,18 +800,15 @@ fn build_progress(
         title: title.to_string(),
         status,
         value: fraction,
-        value_string: format_progress_text(
-            progress_text,
-            done,
-            total,
-            fraction,
-        ),
+        value_string: format_progress_text(progress_text, done, total, fraction),
     })
 }
 
 enum ToastPhase {
     Pending,
-    Shown { sequence: u32 },
+    Shown {
+        sequence: u32,
+    },
     /// The user dismissed the progress toast; never bring it back.
     Dismissed,
     Done,
@@ -837,6 +832,7 @@ struct FileToastState {
     last_toast_update: Instant,
     phase: ToastPhase,
     pending_progress: Option<PendingProgress>,
+    dirty: bool,
 }
 
 // Minimum gap between two updates of the same progress toast.
@@ -874,10 +870,7 @@ fn derive_title(file_name: &str, message: &str) -> String {
 }
 
 fn notification_preview(value: &str) -> String {
-    let compact = value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
 
     let mut chars = compact.chars();
 
@@ -923,19 +916,14 @@ fn set_progress_always(
     )?;
 
     let data =
-        NotificationData::CreateNotificationDataWithValuesAndSequenceNumber(
-            &map,
-            sequence_number,
-        )?;
+        NotificationData::CreateNotificationDataWithValuesAndSequenceNumber(&map, sequence_number)?;
 
-    let notifier =
-        ToastNotificationManager::CreateToastNotifierWithId(
-            &HSTRING::from(app_id),
-        )?;
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?;
 
-    notifier.UpdateWithTag(
+    notifier.UpdateWithTagAndGroup(
         &data,
         &HSTRING::from(&progress.tag),
+        &HSTRING::from(PROGRESS_TOAST_GROUP),
     )
 }
 
@@ -947,29 +935,27 @@ fn show_progress_toast(
     let notification_title = escape_xml_text(notification_title);
 
     let xml = HSTRING::from(format!(
-        r#"<toast>
-            <visual>
-                <binding template="ToastGeneric">
-                    <text>{notification_title}</text>
-                    <progress
-                        title="{{progressTitle}}"
-                        value="{{progressValue}}"
-                        valueStringOverride="{{progressValueString}}"
-                        status="{{progressStatus}}" />
-                </binding>
-            </visual>
-        </toast>"#
+        r#"<toast duration="long">
+        <visual>
+            <binding template="ToastGeneric">
+                <text>{notification_title}</text>
+                <progress
+                    title="{{progressTitle}}"
+                    value="{{progressValue}}"
+                    valueStringOverride="{{progressValueString}}"
+                    status="{{progressStatus}}" />
+            </binding>
+        </visual>
+    </toast>"#
     ));
 
     let document = XmlDocument::new()?;
     document.LoadXml(&xml)?;
 
-    let toast =
-        windows::UI::Notifications::ToastNotification::CreateToastNotification(
-            &document,
-        )?;
+    let toast = windows::UI::Notifications::ToastNotification::CreateToastNotification(&document)?;
 
     toast.SetTag(&HSTRING::from(&progress.tag))?;
+    toast.SetGroup(&HSTRING::from(PROGRESS_TOAST_GROUP))?;
 
     let data = NotificationData::new()?;
 
@@ -996,10 +982,7 @@ fn show_progress_toast(
     data.SetSequenceNumber(1)?;
     toast.SetData(&data)?;
 
-    let notifier =
-        ToastNotificationManager::CreateToastNotifierWithId(
-            &HSTRING::from(app_id),
-        )?;
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?;
 
     notifier.Show(&toast)
 }
@@ -1024,14 +1007,9 @@ fn keep_completion_toast_alive(
     ACTIVE_COMPLETION_TOASTS.with(|toasts| {
         let mut toasts = toasts.borrow_mut();
 
-        toasts.insert(
-            tag.to_string(),
-            (Instant::now(), notification),
-        );
+        toasts.insert(tag.to_string(), (Instant::now(), notification));
 
-        toasts.retain(|_, (created, _)| {
-            created.elapsed() < Duration::from_secs(6 * 60 * 60)
-        });
+        toasts.retain(|_, (created, _)| created.elapsed() < Duration::from_secs(6 * 60 * 60));
     });
 }
 
@@ -1050,10 +1028,7 @@ fn show_completion_toast(
     let visual = document.CreateElement(&HSTRING::from("visual"))?;
     let binding = document.CreateElement(&HSTRING::from("binding"))?;
 
-    binding.SetAttribute(
-        &HSTRING::from("template"),
-        &HSTRING::from("ToastGeneric"),
-    )?;
+    binding.SetAttribute(&HSTRING::from("template"), &HSTRING::from("ToastGeneric"))?;
 
     let title = document.CreateElement(&HSTRING::from("text"))?;
     title.SetInnerText(&HSTRING::from(notification_title))?;
@@ -1088,57 +1063,50 @@ fn show_completion_toast(
     document.AppendChild(&toast)?;
 
     let notification =
-        windows::UI::Notifications::ToastNotification::CreateToastNotification(
-            &document,
-        )?;
+        windows::UI::Notifications::ToastNotification::CreateToastNotification(&document)?;
 
     notification.SetTag(&HSTRING::from(tag))?;
 
     let file_path = std::path::PathBuf::from(file_path);
 
-    let handler: TypedEventHandler<
-        windows::UI::Notifications::ToastNotification,
-        IInspectable,
-    > = TypedEventHandler::new(move |_sender, args| {
-        let args: &Option<IInspectable> = &*args;
+    let handler: TypedEventHandler<windows::UI::Notifications::ToastNotification, IInspectable> =
+        TypedEventHandler::new(move |_sender, args| {
+            let args: &Option<IInspectable> = &*args;
 
-        let Some(args) = args.as_ref() else {
-            return Ok(());
-        };
+            let Some(args) = args.as_ref() else {
+                return Ok(());
+            };
 
-        let Ok(args) = args.cast::<ToastActivatedEventArgs>() else {
-            return Ok(());
-        };
+            let Ok(args) = args.cast::<ToastActivatedEventArgs>() else {
+                return Ok(());
+            };
 
-        let Ok(arguments) = args.Arguments() else {
-            return Ok(());
-        };
+            let Ok(arguments) = args.Arguments() else {
+                return Ok(());
+            };
 
-        if arguments == "clipx:show-file-location" {
-            let path = file_path.clone();
+            if arguments == "clipx:show-file-location" {
+                let path = file_path.clone();
 
-            let _ = thread::Builder::new()
-                .name("clipx-open-file-location".into())
-                .spawn(move || {
-                    if let Err(error) = reveal_path_in_explorer(&path) {
-                        tracing::warn!(
-                            ?error,
-                            path = ?path,
-                            "failed to reveal downloaded file in Explorer"
-                        );
-                    }
-                });
-        }
+                let _ = thread::Builder::new()
+                    .name("clipx-open-file-location".into())
+                    .spawn(move || {
+                        if let Err(error) = reveal_path_in_explorer(&path) {
+                            tracing::warn!(
+                                ?error,
+                                path = ?path,
+                                "failed to reveal downloaded file in Explorer"
+                            );
+                        }
+                    });
+            }
 
-        Ok(())
-    });
+            Ok(())
+        });
 
     notification.Activated(&handler)?;
 
-    let notifier =
-        ToastNotificationManager::CreateToastNotifierWithId(
-            &HSTRING::from(app_id),
-        )?;
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?;
 
     notifier.Show(&notification)?;
 
@@ -1147,23 +1115,42 @@ fn show_completion_toast(
     Ok(())
 }
 
-fn remove_toast_history(
-    app_id: &str,
-    tag: &str,
-) -> windows::core::Result<()> {
+fn finish_progress_toast(
+    file_id: &str,
+    title: &str,
+    progress_tag: &str,
+    sequence: u32,
+    progress_text: &ProgressText,
+    total: u64,
+) {
+    let final_progress = Progress {
+        tag: progress_tag.to_string(),
+        title: title.to_string(),
+        status: "Complete".to_string(),
+        value: 1.0,
+        value_string: format_progress_text(progress_text, total, total, 1.0),
+    };
+
+    match set_progress_always(APP_ID, &final_progress, sequence.saturating_add(1)) {
+        Ok(NotificationUpdateResult::Succeeded) => thread::sleep(FINAL_PROGRESS_HOLD),
+        Ok(result) => tracing::warn!(?result, %file_id, "final progress state not applied"),
+        Err(error) => tracing::warn!(?error, %file_id, "failed to show final progress state"),
+    }
+
+    if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
+        tracing::warn!(?error, %file_id, "could not remove previous progress toast");
+    }
+}
+
+fn remove_toast_history(app_id: &str, tag: &str) -> windows::core::Result<()> {
     ToastNotificationManager::History()?.RemoveGroupedTagWithId(
         &HSTRING::from(tag),
-        &HSTRING::from(""),
+        &HSTRING::from(PROGRESS_TOAST_GROUP),
         &HSTRING::from(app_id),
     )
 }
 
-fn format_progress_text(
-    mode: &ProgressText,
-    done: u64,
-    total: u64,
-    fraction: f32,
-) -> String {
+fn format_progress_text(mode: &ProgressText, done: u64, total: u64, fraction: f32) -> String {
     match mode {
         ProgressText::Percentage => {
             if total == 0 {
@@ -1177,11 +1164,7 @@ fn format_progress_text(
             if total == 0 {
                 format_bytes(done)
             } else {
-                format!(
-                    "{} / {}",
-                    format_bytes(done),
-                    format_bytes(total)
-                )
+                format!("{} / {}", format_bytes(done), format_bytes(total))
             }
         }
 
@@ -1246,9 +1229,7 @@ impl Engine for NotificationEngine {
     ) -> NotificationFuture<'a, PairDecision> {
         Box::pin(async move {
             let labels: &[(&str, &str)] = match prompt {
-                Prompt::ConfirmCode { .. } => {
-                    &[("Confirm", "allow"), ("Deny", "deny")]
-                }
+                Prompt::ConfirmCode { .. } => &[("Confirm", "allow"), ("Deny", "deny")],
                 _ => &[("Allow", "allow"), ("Deny", "deny")],
             };
 
@@ -1308,20 +1289,12 @@ impl Engine for NotificationEngine {
         })
     }
 
-    fn notify_info<'a>(
-        &'a self,
-        title: &'a str,
-        body: String,
-    ) -> NotificationFuture<'a, ()> {
+    fn notify_info<'a>(&'a self, title: &'a str, body: String) -> NotificationFuture<'a, ()> {
         Box::pin(async move {
             let title = title.to_string();
 
             tokio::task::block_in_place(|| {
-                if let Err(error) = Toast::new(APP_ID)
-                    .title(&title)
-                    .text1(&body)
-                    .show()
-                {
+                if let Err(error) = Toast::new(APP_ID).title(&title).text1(&body).show() {
                     tracing::warn!(?error, "failed to show information toast");
                 }
             });
@@ -1339,6 +1312,11 @@ impl Engine for NotificationEngine {
         message: String,
         override_config: Option<TransferNotificationOverride>,
     ) -> NotificationFuture<'static, ()> {
+        tracing::info!(
+            %file_id, %file_name, %direction, done, total, %state, %message,
+            "notify_file_transfer event"
+        );
+
         let transfer_title = override_config
             .as_ref()
             .and_then(|config| config.transfer_title.clone())
@@ -1377,17 +1355,13 @@ impl Engine for NotificationEngine {
         };
 
         let Some(sender) = self.worker.tx.as_ref() else {
-            tracing::warn!(
-                "Windows notification worker sender is unavailable"
-            );
+            tracing::warn!("Windows notification worker sender is unavailable");
 
             return Box::pin(async {});
         };
 
         if sender.send(event).is_err() {
-            tracing::warn!(
-                "Windows notification worker has stopped"
-            );
+            tracing::warn!("Windows notification worker has stopped");
 
             return Box::pin(async {});
         }

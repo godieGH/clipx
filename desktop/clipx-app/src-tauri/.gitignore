@@ -9,3 +9,5 @@
 /icons/*
 !/icons/.gitkeep
 /public/clipx-icon.png
+
+binaries/
