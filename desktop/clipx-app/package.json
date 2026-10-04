@@ -1,7 +1,7 @@
 {
   "name": "clipx-app",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "packageManager": "pnpm@11.6.0",
   "scripts": {
