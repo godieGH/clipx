@@ -1,4 +1,6 @@
 mod core_supervisor;
+
+#[cfg(windows)]
 mod error_dialog;
 use std::sync::Arc;
 

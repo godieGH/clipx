@@ -1,5 +1,5 @@
-mod traits;
 mod adapter;
+mod traits;
 
-pub use traits::*;
 pub use adapter::*;
+pub use traits::*;

@@ -25,6 +25,12 @@ impl NotificationEngine {
     }
 }
 
+impl Default for NotificationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine for NotificationEngine {
     fn ask_pair<'a>(
         &'a self,
