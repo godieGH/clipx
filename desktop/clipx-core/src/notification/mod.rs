@@ -42,8 +42,10 @@ pub enum IncomingClipboardKind {
 }
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum ProgressText {
     /// Render the authoritative progress value as a percentage, e.g. `47%`.
+    #[default]
     Percentage,
     /// Render the authoritative byte counters, e.g. `47 MB / 100 MB`.
     Bytes,
@@ -53,11 +55,6 @@ pub enum ProgressText {
     Hidden,
 }
 
-impl Default for ProgressText {
-    fn default() -> Self {
-        Self::Percentage
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct NotificationConfig {

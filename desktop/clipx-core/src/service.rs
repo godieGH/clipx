@@ -120,27 +120,6 @@ impl CoreService {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn service_state_transitions_cleanly() {
-        let mut service = CoreService::new();
-
-        assert_eq!(service.state(), ServiceState::Stopped);
-
-        service.start();
-        assert_eq!(service.state(), ServiceState::Running);
-
-        service.stop();
-        assert_eq!(service.state(), ServiceState::Stopping);
-
-        service.finish_stop();
-        assert_eq!(service.state(), ServiceState::Stopped);
-    }
-}
-
 pub fn spawn_core_tasks<S, N>(
     clipboard_sink: S,
     notification_engine: N,
@@ -268,4 +247,25 @@ where
         device_tx,
         core_events_tx,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_state_transitions_cleanly() {
+        let mut service = CoreService::new();
+
+        assert_eq!(service.state(), ServiceState::Stopped);
+
+        service.start();
+        assert_eq!(service.state(), ServiceState::Running);
+
+        service.stop();
+        assert_eq!(service.state(), ServiceState::Stopping);
+
+        service.finish_stop();
+        assert_eq!(service.state(), ServiceState::Stopped);
+    }
 }

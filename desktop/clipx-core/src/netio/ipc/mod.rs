@@ -499,7 +499,7 @@ impl IpcService {
                 let _ = clipboard_tx.send(ClipboardCommand::ClearHistory {
                     reply_to: cmdres_tx,
                 });
-                let _ = cmdres_rx.await?;
+                cmdres_rx.await?;
                 clipx::IpcResponse {
                     response: Some(clipx::ipc_response::Response::ClipboardClear(
                         clipx::ClipboardClearResponse {},

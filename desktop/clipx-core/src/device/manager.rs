@@ -441,7 +441,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     0,
                     total_size,
                     "requesting",
-                    format!("Downloading file"),
+                    "Downloading file".to_string(),
                 );
                 self.send_peer(
                     &device_id,
@@ -511,16 +511,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         // do not start a connection just because the user toggled this on.
         // Both sides are allowed to initiate here; the transport/handshake
         // resolves an overlap instead of using a fingerprint tie-breaker.
-        if just_appeared {
-            if let Some(td) = self.trusted.get(&device_id) {
-                if td.auto_connect
+        if just_appeared
+            && let Some(td) = self.trusted.get(&device_id)
+                && td.auto_connect
                     && !self.connected.contains_key(&device_id)
                     && !self.connect_sessions.contains_key(&device_id)
                 {
                     let _ = self.handle_connect(&device_id);
                 }
-            }
-        }
     }
 
     // ---------------- Pair: initiator side ----------------
@@ -668,8 +666,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             return;
         }
-        if let Some(sess) = self.connect_sessions.get_mut(&device_id) {
-            if sess.role == Role::Initiator && sess.stage == ConnectStage::Dialing {
+        if let Some(sess) = self.connect_sessions.get_mut(&device_id)
+            && sess.role == Role::Initiator && sess.stage == ConnectStage::Dialing {
                 sess.stage = ConnectStage::AwaitingSignature;
                 sess.connection_id = Some(connection_id.clone());
                 let nonce_vec = self.identity.random_nonce();
@@ -688,7 +686,6 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     }),
                 );
             }
-        }
     }
 
     fn on_transport_disconnected(&mut self, device_id: String, connection_id: String) {
@@ -2026,11 +2023,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     fn abort_download(&mut self, file_id: &str, message: impl Into<String>) {
         let pending = self.pending_downloads.remove(file_id);
         if let Some(p) = pending {
-            self.incoming_files
-                .remove(&(p.device_id.clone(), file_id.to_string()))
-                .map(|s| {
-                    let _ = fs::remove_file(s.temp_path);
-                });
+            if let Some(s) = self.incoming_files
+                .remove(&(p.device_id.clone(), file_id.to_string())) { let _ = fs::remove_file(s.temp_path); }
             self.resume_candidates.remove(file_id);
             let _ = fs::remove_file(self.incoming_state_path(file_id));
             let _ = self
@@ -2052,13 +2046,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn cancel_local_download(&mut self, file_id: &str) {
-        if let Some(p) = self.pending_downloads.remove(file_id) {
-            self.incoming_files
-                .remove(&(p.device_id.clone(), file_id.to_string()))
-                .map(|s| {
-                    let _ = fs::remove_file(s.temp_path);
-                });
-        }
+        if let Some(p) = self.pending_downloads.remove(file_id)
+            && let Some(s) = self.incoming_files
+                .remove(&(p.device_id.clone(), file_id.to_string())) { let _ = fs::remove_file(s.temp_path); }
         self.resume_candidates.remove(file_id);
         let _ = fs::remove_file(self.incoming_state_path(file_id));
         let keys: Vec<(String, String)> = self
@@ -2123,11 +2113,10 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         };
         let path = self.incoming_state_path(file_id);
         let tmp = path.with_extension("resume.tmp");
-        if let Ok(bytes) = serde_json::to_vec(&state) {
-            if fs::write(&tmp, bytes).is_ok() {
+        if let Ok(bytes) = serde_json::to_vec(&state)
+            && fs::write(&tmp, bytes).is_ok() {
                 let _ = fs::rename(tmp, path);
             }
-        }
     }
 
     fn load_valid_resume_state(
@@ -2237,8 +2226,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 continue;
             }
             if path.extension().and_then(|x| x.to_str()) == Some("resume") {
-                if let Ok(bytes) = fs::read(&path) {
-                    if let Ok(state) = serde_json::from_slice::<ResumeState>(&bytes) {
+                if let Ok(bytes) = fs::read(&path)
+                    && let Ok(state) = serde_json::from_slice::<ResumeState>(&bytes) {
                         if state.updated_at_ms >= cutoff
                             && state.offer_expires_at_ms >= now
                             && !self
@@ -2252,7 +2241,6 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                             self.incoming_temp_path(&state.device_id, &state.file_id),
                         );
                     }
-                }
                 let _ = fs::remove_file(path);
                 continue;
             }

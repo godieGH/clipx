@@ -79,11 +79,10 @@ impl Drop for NotificationWorker {
     fn drop(&mut self) {
         self.tx.take();
 
-        if let Some(thread) = self.thread.take() {
-            if thread.thread().id() != thread::current().id() {
+        if let Some(thread) = self.thread.take()
+            && thread.thread().id() != thread::current().id() {
                 let _ = thread.join();
             }
-        }
     }
 }
 
@@ -427,13 +426,11 @@ fn handle_transfer_notification_inner(
         }
     }
 
-    if !terminal {
-        if let Some(existing) = states.get(file_id) {
-            if done < existing.last_done {
+    if !terminal
+        && let Some(existing) = states.get(file_id)
+            && done < existing.last_done {
                 return Ok(());
             }
-        }
-    }
 
     let title = states
         .get(file_id)
@@ -655,15 +652,14 @@ fn handle_terminal_notification(
         }
 
         _ => {
-            if previous_sequence.is_some() {
-                if let Err(error) = remove_toast_history(APP_ID, progress_tag) {
+            if previous_sequence.is_some()
+                && let Err(error) = remove_toast_history(APP_ID, progress_tag) {
                     tracing::debug!(
                         ?error,
                         %file_id,
                         "could not remove previous progress toast"
                     );
                 }
-            }
 
             let toast_message = notification_preview(message);
 
@@ -1071,7 +1067,7 @@ fn show_completion_toast(
 
     let handler: TypedEventHandler<windows::UI::Notifications::ToastNotification, IInspectable> =
         TypedEventHandler::new(move |_sender, args| {
-            let args: &Option<IInspectable> = &*args;
+            let args: &Option<IInspectable> = &args;
 
             let Some(args) = args.as_ref() else {
                 return Ok(());

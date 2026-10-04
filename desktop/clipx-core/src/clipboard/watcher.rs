@@ -60,12 +60,11 @@ pub async fn watch_clipboard(
                 // newline-delimited file:// URIs in the text clipboard. Treat
                 // those as file offers rather than pushing file bytes through
                 // the normal clipboard path.
-                if let Some(paths) = parse_file_uris(&current) {
-                    if !paths.is_empty() {
+                if let Some(paths) = parse_file_uris(&current)
+                    && !paths.is_empty() {
                         let _ = tx.send(ClipboardPayload::Files(paths));
                         continue;
                     }
-                }
                 let _ = tx.send(ClipboardPayload::Text(current));
             }
             Ok(_) => {}
