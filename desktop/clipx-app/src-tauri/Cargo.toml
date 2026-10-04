@@ -1,6 +1,6 @@
 [package]
 name = "clipx-app"
-version = "0.1.0"
+version.workspace = true
 description = "The UI for clipx, written in tauri"
 authors = ["godiegh"]
 edition = "2021"
