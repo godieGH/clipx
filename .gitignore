@@ -9,3 +9,6 @@ Thumbs.db
 .venv/
 
 clipx.bundle
+
+# android signing keystore
+clipx-release.jks
