@@ -63,3 +63,92 @@ jobs:
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
+
+  ffi:
+    name: ffi (mobile/native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile/native
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Rust (host)
+        working-directory: mobile/native
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      # Catches android-only breakage (cfg(target_os = "android") code,
+      # paranoid-android, linking) without needing Gradle.
+      - name: Cross-compile for Android
+        working-directory: mobile/native
+        run: cargo ndk -t arm64-v8a build --package rust-mobile-ffi-bridge --release
+
+      # Catches UniFFI interface breakage before Kotlin ever sees it.
+      - name: Generate Kotlin bindings
+        working-directory: mobile/native
+        run: |
+          cargo run --bin uniffi-bindgen generate \
+            --library target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so \
+            --language kotlin --out-dir "$RUNNER_TEMP/bindings"
+
+  android:
+    name: android (app)
+    needs: ffi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile/native
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests + debug build
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug -PclipxAbis=arm64-v8a
+
+  emulator:
+    name: emulator tool builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tests/emulator
+      - run: cargo clippy --manifest-path tests/emulator/Cargo.toml --all-targets -- -D warnings

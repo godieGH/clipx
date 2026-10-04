@@ -3,11 +3,11 @@ mod netio;
 mod state;
 
 use clipx_core::device::identity::DeviceIdentity;
-use state::AppState;
-use std::sync::atomic::{AtomicBool, AtomicU32};
-use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
 use clipx_core::message::proto::DeviceType;
+use state::AppState;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32};
+use tokio::sync::{Mutex, broadcast};
 
 #[tokio::main]
 async fn main() {
@@ -19,37 +19,57 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--name" => { if let Some(v) = args.next() { name = v; } }
-            "--id-path" => { if let Some(v) = args.next() { id_path = v.into(); } }
+            "--name" => {
+                if let Some(v) = args.next() {
+                    name = v;
+                }
+            }
+            "--id-path" => {
+                if let Some(v) = args.next() {
+                    id_path = v.into();
+                }
+            }
             "--port" => {
                 if let Some(v) = args.next() {
-                    ws_port = v.parse::<u32>()
-                        .expect("Failed to parse port")
+                    ws_port = v.parse::<u32>().expect("Failed to parse port")
                 }
             }
             "--device-type" => {
                 if let Some(v) = args.next() {
                     match v.as_str() {
-                       "windows" | "linux" | "macos" | "android" | "ios" | "unknown" => {
-                           device_type = v;
-                       }
-                       _ => {
-                        panic!("Invalid device types specified")
-                       }
+                        "windows" | "linux" | "macos" | "android" | "ios" | "unknown" => {
+                            device_type = v;
+                        }
+                        _ => {
+                            panic!("Invalid device types specified")
+                        }
                     }
                 }
             }
             "-h" | "--help" => {
                 println!("usage: emulator [--name NAME] [--id-path PATH]");
-                println!("  --name NAME            display name this emulator announces/pairs as (default: emulator)");
-                println!("  --id-path PATH         where to persist this emulator's keypair, so its identity");
-                println!("                         is stable across restarts (default: a per-name temp file)");
-                println!("  --port PORT            specify a different transport socket port (default=8081)");
+                println!(
+                    "  --name NAME            display name this emulator announces/pairs as (default: emulator)"
+                );
+                println!(
+                    "  --id-path PATH         where to persist this emulator's keypair, so its identity"
+                );
+                println!(
+                    "                         is stable across restarts (default: a per-name temp file)"
+                );
+                println!(
+                    "  --port PORT            specify a different transport socket port (default=8081)"
+                );
                 println!("  --device-type TYPE     specify the device type (default to unknown)");
-                println!("                         valid values (windows|linux|macos|android|ios|unknown)");
+                println!(
+                    "                         valid values (windows|linux|macos|android|ios|unknown)"
+                );
                 return;
             }
-            other => { eprintln!("unrecognized flag: {other} (try --help)"); return; }
+            other => {
+                eprintln!("unrecognized flag: {other} (try --help)");
+                return;
+            }
         }
     }
     // Default id path is per-name so you can run several emulator instances
@@ -66,7 +86,7 @@ async fn main() {
         "android" => DeviceType::Android,
         "ios" => DeviceType::Ios,
         "unknown" => DeviceType::Unspecified,
-        _ => DeviceType::Unspecified
+        _ => DeviceType::Unspecified,
     };
 
     let identity = Arc::new(DeviceIdentity::load_or_create(id_path.clone()));
@@ -89,7 +109,10 @@ async fn main() {
 
     println!("clipx protocol emulator — device '{name}'");
     println!("identity file: {id_path:?}");
-    println!("fingerprint:   {}", hex::encode(identity.get_this_device_fingerprint()));
+    println!(
+        "fingerprint:   {}",
+        hex::encode(identity.get_this_device_fingerprint())
+    );
     println!("type 'help' for commands\n");
 
     tokio::spawn(async move {

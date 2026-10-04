@@ -2,9 +2,9 @@ use clipx_core::device::identity::DeviceIdentity;
 use clipx_core::message::proto;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32};
+use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Everything captured so far about the peer on one open connection.
@@ -28,10 +28,22 @@ pub struct ConnHandle {
 /// auto` / `respond auto` waiter can each see every event independently.
 #[derive(Debug, Clone)]
 pub enum Event {
-    Discovered { device_id: String, name: String, addr: SocketAddr },
-    Connected { label: String, addr: SocketAddr },
-    Disconnected { label: String },
-    Message { label: String, message: proto::PeerMessage },
+    Discovered {
+        device_id: String,
+        name: String,
+        addr: SocketAddr,
+    },
+    Connected {
+        label: String,
+        addr: SocketAddr,
+    },
+    Disconnected {
+        label: String,
+    },
+    Message {
+        label: String,
+        message: proto::PeerMessage,
+    },
     Info(String),
     Warn(String),
 }

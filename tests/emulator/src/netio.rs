@@ -6,9 +6,11 @@ use socket2::{Domain, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::sync::{mpsc, watch, Mutex};
+use tokio::sync::{Mutex, mpsc, watch};
 use tokio::time::Duration;
-use tokio_tungstenite::{accept_async, client_async, tungstenite::Message as WsMessage, WebSocketStream};
+use tokio_tungstenite::{
+    WebSocketStream, accept_async, client_async, tungstenite::Message as WsMessage,
+};
 
 /// Same shape as clipx-core's own `make_shared_socket`, but the port is a
 /// parameter, and SO_REUSEADDR (+ SO_REUSEPORT on unix) is set so this can
@@ -27,10 +29,18 @@ fn make_udp_socket(port: u16) -> std::io::Result<UdpSocket> {
 
 // ---------------- Discovery: broadcast component ----------------
 
-pub async fn run_broadcaster(mut shutdown_rx: watch::Receiver<bool>, state: Arc<AppState>, port: u16, interval_secs: u64) {
+pub async fn run_broadcaster(
+    mut shutdown_rx: watch::Receiver<bool>,
+    state: Arc<AppState>,
+    port: u16,
+    interval_secs: u64,
+) {
     let socket = match make_udp_socket(0) {
         Ok(s) => s,
-        Err(e) => { state.emit(Event::Warn(format!("broadcast socket failed: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!("broadcast socket failed: {e}")));
+            return;
+        }
     };
     let announce = proto::Announce {
         fingerprint: state.identity.get_this_device_fingerprint().to_vec(),
@@ -46,7 +56,9 @@ pub async fn run_broadcaster(mut shutdown_rx: watch::Receiver<bool>, state: Arc<
     // default 2s interval that would otherwise print ~30x/minute and bury
     // the prompt. `disco seen` and the sent-once notice below are enough to
     // confirm it's alive; use that instead of watching a scrolling log.
-    state.emit(Event::Info(format!("broadcasting to {target} every {interval_secs}s (until 'disco broadcast off')")));
+    state.emit(Event::Info(format!(
+        "broadcasting to {target} every {interval_secs}s (until 'disco broadcast off')"
+    )));
 
     loop {
         tokio::select! {
@@ -64,7 +76,10 @@ pub async fn run_broadcaster(mut shutdown_rx: watch::Receiver<bool>, state: Arc<
 pub async fn run_listener(mut shutdown_rx: watch::Receiver<bool>, state: Arc<AppState>, port: u16) {
     let socket = match make_udp_socket(port) {
         Ok(s) => s,
-        Err(e) => { state.emit(Event::Warn(format!("listen bind({port}) failed: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!("listen bind({port}) failed: {e}")));
+            return;
+        }
     };
     state.emit(Event::Info(format!("listening for Announces on {port}")));
     let mut buf = [0u8; 1024];
@@ -105,23 +120,38 @@ pub async fn run_listener(mut shutdown_rx: watch::Receiver<bool>, state: Arc<App
 pub async fn dial(state: Arc<AppState>, label: String, addr: SocketAddr) {
     let stream = match TcpStream::connect(addr).await {
         Ok(s) => s,
-        Err(e) => { state.emit(Event::Warn(format!("connect to {addr} failed: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!("connect to {addr} failed: {e}")));
+            return;
+        }
     };
     let ws = match client_async(format!("ws://{addr}/"), stream).await {
         Ok((ws, _)) => ws,
-        Err(e) => { state.emit(Event::Warn(format!("ws handshake with {addr} failed: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!("ws handshake with {addr} failed: {e}")));
+            return;
+        }
     };
     register_and_run(state, label, addr, ws).await;
 }
 
 // ---------------- Transport: inbound acceptor (act as responder) ----------------
 
-pub async fn run_inbound_acceptor(mut shutdown_rx: watch::Receiver<bool>, state: Arc<AppState>, port: u16) {
+pub async fn run_inbound_acceptor(
+    mut shutdown_rx: watch::Receiver<bool>,
+    state: Arc<AppState>,
+    port: u16,
+) {
     let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
-        Err(e) => { state.emit(Event::Warn(format!("inbound bind({port}) failed: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!("inbound bind({port}) failed: {e}")));
+            return;
+        }
     };
-    state.emit(Event::Info(format!("accepting inbound peer connections on {port} (labels: in-N)")));
+    state.emit(Event::Info(format!(
+        "accepting inbound peer connections on {port} (labels: in-N)"
+    )));
 
     loop {
         tokio::select! {
@@ -143,17 +173,36 @@ pub async fn run_inbound_acceptor(mut shutdown_rx: watch::Receiver<bool>, state:
 async fn handle_inbound(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
     let ws = match accept_async(stream).await {
         Ok(ws) => ws,
-        Err(e) => { state.emit(Event::Warn(format!("inbound ws handshake failed from {addr}: {e}"))); return; }
+        Err(e) => {
+            state.emit(Event::Warn(format!(
+                "inbound ws handshake failed from {addr}: {e}"
+            )));
+            return;
+        }
     };
-    let id = state.next_inbound.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let id = state
+        .next_inbound
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     register_and_run(state, format!("in-{id}"), addr, ws).await;
 }
 
-async fn register_and_run(state: Arc<AppState>, label: String, addr: SocketAddr, ws: WebSocketStream<TcpStream>) {
+async fn register_and_run(
+    state: Arc<AppState>,
+    label: String,
+    addr: SocketAddr,
+    ws: WebSocketStream<TcpStream>,
+) {
     let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
-    let handle = Arc::new(ConnHandle { addr, outbound_tx, session: Mutex::new(SessionInfo::default()) });
+    let handle = Arc::new(ConnHandle {
+        addr,
+        outbound_tx,
+        session: Mutex::new(SessionInfo::default()),
+    });
     state.conns.lock().await.insert(label.clone(), handle);
-    state.emit(Event::Connected { label: label.clone(), addr });
+    state.emit(Event::Connected {
+        label: label.clone(),
+        addr,
+    });
     run_connection(state, label, ws, outbound_rx).await;
 }
 
@@ -198,22 +247,32 @@ async fn run_connection(
 /// last-received nonce/peer key without you re-typing hex by hand. Doesn't
 /// gate anything; you can still send any message at any time regardless.
 async fn auto_capture(state: &Arc<AppState>, label: &str, message: &proto::PeerMessage) {
-    let Some(handle) = state.conns.lock().await.get(label).cloned() else { return };
+    let Some(handle) = state.conns.lock().await.get(label).cloned() else {
+        return;
+    };
     let mut sess = handle.session.lock().await;
     match &message.body {
         Some(Body::PairRequest(r)) => {
-            if let Ok(pk) = <[u8; 32]>::try_from(r.public_key.as_slice()) { sess.peer_public_key = Some(pk); }
+            if let Ok(pk) = <[u8; 32]>::try_from(r.public_key.as_slice()) {
+                sess.peer_public_key = Some(pk);
+            }
             sess.peer_name = Some(r.name.clone());
         }
         Some(Body::PairResponse(r)) => {
-            if let Ok(pk) = <[u8; 32]>::try_from(r.public_key.as_slice()) { sess.peer_public_key = Some(pk); }
+            if let Ok(pk) = <[u8; 32]>::try_from(r.public_key.as_slice()) {
+                sess.peer_public_key = Some(pk);
+            }
             sess.peer_name = Some(r.name.clone());
         }
         Some(Body::PairChallenge(c)) => {
-            if let Ok(n) = <[u8; 32]>::try_from(c.nonce.as_slice()) { sess.nonce = Some(n); }
+            if let Ok(n) = <[u8; 32]>::try_from(c.nonce.as_slice()) {
+                sess.nonce = Some(n);
+            }
         }
         Some(Body::ConnectChallenge(c)) => {
-            if let Ok(n) = <[u8; 32]>::try_from(c.nonce.as_slice()) { sess.nonce = Some(n); }
+            if let Ok(n) = <[u8; 32]>::try_from(c.nonce.as_slice()) {
+                sess.nonce = Some(n);
+            }
         }
         _ => {}
     }
@@ -222,10 +281,16 @@ async fn auto_capture(state: &Arc<AppState>, label: &str, message: &proto::PeerM
 pub async fn send_body(state: &Arc<AppState>, label: &str, body: Body) -> anyhow::Result<()> {
     let handle = {
         let conns = state.conns.lock().await;
-        conns.get(label).cloned().ok_or_else(|| anyhow::anyhow!("no such connection: {label}"))?
+        conns
+            .get(label)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no such connection: {label}"))?
     };
     let message = proto::PeerMessage { body: Some(body) };
     let mut buf = Vec::new();
     message.encode(&mut buf)?;
-    handle.outbound_tx.send(WsMessage::binary(buf)).map_err(|_| anyhow::anyhow!("connection closed"))
+    handle
+        .outbound_tx
+        .send(WsMessage::binary(buf))
+        .map_err(|_| anyhow::anyhow!("connection closed"))
 }
