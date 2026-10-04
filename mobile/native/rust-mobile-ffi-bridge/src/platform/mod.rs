@@ -1,5 +1,5 @@
-mod platform;
+mod traits;
 mod adapter;
 
-pub use platform::*;
+pub use traits::*;
 pub use adapter::*;

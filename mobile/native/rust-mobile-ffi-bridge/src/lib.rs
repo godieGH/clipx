@@ -9,6 +9,8 @@
 //! remove things like IPCs + notification engine (or reuse one but with delegation to the android notifications or UI)
 //! all that are not in terms with android
 
+#![allow(clippy::too_many_arguments)]
+
 mod logger;
 mod service;
 mod platform;
