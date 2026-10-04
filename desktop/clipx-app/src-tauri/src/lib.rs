@@ -6,7 +6,7 @@ use clipx_lib::{clipx, ipc, message::types, message::IpcCmdBridge};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     async_runtime::Mutex,
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{self, MouseButton, MouseButtonState},
     Emitter, Manager, State,
 };
@@ -16,6 +16,9 @@ use webview2_com::{
 };
 #[cfg(windows)]
 use windows::core::Interface;
+
+#[cfg(desktop)]
+use tauri_plugin_autostart::ManagerExt;
 
 pub struct AppState {
     ipc: Mutex<ipc::non_blocking::Client>,
@@ -109,7 +112,26 @@ pub fn run() {
         supervisor: supervisor.clone(),
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder
+            // must be the FIRST plugin
+            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.unminimize();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }))
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                Some(vec!["--autostart"]),
+            ));
+    }
+
+    builder
         .manage(state)
         .setup(|app| {
             // Forward every push from the core onto the webview as a plain
@@ -153,6 +175,14 @@ pub fn run() {
                 MenuItem::with_id(app, "core_restart", "Restart core", true, None::<&str>)?;
             let stop_item = MenuItem::with_id(app, "core_stop", "Stop core", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let autostart_item = CheckMenuItem::with_id(
+                app,
+                "autostart",
+                "Start with system",
+                true,
+                app.autolaunch().is_enabled().unwrap_or(false),
+                None::<&str>,
+            )?;
 
             let menu = Menu::with_items(
                 app,
@@ -162,6 +192,7 @@ pub fn run() {
                     &status_item,
                     &restart_item,
                     &stop_item,
+                    &autostart_item,
                     &quit_item,
                 ],
             )?;
@@ -170,12 +201,14 @@ pub fn run() {
             sup.attach_label(status_item.clone());
             sup.spawn_watchdog(app.handle().clone());
 
+            let autostart_item_for_event = autostart_item.clone();
+
             tray::TrayIconBuilder::new()
                 .tooltip("Clipx")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, evt| match evt.id.as_ref() {
+                .on_menu_event(move |app, evt| match evt.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
@@ -198,6 +231,18 @@ pub fn run() {
                             let st = app.state::<AppState>();
                             st.supervisor.stop(&st.ipc, true).await;
                         });
+                    }
+                    "autostart" => {
+                        let al = app.autolaunch();
+                        let res = if al.is_enabled().unwrap_or(false) {
+                            al.disable()
+                        } else {
+                            al.enable()
+                        };
+                        if let Err(e) = res {
+                            eprintln!("ClipX: autostart toggle failed: {e}");
+                        }
+                        let _ = autostart_item_for_event.set_checked(al.is_enabled().unwrap_or(false));
                     }
                     "quit" => {
                         app.exit(0);
@@ -249,6 +294,7 @@ pub fn run() {
             send_file_path,
             download_clipboard_file,
             reveal_file_location,
+            launched_by_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -498,4 +544,9 @@ async fn send_file_path(
 #[tauri::command]
 async fn download_clipboard_file(state: State<'_, AppState>, id: String) -> Result<String, String> {
     state.ipc.lock().await.download_clipboard_file(id).await
+}
+
+#[tauri::command]
+fn launched_by_autostart() -> bool {
+    std::env::args().any(|a| a == "--autostart")
 }

@@ -154,7 +154,7 @@ function useScrollFade<T extends HTMLDivElement>() {
     const el = ref.current;
     const { scrollHeight, clientHeight } = el;
     const maxScroll = scrollHeight - clientHeight;
-    
+
     // Calculate ratio of scrollable height to track area
     const thumbHeightPx = Math.max((clientHeight / scrollHeight) * clientHeight, (clientHeight * 10) / 100);
     const trackSpacePx = clientHeight - thumbHeightPx;
@@ -539,11 +539,11 @@ function ClipRow({ item, onCopy, onRemove, onDownload, onReveal, transfer, nowMs
   const disabled = expired || item.fileDownloaded || transferActive;
   const status = transfer?.state === "requesting" ? "Starting download…"
     : transfer?.state === "receiving" ? `Downloading · ${transferPercent}%`
-    : transfer?.state === "saving" ? "Saving file…"
-    : transfer?.state === "complete" || item.fileDownloaded ? "Downloaded"
-    : transfer?.state === "failed" ? "Download failed · Retry"
-    : expired ? "Offer expired"
-    : "Available for download for up to 24 hours";
+      : transfer?.state === "saving" ? "Saving file…"
+        : transfer?.state === "complete" || item.fileDownloaded ? "Downloaded"
+          : transfer?.state === "failed" ? "Download failed · Retry"
+            : expired ? "Offer expired"
+              : "Available for download for up to 24 hours";
   return (
     <div className="clip-row">
       <div className="clip-main">
@@ -567,7 +567,7 @@ function ClipRow({ item, onCopy, onRemove, onDownload, onReveal, transfer, nowMs
             <path d="M12 3v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>}
-        {item.kind === "file" && item.fileDownloaded && item.localFilePath && <button className="icon-button" title="Show in folder" onClick={() => onReveal(item.localFilePath!)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg></button>}
+        {item.kind === "file" && item.fileDownloaded && item.localFilePath && <button className="icon-button" title="Show in folder" onClick={() => onReveal(item.localFilePath!)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg></button>}
         {item.kind !== "file" && <button className="icon-button" title="Copy to clipboard" onClick={() => onCopy(item.content)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect x="8" y="8" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
@@ -676,7 +676,7 @@ function App() {
           .then((files) => addPickedFiles(files))
           .catch((e) => showToast(`${e}`, { variant: "error" }));
       }
-    }).then((off) => { unlisten = off; }).catch(() => {});
+    }).then((off) => { unlisten = off; }).catch(() => { });
     return () => { cancelled = true; unlisten?.(); };
   }, [appWindow, screen]);
 
@@ -740,7 +740,8 @@ function App() {
       const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
       const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
       await appWindow.setPosition(new PhysicalPosition(x, y));
-      appWindow.show();
+      const autostarted = await invoke<boolean>("launched_by_autostart");
+      if (!autostarted) await appWindow.show();
       handleScan();
     }
     getThisDeviceIdenty();
@@ -909,7 +910,7 @@ function App() {
       }
       const text = await navigator.clipboard?.readText();
       if (typeof text === "string") setCurrentClipboard(text ? { kind: "text", text } : null);
-    } catch {}
+    } catch { }
   }, []);
 
   function addPickedFiles(files: PickedFile[]) {
@@ -1030,131 +1031,131 @@ function App() {
     return (
       <section className={`sync-screen ${isFileDragActive ? "sync-screen--dragging" : ""}`}>
         <ScrollFade className="sync-scroll">
-        <div className="sync-shell">
-          <header className="sync-page-header">
-            <div>
-              <div className="sync-heading-row">
-                <div className="sync-device-transfer-icon" aria-hidden="true">
-                  <svg viewBox="0 0 36 42" fill="none">
-                    <rect x="8" y="2" width="20" height="28" rx="4" stroke="currentColor" strokeWidth="1.8" />
-                  </svg>
-                </div>
-                <div style={{flex: "1", display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-                  <div className="sync-heading">Send</div>
-                  <div className={`sync-connection-pill ${connectedCount > 0 ? "online" : "offline"}`}>
-                    <span className="status-dot" />
-                    {connectedCount > 0 ? `${connectedCount} connected` : "No device connected"}
+          <div className="sync-shell">
+            <header className="sync-page-header">
+              <div>
+                <div className="sync-heading-row">
+                  <div className="sync-device-transfer-icon" aria-hidden="true">
+                    <svg viewBox="0 0 36 42" fill="none">
+                      <rect x="8" y="2" width="20" height="28" rx="4" stroke="currentColor" strokeWidth="1.8" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: "1", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div className="sync-heading">Send</div>
+                    <div className={`sync-connection-pill ${connectedCount > 0 ? "online" : "offline"}`}>
+                      <span className="status-dot" />
+                      {connectedCount > 0 ? `${connectedCount} connected` : "No device connected"}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </header>
+            </header>
 
-          <div className="sync-layout">
-            <div className="sync-primary-column">
-              <section className="sync-panel clipboard-panel">
-                <div className="sync-panel-header sync-clipboard-header">
-                  <div className="sync-panel-title">Clipboard</div>
-                  <div className="sync-clipboard-actions">
-                    {currentClipboard && <span className="sync-kind ready">{clipboardKindLabel}</span>}
-                    <button className="sync-refresh sync-refresh--compact" onClick={refreshCurrentClipboard} title="Refresh clipboard"><span className="sync-refresh-icon">↻</span><span>Refresh</span></button>
-                  </div>
-                </div>
-                {currentClipboard ? (
-                  <div className="sync-clipboard-preview">
-                    <div className="sync-preview-icon">
-                      {currentClipboard.kind === "image" ? "▧" : currentClipboard.kind === "rich_text" ? "R" : "T"}
+            <div className="sync-layout">
+              <div className="sync-primary-column">
+                <section className="sync-panel clipboard-panel">
+                  <div className="sync-panel-header sync-clipboard-header">
+                    <div className="sync-panel-title">Clipboard</div>
+                    <div className="sync-clipboard-actions">
+                      {currentClipboard && <span className="sync-kind ready">{clipboardKindLabel}</span>}
+                      <button className="sync-refresh sync-refresh--compact" onClick={refreshCurrentClipboard} title="Refresh clipboard"><span className="sync-refresh-icon">↻</span><span>Refresh</span></button>
                     </div>
-                    <div className="sync-preview-copy">
-                      <div className="sync-preview-text">{currentClipboard.text || "Clipboard content"}</div>
-                    </div>
-                    <button className="sync-selection-remove" title="Don't send clipboard" onClick={() => setCurrentClipboard(null)}>×</button>
                   </div>
-                ) : (
-                  <button className="sync-clipboard-empty" onClick={refreshCurrentClipboard} title="Read clipboard">
-                    <div className="sync-empty-glyph">＋</div>
-                    <div>
-                      <div className="sync-empty-title">Add clipboard</div>
-                      <div className="sync-empty-copy">Tap to read what is currently copied.</div>
-                    </div>
-                  </button>
-                )}
-              </section>
-
-              <section className="sync-panel files-panel">
-                <div className="sync-panel-header">
-                  <div>
-                    <div className="sync-panel-title">Files to send</div>
-                    <div className="sync-panel-subtitle">Files stay local until you explicitly press Send.</div>
-                  </div>
-                  {outgoingFiles.length > 0 && <span className="sync-count-chip">{outgoingFiles.length}</span>}
-                </div>
-
-                <button className={`sync-dropzone ${isFileDragActive ? "dragging" : ""}`} onClick={pickFiles} title="Choose files">
-                  <div className="sync-drop-icon">＋</div>
-                  <div className="sync-drop-title">Drop files anywhere</div>
-                  <div className="sync-drop-copy">or click to choose files</div>
-                </button>
-
-                {outgoingFiles.length > 0 && (
-                  <div className="sync-file-list">
-                    {outgoingFiles.map((file, index) => (
-                      <div className="sync-file-row" key={`${file.name}:${file.size}${/*:${file?.lastModified}*/""}:${index}`}>
-                        <div className="sync-file-icon">{file.mimeType.startsWith("image/") ? "▧" : "□"}</div>
-                        <div className="sync-file-info">
-                          <div className="sync-file-name">{file.name}</div>
-                          <div className="sync-file-meta">{file.mimeType} · {formatBytes(file.size)}</div>
-                        </div>
-                        <button
-                          className="sync-file-remove"
-                          title={`Remove ${file.name}`}
-                          onClick={() => setOutgoingFiles((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          ×
-                        </button>
+                  {currentClipboard ? (
+                    <div className="sync-clipboard-preview">
+                      <div className="sync-preview-icon">
+                        {currentClipboard.kind === "image" ? "▧" : currentClipboard.kind === "rich_text" ? "R" : "T"}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <aside className="sync-aside">
-              <div className="sync-summary-panel">
-                <div className="sync-summary-label">READY TO SEND</div>
-                <div className="sync-summary-number">{readyCount}</div>
-                <div className="sync-summary-caption">{readyCount === 1 ? "item" : "items"} in this send</div>
-
-                <div className="sync-summary-breakdown">
-                  {currentClipboard && (
-                    <div className="sync-breakdown-row"><span>Clipboard</span><strong>1</strong></div>
+                      <div className="sync-preview-copy">
+                        <div className="sync-preview-text">{currentClipboard.text || "Clipboard content"}</div>
+                      </div>
+                      <button className="sync-selection-remove" title="Don't send clipboard" onClick={() => setCurrentClipboard(null)}>×</button>
+                    </div>
+                  ) : (
+                    <button className="sync-clipboard-empty" onClick={refreshCurrentClipboard} title="Read clipboard">
+                      <div className="sync-empty-glyph">＋</div>
+                      <div>
+                        <div className="sync-empty-title">Add clipboard</div>
+                        <div className="sync-empty-copy">Tap to read what is currently copied.</div>
+                      </div>
+                    </button>
                   )}
+                </section>
+
+                <section className="sync-panel files-panel">
+                  <div className="sync-panel-header">
+                    <div>
+                      <div className="sync-panel-title">Files to send</div>
+                      <div className="sync-panel-subtitle">Files stay local until you explicitly press Send.</div>
+                    </div>
+                    {outgoingFiles.length > 0 && <span className="sync-count-chip">{outgoingFiles.length}</span>}
+                  </div>
+
+                  <button className={`sync-dropzone ${isFileDragActive ? "dragging" : ""}`} onClick={pickFiles} title="Choose files">
+                    <div className="sync-drop-icon">＋</div>
+                    <div className="sync-drop-title">Drop files anywhere</div>
+                    <div className="sync-drop-copy">or click to choose files</div>
+                  </button>
+
                   {outgoingFiles.length > 0 && (
-                    <div className="sync-breakdown-row"><span>Files</span><strong>{outgoingFiles.length}</strong></div>
+                    <div className="sync-file-list">
+                      {outgoingFiles.map((file, index) => (
+                        <div className="sync-file-row" key={`${file.name}:${file.size}${/*:${file?.lastModified}*/""}:${index}`}>
+                          <div className="sync-file-icon">{file.mimeType.startsWith("image/") ? "▧" : "□"}</div>
+                          <div className="sync-file-info">
+                            <div className="sync-file-name">{file.name}</div>
+                            <div className="sync-file-meta">{file.mimeType} · {formatBytes(file.size)}</div>
+                          </div>
+                          <button
+                            className="sync-file-remove"
+                            title={`Remove ${file.name}`}
+                            onClick={() => setOutgoingFiles((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  {!currentClipboard && outgoingFiles.length === 0 && (
-                    <div className="sync-breakdown-empty">Add something to the queue to enable sending.</div>
-                  )}
-                </div>
-
-                <div className="sync-summary-destination">
-                  <span className={`status-dot ${connectedCount > 0 ? "connected" : "disconnected"}`} />
-                  <div>
-                    <div>{connectedCount > 0 ? "Connected devices" : "No connected devices"}</div>
-                    <small>{connectedCount > 0 ? "The bundle will be sent to connected peers." : "Connect a paired device first."}</small>
-                  </div>
-                </div>
-
-                <button className="sync-send-button" onClick={sendReadyItems} disabled={sendingReadyItems || connectedCount === 0 || readyCount === 0}>
-                  <span>{sendingReadyItems ? "Preparing…" : "Send now"}</span>
-                  <span className="sync-send-arrow">→</span>
-                </button>
-
-                <div className="sync-summary-note">Files are offered as downloadable content and remain available for up to 24 hours.</div>
+                </section>
               </div>
-            </aside>
+
+              <aside className="sync-aside">
+                <div className="sync-summary-panel">
+                  <div className="sync-summary-label">READY TO SEND</div>
+                  <div className="sync-summary-number">{readyCount}</div>
+                  <div className="sync-summary-caption">{readyCount === 1 ? "item" : "items"} in this send</div>
+
+                  <div className="sync-summary-breakdown">
+                    {currentClipboard && (
+                      <div className="sync-breakdown-row"><span>Clipboard</span><strong>1</strong></div>
+                    )}
+                    {outgoingFiles.length > 0 && (
+                      <div className="sync-breakdown-row"><span>Files</span><strong>{outgoingFiles.length}</strong></div>
+                    )}
+                    {!currentClipboard && outgoingFiles.length === 0 && (
+                      <div className="sync-breakdown-empty">Add something to the queue to enable sending.</div>
+                    )}
+                  </div>
+
+                  <div className="sync-summary-destination">
+                    <span className={`status-dot ${connectedCount > 0 ? "connected" : "disconnected"}`} />
+                    <div>
+                      <div>{connectedCount > 0 ? "Connected devices" : "No connected devices"}</div>
+                      <small>{connectedCount > 0 ? "The bundle will be sent to connected peers." : "Connect a paired device first."}</small>
+                    </div>
+                  </div>
+
+                  <button className="sync-send-button" onClick={sendReadyItems} disabled={sendingReadyItems || connectedCount === 0 || readyCount === 0}>
+                    <span>{sendingReadyItems ? "Preparing…" : "Send now"}</span>
+                    <span className="sync-send-arrow">→</span>
+                  </button>
+
+                  <div className="sync-summary-note">Files are offered as downloadable content and remain available for up to 24 hours.</div>
+                </div>
+              </aside>
+            </div>
           </div>
-        </div>
         </ScrollFade>
       </section>
     );
@@ -1211,7 +1212,7 @@ function App() {
           </button>
           <button className="icon-button titlebar-icon" title="Sync" onClick={() => setScreen("sync")}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
             </svg>
           </button>
           <button
