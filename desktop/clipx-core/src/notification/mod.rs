@@ -41,8 +41,7 @@ pub enum IncomingClipboardKind {
     File,
 }
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum ProgressText {
     /// Render the authoritative progress value as a percentage, e.g. `47%`.
     #[default]
@@ -54,7 +53,6 @@ pub enum ProgressText {
     /// Do not render a value string next to the progress bar.
     Hidden,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct NotificationConfig {

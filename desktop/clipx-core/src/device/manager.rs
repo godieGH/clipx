@@ -513,12 +513,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         // resolves an overlap instead of using a fingerprint tie-breaker.
         if just_appeared
             && let Some(td) = self.trusted.get(&device_id)
-                && td.auto_connect
-                    && !self.connected.contains_key(&device_id)
-                    && !self.connect_sessions.contains_key(&device_id)
-                {
-                    let _ = self.handle_connect(&device_id);
-                }
+            && td.auto_connect
+            && !self.connected.contains_key(&device_id)
+            && !self.connect_sessions.contains_key(&device_id)
+        {
+            let _ = self.handle_connect(&device_id);
+        }
     }
 
     // ---------------- Pair: initiator side ----------------
@@ -667,25 +667,27 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         }
         if let Some(sess) = self.connect_sessions.get_mut(&device_id)
-            && sess.role == Role::Initiator && sess.stage == ConnectStage::Dialing {
-                sess.stage = ConnectStage::AwaitingSignature;
-                sess.connection_id = Some(connection_id.clone());
-                let nonce_vec = self.identity.random_nonce();
-                let nonce_arr: [u8; 32] = nonce_vec
-                    .as_slice()
-                    .try_into()
-                    .expect("nonce must be 32 bytes");
-                sess.nonce = Some(nonce_arr);
-                let own_fp = self.identity.get_this_device_fingerprint();
-                self.send_peer_on_connection(
-                    &device_id,
-                    &connection_id,
-                    Body::ConnectChallenge(proto::PeerConnectChallenge {
-                        nonce: nonce_vec,
-                        initiator_fingerprint: own_fp.to_vec(),
-                    }),
-                );
-            }
+            && sess.role == Role::Initiator
+            && sess.stage == ConnectStage::Dialing
+        {
+            sess.stage = ConnectStage::AwaitingSignature;
+            sess.connection_id = Some(connection_id.clone());
+            let nonce_vec = self.identity.random_nonce();
+            let nonce_arr: [u8; 32] = nonce_vec
+                .as_slice()
+                .try_into()
+                .expect("nonce must be 32 bytes");
+            sess.nonce = Some(nonce_arr);
+            let own_fp = self.identity.get_this_device_fingerprint();
+            self.send_peer_on_connection(
+                &device_id,
+                &connection_id,
+                Body::ConnectChallenge(proto::PeerConnectChallenge {
+                    nonce: nonce_vec,
+                    initiator_fingerprint: own_fp.to_vec(),
+                }),
+            );
+        }
     }
 
     fn on_transport_disconnected(&mut self, device_id: String, connection_id: String) {
@@ -1935,16 +1937,21 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let Some(transport_tx) = self.transport_tx.as_ref().cloned() else {
             return;
         };
+
         let key = (device_id.clone(), file_id.clone());
+
         if self.upload_sessions.contains_key(&key) {
             return;
         }
+
         let Some(connection_id) = self.connected.get(&device_id).cloned() else {
             return;
         };
+
         let cancel = CancellationToken::new();
         let interrupt = CancellationToken::new();
         let (ack_tx, mut ack_rx) = mpsc::unbounded_channel();
+
         self.upload_sessions.insert(
             key.clone(),
             UploadSession {
@@ -1953,34 +1960,186 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 ack_tx,
             },
         );
+
         let done_tx = self.upload_done_tx.clone();
         let events_tx = self.events_tx.clone();
         let notification = self.notification.clone();
         let connection_id_for_task = connection_id.clone();
+
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("file")
             .to_string();
+
         let confirmed_offset = Arc::new(AtomicU64::new(start_offset));
         let confirmed_offset_task = confirmed_offset.clone();
+
         tokio::spawn(async move {
-            let result: Result<(),String> = async {
-                let mut file=tokio::fs::File::open(&path).await.map_err(|e|format!("Could not open file: {e}"))?;
-                if file.metadata().await.map_err(|e|e.to_string())?.len()!=total_size || start_offset>total_size { return Err("Source file changed or resume offset is invalid".into()); }
-                file.seek(SeekFrom::Start(start_offset)).await.map_err(|e|e.to_string())?;
-                let mut offset=start_offset; let mut seq=offset/MAX_FILE_CHUNK_BYTES as u64;
-                let _ = Self::emit_transfer(&events_tx, &notification, &file_id, &file_name, "send", offset, total_size, "sending", "Sending file".into()).await;
+            let result: Result<(), String> = async {
+                let mut file = tokio::fs::File::open(&path)
+                    .await
+                    .map_err(|e| format!("Could not open file: {e}"))?;
+
+                if file.metadata().await.map_err(|e| e.to_string())?.len() != total_size
+                    || start_offset > total_size
+                {
+                    return Err("Source file changed or resume offset is invalid".into());
+                }
+
+                file.seek(SeekFrom::Start(start_offset))
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let mut offset = start_offset;
+                let mut seq = offset / MAX_FILE_CHUNK_BYTES as u64;
+
+                let _ = Self::emit_transfer(
+                    &events_tx,
+                    &notification,
+                    &file_id,
+                    &file_name,
+                    "send",
+                    offset,
+                    total_size,
+                    "sending",
+                    "Sending file".into(),
+                )
+                .await;
+
                 loop {
-                    if interrupt.is_cancelled(){return Err("INTERRUPTED".into());} if cancel.is_cancelled(){return Err("CANCELLED".into());}
-                    let mut data=vec![0u8;MAX_FILE_CHUNK_BYTES]; let n=file.read(&mut data).await.map_err(|e|e.to_string())?; if n==0 && offset!=total_size {return Err("Source file ended before the advertised size".into());}
-                    data.truncate(n); let end=offset.saturating_add(n as u64); let eof=end==total_size; let digest=Sha256::digest(&data).to_vec();
-                    let (reply_tx,reply_rx)=oneshot::channel(); transport_tx.send(TransportCommand::SendPeerMessageOnConnection{device_id:device_id.clone(),connection_id:connection_id_for_task.clone(),message:proto::PeerMessage{body:Some(Body::FileChunk(proto::FileChunk{file_id:file_id.clone(),seq,data,eof,total_size,offset,sha256:digest}))},reply_to:reply_tx}).map_err(|_|"Transport is unavailable".to_string())?;
-                    tokio::select!{ _=cancel.cancelled()=>return Err("CANCELLED".into()), _=interrupt.cancelled()=>return Err("INTERRUPTED".into()), r=tokio::time::timeout(Duration::from_secs(15),reply_rx)=>{if !matches!(r,Ok(Ok(true))){return Err("Transport rejected or timed out queuing file data".into());}} }
-                    tokio::select!{ _=cancel.cancelled()=>return Err("CANCELLED".into()), _=interrupt.cancelled()=>return Err("INTERRUPTED".into()), ack=tokio::time::timeout(Duration::from_secs(30),ack_rx.recv())=>{match ack{Ok(Some(v)) if v==end=>{},Ok(Some(v))=>return Err(format!("Unexpected transfer acknowledgement offset {v}")),_=>return Err("Timed out waiting for transfer acknowledgement".into())}}}
-                    offset=end; confirmed_offset_task.store(offset, Ordering::Release); let state=if eof{"complete"}else{"sending"}; let msg=if eof{format!("Sending finished: {file_name}")}else{format!("Sending {file_name} · {}%",Self::percentage(offset,total_size))}; Self::emit_transfer(&events_tx,&notification,&file_id,&file_name,"send",offset,total_size,state,msg).await; if eof{break;} seq=seq.saturating_add(1);
-                } Ok(())
-            }.await;
+                    if interrupt.is_cancelled() {
+                        return Err("INTERRUPTED".into());
+                    }
+
+                    if cancel.is_cancelled() {
+                        return Err("CANCELLED".into());
+                    }
+
+                    let mut data = vec![0u8; MAX_FILE_CHUNK_BYTES];
+
+                    let n = file.read(&mut data).await.map_err(|e| e.to_string())?;
+
+                    if n == 0 && offset != total_size {
+                        return Err("Source file ended before the advertised size".into());
+                    }
+
+                    data.truncate(n);
+
+                    let end = offset.saturating_add(n as u64);
+                    let eof = end == total_size;
+                    let digest = Sha256::digest(&data).to_vec();
+
+                    let (reply_tx, reply_rx) = oneshot::channel();
+
+                    transport_tx
+                        .send(TransportCommand::SendPeerMessageOnConnection {
+                            device_id: device_id.clone(),
+                            connection_id: connection_id_for_task.clone(),
+                            message: proto::PeerMessage {
+                                body: Some(Body::FileChunk(proto::FileChunk {
+                                    file_id: file_id.clone(),
+                                    seq,
+                                    data,
+                                    eof,
+                                    total_size,
+                                    offset,
+                                    sha256: digest,
+                                })),
+                            },
+                            reply_to: reply_tx,
+                        })
+                        .map_err(|_| "Transport is unavailable".to_string())?;
+
+                    tokio::select! {
+                        _ = cancel.cancelled() => {
+                            return Err("CANCELLED".into());
+                        }
+
+                        _ = interrupt.cancelled() => {
+                            return Err("INTERRUPTED".into());
+                        }
+
+                        r = tokio::time::timeout(Duration::from_secs(15), reply_rx) => {
+                            if !matches!(r, Ok(Ok(true))) {
+                                return Err(
+                                    "Transport rejected or timed out queuing file data".into()
+                                );
+                            }
+                        }
+                    }
+
+                    tokio::select! {
+                        _ = cancel.cancelled() => {
+                            return Err("CANCELLED".into());
+                        }
+
+                        _ = interrupt.cancelled() => {
+                            return Err("INTERRUPTED".into());
+                        }
+
+                        ack = tokio::time::timeout(
+                            Duration::from_secs(30),
+                            ack_rx.recv(),
+                        ) => {
+                            match ack {
+                                Ok(Some(v)) if v == end => {}
+
+                                Ok(Some(v)) => {
+                                    return Err(
+                                        format!(
+                                            "Unexpected transfer acknowledgement offset {v}"
+                                        )
+                                    );
+                                }
+
+                                _ => {
+                                    return Err(
+                                        "Timed out waiting for transfer acknowledgement".into()
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    offset = end;
+                    confirmed_offset_task.store(offset, Ordering::Release);
+
+                    let state = if eof { "complete" } else { "sending" };
+
+                    let msg = if eof {
+                        format!("Sending finished: {file_name}")
+                    } else {
+                        format!(
+                            "Sending {file_name} · {}%",
+                            Self::percentage(offset, total_size)
+                        )
+                    };
+
+                    Self::emit_transfer(
+                        &events_tx,
+                        &notification,
+                        &file_id,
+                        &file_name,
+                        "send",
+                        offset,
+                        total_size,
+                        state,
+                        msg,
+                    )
+                    .await;
+
+                    if eof {
+                        break;
+                    }
+
+                    seq = seq.saturating_add(1);
+                }
+
+                Ok(())
+            }
+            .await;
+
             if let Err(error) = result {
                 if error == "CANCELLED" {
                     Self::emit_transfer(
@@ -2000,7 +2159,21 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     || error.starts_with("Timed out")
                 {
                     let confirmed = confirmed_offset.load(Ordering::Acquire);
-                    Self::emit_transfer(&events_tx, &notification, &file_id, &file_name, "send", confirmed, total_size, "interrupted", format!("Sending {file_name} was interrupted; it can resume from {confirmed} bytes")).await;
+
+                    Self::emit_transfer(
+                    &events_tx,
+                    &notification,
+                    &file_id,
+                    &file_name,
+                    "send",
+                    confirmed,
+                    total_size,
+                    "interrupted",
+                    format!(
+                        "Sending {file_name} was interrupted; it can resume from {confirmed} bytes"
+                    ),
+                )
+                .await;
                 } else {
                     Self::emit_transfer(
                         &events_tx,
@@ -2016,6 +2189,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     .await;
                 }
             }
+
             let _ = done_tx.send(key);
         });
     }
@@ -2023,8 +2197,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     fn abort_download(&mut self, file_id: &str, message: impl Into<String>) {
         let pending = self.pending_downloads.remove(file_id);
         if let Some(p) = pending {
-            if let Some(s) = self.incoming_files
-                .remove(&(p.device_id.clone(), file_id.to_string())) { let _ = fs::remove_file(s.temp_path); }
+            if let Some(s) = self
+                .incoming_files
+                .remove(&(p.device_id.clone(), file_id.to_string()))
+            {
+                let _ = fs::remove_file(s.temp_path);
+            }
             self.resume_candidates.remove(file_id);
             let _ = fs::remove_file(self.incoming_state_path(file_id));
             let _ = self
@@ -2047,8 +2225,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
     fn cancel_local_download(&mut self, file_id: &str) {
         if let Some(p) = self.pending_downloads.remove(file_id)
-            && let Some(s) = self.incoming_files
-                .remove(&(p.device_id.clone(), file_id.to_string())) { let _ = fs::remove_file(s.temp_path); }
+            && let Some(s) = self
+                .incoming_files
+                .remove(&(p.device_id.clone(), file_id.to_string()))
+        {
+            let _ = fs::remove_file(s.temp_path);
+        }
         self.resume_candidates.remove(file_id);
         let _ = fs::remove_file(self.incoming_state_path(file_id));
         let keys: Vec<(String, String)> = self
@@ -2114,9 +2296,10 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let path = self.incoming_state_path(file_id);
         let tmp = path.with_extension("resume.tmp");
         if let Ok(bytes) = serde_json::to_vec(&state)
-            && fs::write(&tmp, bytes).is_ok() {
-                let _ = fs::rename(tmp, path);
-            }
+            && fs::write(&tmp, bytes).is_ok()
+        {
+            let _ = fs::rename(tmp, path);
+        }
     }
 
     fn load_valid_resume_state(
@@ -2227,20 +2410,20 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             if path.extension().and_then(|x| x.to_str()) == Some("resume") {
                 if let Ok(bytes) = fs::read(&path)
-                    && let Ok(state) = serde_json::from_slice::<ResumeState>(&bytes) {
-                        if state.updated_at_ms >= cutoff
-                            && state.offer_expires_at_ms >= now
-                            && !self
-                                .incoming_files_dir
-                                .join(format!("clipx-{}.cancelled", state.file_id))
-                                .exists()
-                        {
-                            continue;
-                        }
-                        let _ = fs::remove_file(
-                            self.incoming_temp_path(&state.device_id, &state.file_id),
-                        );
+                    && let Ok(state) = serde_json::from_slice::<ResumeState>(&bytes)
+                {
+                    if state.updated_at_ms >= cutoff
+                        && state.offer_expires_at_ms >= now
+                        && !self
+                            .incoming_files_dir
+                            .join(format!("clipx-{}.cancelled", state.file_id))
+                            .exists()
+                    {
+                        continue;
                     }
+                    let _ =
+                        fs::remove_file(self.incoming_temp_path(&state.device_id, &state.file_id));
+                }
                 let _ = fs::remove_file(path);
                 continue;
             }
@@ -2369,11 +2552,10 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn percentage(done: u64, total: u64) -> u8 {
-        if total == 0 {
-            0
-        } else {
-            ((done.saturating_mul(100)) / total).min(100) as u8
-        }
+        done.saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(0)
+            .min(100) as u8
     }
 
     fn now_ms() -> u64 {
@@ -2576,7 +2758,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     })
                     .cloned()
                     .collect::<Vec<SeenDevice>>();
-                devices.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+                devices.sort_by_key(|b| std::cmp::Reverse(b.last_seen));
                 let _ = reply_to.send(devices);
             }
             DeviceCommands::Pair {

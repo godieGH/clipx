@@ -80,9 +80,10 @@ impl Drop for NotificationWorker {
         self.tx.take();
 
         if let Some(thread) = self.thread.take()
-            && thread.thread().id() != thread::current().id() {
-                let _ = thread.join();
-            }
+            && thread.thread().id() != thread::current().id()
+        {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -428,9 +429,10 @@ fn handle_transfer_notification_inner(
 
     if !terminal
         && let Some(existing) = states.get(file_id)
-            && done < existing.last_done {
-                return Ok(());
-            }
+        && done < existing.last_done
+    {
+        return Ok(());
+    }
 
     let title = states
         .get(file_id)
@@ -653,13 +655,14 @@ fn handle_terminal_notification(
 
         _ => {
             if previous_sequence.is_some()
-                && let Err(error) = remove_toast_history(APP_ID, progress_tag) {
-                    tracing::debug!(
-                        ?error,
-                        %file_id,
-                        "could not remove previous progress toast"
-                    );
-                }
+                && let Err(error) = remove_toast_history(APP_ID, progress_tag)
+            {
+                tracing::debug!(
+                    ?error,
+                    %file_id,
+                    "could not remove previous progress toast"
+                );
+            }
 
             let toast_message = notification_preview(message);
 
