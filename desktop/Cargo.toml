@@ -3,7 +3,7 @@ resolver = "2"
 members = ["clipx-app/src-tauri", "clipx-core", "clipx"]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 
 [workspace.dependencies]
 clipx = {path = "./clipx"}
