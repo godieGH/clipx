@@ -196,10 +196,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     ) -> Self {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let (upload_done_tx, upload_done_rx) = mpsc::unbounded_channel();
-        let incoming_files_dir = trusted_store_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("incoming-files");
+        let incoming_files_dir = crate::device::config::transfer_dir().join("incoming-files");
         let _ = std::fs::create_dir_all(&incoming_files_dir);
         Self {
             seen: SeenDeviceRegistry::new(),

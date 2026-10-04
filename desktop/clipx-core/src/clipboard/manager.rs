@@ -188,10 +188,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         outbound_tx: mpsc::UnboundedSender<ClipboardOutbound>,
         events_tx: broadcast::Sender<CoreEvent>,
     ) -> Self {
-        let files_dir = history_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("clipboard-files");
+        let files_dir = crate::device::config::transfer_dir().join("clipboard-files");
         let _ = fs::create_dir_all(&files_dir);
         let store = ClipboardStore::load(history_path, max_history);
         let (resolved_tx, resolved_rx) = mpsc::unbounded_channel();
