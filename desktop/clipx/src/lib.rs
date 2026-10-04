@@ -2,6 +2,7 @@ pub mod ipc;
 pub mod message;
 pub mod clipx {
     #![allow(unused)]
+    #[allow(clippy::module_inception)]
     mod clipx {
         include!(concat!(env!("OUT_DIR"), "/clipx.rs"));
     }
