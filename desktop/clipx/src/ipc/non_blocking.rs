@@ -180,4 +180,20 @@ impl Client {
         self.state = State::Down;
         Ok(())
     }
+
+    /// True only if the reader task is still alive, meaning the core is really there.
+    pub fn is_connected(&self) -> bool {
+        self.is_running()
+            && self.reader_task.as_ref().is_some_and(|t| !t.is_finished())
+    }
+
+    pub async fn request_shutdown(&mut self) -> anyhow::Result<()> {
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::Shutdown(clipx::ShutdownRequest {})),
+        };
+        match self.send(req).await?.response {
+            Some(clipx::ipc_response::Response::Shutdown(_)) => Ok(()),
+            _ => Err(anyhow::anyhow!("unexpected response to shutdown")),
+        }
+    }
 }

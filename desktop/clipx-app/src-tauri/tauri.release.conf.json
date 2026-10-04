@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeBuildCommand": "pnpm build && node scripts/prepare-core.mjs"
+  },
+  "bundle": {
+    "externalBin": ["binaries/clipx-core"]
+  }
+}

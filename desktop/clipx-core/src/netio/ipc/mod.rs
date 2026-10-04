@@ -23,6 +23,7 @@ pub struct IpcService {
     clipboard_tx: UnboundedSender<ClipboardCommand>,
     events_tx: broadcast::Sender<CoreEvent>,
     tracker: TaskTracker,
+    stop_tx: UnboundedSender<()>,
 }
 
 impl IpcService {
@@ -32,6 +33,7 @@ impl IpcService {
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
         events_tx: broadcast::Sender<CoreEvent>,
+        stop_tx: UnboundedSender<()>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -41,6 +43,7 @@ impl IpcService {
             clipboard_tx,
             events_tx,
             tracker: TaskTracker::new(),
+            stop_tx,
         }
     }
 
@@ -68,9 +71,10 @@ impl IpcService {
                         let clipboard_tx = self.clipboard_tx.clone();
                         let events_tx = self.events_tx.clone();
                         let client_shutdown_rx = self.core_service_shutdown_rx.clone();
+                        let stop_tx = self.stop_tx.clone();
                         self.tracker.spawn(async move {
                             if let Err(err) =
-                                IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, client_shutdown_rx).await
+                                IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, stop_tx, client_shutdown_rx).await
                             {
                                 tracing::error!(error = %err, "IPC client handler failed");
                             }
@@ -95,6 +99,7 @@ impl IpcService {
         device_tx: UnboundedSender<DeviceCommands>,
         clipboard_tx: UnboundedSender<ClipboardCommand>,
         events_tx: broadcast::Sender<CoreEvent>,
+        stop_tx: UnboundedSender<()>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
         let mut ws = accept_async(conn).await?;
@@ -161,7 +166,7 @@ impl IpcService {
                         WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                         WsMessage::Binary(bytes) => {
                             let ipcreq = IpcService::decode_ipc_req(bytes.to_vec())?;
-                            IpcService::handle_ipc_request(&device_tx, &clipboard_tx, ipcreq, &mut ws).await?;
+                            IpcService::handle_ipc_request(&device_tx, &clipboard_tx, &stop_tx, ipcreq, &mut ws).await?;
                         }
                         _ => break,
                     }
@@ -175,6 +180,7 @@ impl IpcService {
     async fn handle_ipc_request(
         device_tx: &UnboundedSender<DeviceCommands>,
         clipboard_tx: &UnboundedSender<ClipboardCommand>,
+        stop_tx: &UnboundedSender<()>,
         ipcreq: clipx::IpcRequest,
         ws: &mut WebSocketStream<LocalStream>,
     ) -> anyhow::Result<()> {
@@ -556,6 +562,12 @@ impl IpcService {
                 let _ = clipboard_tx.send(ClipboardCommand::DownloadHistoryFile { entry_id: req.entry_id, reply_to: tx });
                 let message = rx.await?;
                 clipx::IpcResponse { response: Some(clipx::ipc_response::Response::DownloadClipboardFile(clipx::DownloadClipboardFileResponse { started: message == "download requested", message })) }
+            }
+            clipx::ipc_request::Request::Shutdown(_) => {
+                let _ = stop_tx.send(());
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::Shutdown(clipx::ShutdownResponse {})),
+                }
             }
         };
 

@@ -78,17 +78,27 @@ impl CoreService {
         self.tasks = tasks;
         self.shutdown_tx = Some(shutdown_tx.clone());
 
+        let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
+
         let mut ipc_service = netio::ipc::IpcService::new(
             "clipx",
             shutdown_tx.subscribe(),
             device_tx,
             clipboard_cmd_tx,
             core_events_tx,
+            stop_tx,
         );
         self.tasks.push(tokio::spawn(async move { ipc_service.start().await }));
         
-        signal::ctrl_c().await?;
-
+        tokio::select! {
+            r = signal::ctrl_c() => { r?; }
+            _ = stop_rx.recv() => {
+                tracing::info!("Shutdown requested over IPC");
+                // let the Shutdown reply flush before the sockets close
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+        
         self.stop();
         self.shutdown().await;
         Ok(())

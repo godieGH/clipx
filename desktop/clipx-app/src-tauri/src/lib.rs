@@ -1,28 +1,47 @@
+mod core_supervisor;
 mod error_dialog;
+use std::sync::Arc;
 
 use clipx_lib::{clipx, ipc, message::types, message::IpcCmdBridge};
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(windows)]
-use windows::core::Interface;
-#[cfg(windows)]
-use webview2_com::{take_pwstr, ContextMenuRequestedEventHandler, Microsoft::Web::WebView2::Win32::{ICoreWebView2_11}};
 use tauri::{
     async_runtime::Mutex,
     menu::{Menu, MenuItem},
     tray::{self, MouseButton, MouseButtonState},
     Emitter, Manager, State,
 };
+#[cfg(windows)]
+use webview2_com::{
+    take_pwstr, ContextMenuRequestedEventHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2_11,
+};
+#[cfg(windows)]
+use windows::core::Interface;
 
 pub struct AppState {
     ipc: Mutex<ipc::non_blocking::Client>,
+    supervisor: Arc<core_supervisor::CoreSupervisor>,
 }
 
 static EXIT_SHUTDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn mime_from_name(name: &str) -> String {
-    match std::path::Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-        "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", "pdf" => "application/pdf", "txt" => "text/plain", "html" | "htm" => "text/html", _ => "application/octet-stream",
-    }.to_string()
+    match std::path::Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 #[cfg(windows)]
@@ -30,25 +49,37 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
     window.with_webview(|webview| unsafe {
         let core = match webview.controller().CoreWebView2() {
             Ok(value) => value,
-            Err(error) => { eprintln!("ClipX: unable to access WebView2: {error}"); return; }
+            Err(error) => {
+                eprintln!("ClipX: unable to access WebView2: {error}");
+                return;
+            }
         };
         let core11: ICoreWebView2_11 = match core.cast() {
             Ok(value) => value,
-            Err(error) => { eprintln!("ClipX: WebView2 context-menu API unavailable: {error}"); return; }
+            Err(error) => {
+                eprintln!("ClipX: WebView2 context-menu API unavailable: {error}");
+                return;
+            }
         };
         let handler = ContextMenuRequestedEventHandler::create(Box::new(|_, args| {
-            let Some(args) = args else { return Ok(()); };
+            let Some(args) = args else {
+                return Ok(());
+            };
             let items = args.MenuItems()?;
             let mut count = 0u32;
             items.Count(&mut count)?;
             let mut remove = Vec::new();
             for i in 0..count {
-                let item = items.GetValueAtIndex(i)? ;
+                let item = items.GetValueAtIndex(i)?;
                 let mut name = windows::core::PWSTR::null();
                 item.Name(&mut name)?;
-                if matches!(take_pwstr(name).as_str(), "saveAs" | "print" | "moreTools") { remove.push(i); }
+                if matches!(take_pwstr(name).as_str(), "saveAs" | "print" | "moreTools") {
+                    remove.push(i);
+                }
             }
-            for i in remove.into_iter().rev() {  items.RemoveValueAtIndex(i)?; }
+            for i in remove.into_iter().rev() {
+                items.RemoveValueAtIndex(i)?;
+            }
             Ok(())
         }));
         let mut token = 0i64;
@@ -60,20 +91,22 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let supervisor = Arc::new(core_supervisor::CoreSupervisor::new());
     let mut client = ipc::non_blocking::Client::new("clipx");
-    if let Err(e) = tauri::async_runtime::block_on(client.start()) {
+    let events_rx = client.take_events();
+    let ipc = Mutex::new(client);
+
+    if let Err(e) = tauri::async_runtime::block_on(supervisor.ensure_running(&ipc)) {
         #[cfg(windows)]
         error_dialog::show_core_error(&e);
-
         #[cfg(not(windows))]
-        eprintln!("Failed to start IPC: {e}");
+        eprintln!("Failed to start core: {e}");
         return;
-    };
-
-    let events_rx = client.take_events();
+    }
 
     let state = AppState {
-        ipc: Mutex::new(client),
+        ipc,
+        supervisor: supervisor.clone(),
     };
 
     tauri::Builder::default()
@@ -108,13 +141,35 @@ pub fn run() {
             }
 
             #[cfg(windows)]
-            if let Some(main_window) = app.get_webview_window("main") { configure_windows_context_menu(&main_window)?; }
+            if let Some(main_window) = app.get_webview_window("main") {
+                configure_windows_context_menu(&main_window)?;
+            }
 
             let show_item = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
-            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            // let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            let status_item =
+                MenuItem::with_id(app, "core_status", "Core: running", false, None::<&str>)?;
+            let restart_item =
+                MenuItem::with_id(app, "core_restart", "Restart core", true, None::<&str>)?;
+            let stop_item = MenuItem::with_id(app, "core_stop", "Stop core", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_item,
+                    //&settings_item,
+                    &status_item,
+                    &restart_item,
+                    &stop_item,
+                    &quit_item,
+                ],
+            )?;
+
+            let sup = app.state::<AppState>().supervisor.clone();
+            sup.attach_label(status_item.clone());
+            sup.spawn_watchdog(app.handle().clone());
+
             tray::TrayIconBuilder::new()
                 .tooltip("Clipx")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -127,8 +182,22 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-                    "settings" => {
-                        println!("Settings from the tray!");
+                    // "settings" => {
+                    //     println!("Settings from the tray!");
+                    // }
+                    "core_restart" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let st = app.state::<AppState>();
+                            let _ = st.supervisor.restart(&st.ipc).await;
+                        });
+                    }
+                    "core_stop" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let st = app.state::<AppState>();
+                            st.supervisor.stop(&st.ipc, true).await;
+                        });
                     }
                     "quit" => {
                         app.exit(0);
@@ -194,8 +263,12 @@ pub fn run() {
                     let app_handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app_handle.state::<AppState>();
-                        let mut lock = state.ipc.lock().await;
-                        let _ = lock.shutdown().await;
+                        state.supervisor.stop(&state.ipc, false).await;
+
+                        for (_, w) in app_handle.webview_windows() {
+                            let _ = w.destroy();
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                         app_handle.exit(0);
                     });
                 }
@@ -300,7 +373,10 @@ async fn forget_device(state: State<'_, AppState>, device_id: String) -> Result<
 }
 
 #[tauri::command]
-async fn get_clipboard_history(state: State<'_, AppState>, limit: Option<u32>) -> Result<Vec<types::ClipHistoryEntry>, String> {
+async fn get_clipboard_history(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<types::ClipHistoryEntry>, String> {
     state.ipc.lock().await.get_clipboard_history(limit).await
 }
 
@@ -319,18 +395,37 @@ async fn send_text(state: State<'_, AppState>, content: String) -> Result<String
 }
 
 #[tauri::command]
-async fn send_image(state: State<'_, AppState>, width: u32, height: u32, rgba: Vec<u8>) -> Result<String, String> {
+async fn send_image(
+    state: State<'_, AppState>,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+) -> Result<String, String> {
     state.ipc.lock().await.send_image(width, height, rgba).await
 }
 
 #[tauri::command]
-async fn send_rich_text(state: State<'_, AppState>, text: String, html: String) -> Result<String, String> {
+async fn send_rich_text(
+    state: State<'_, AppState>,
+    text: String,
+    html: String,
+) -> Result<String, String> {
     state.ipc.lock().await.send_rich_text(text, html).await
 }
 
 #[tauri::command]
-async fn send_file(state: State<'_, AppState>, name: String, mime_type: String, data: Vec<u8>) -> Result<String, String> {
-    state.ipc.lock().await.send_file(name, mime_type, data).await
+async fn send_file(
+    state: State<'_, AppState>,
+    name: String,
+    mime_type: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    state
+        .ipc
+        .lock()
+        .await
+        .send_file(name, mime_type, data)
+        .await
 }
 
 #[derive(serde::Serialize)]
@@ -344,28 +439,60 @@ struct PickedFile {
 
 #[tauri::command]
 fn pick_files() -> Vec<PickedFile> {
-    rfd::FileDialog::new().pick_files().unwrap_or_default().into_iter().filter_map(|path| {
-        let metadata = std::fs::metadata(&path).ok()?;
-        if !metadata.is_file() { return None; }
-        let name = path.file_name()?.to_string_lossy().into_owned();
-        Some(PickedFile { path: path.to_string_lossy().into_owned(), name: name.clone(), size: metadata.len(), mime_type: mime_from_name(&name) })
-    }).collect()
+    rfd::FileDialog::new()
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            Some(PickedFile {
+                path: path.to_string_lossy().into_owned(),
+                name: name.clone(),
+                size: metadata.len(),
+                mime_type: mime_from_name(&name),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
 fn get_dropped_files(paths: Vec<String>) -> Vec<PickedFile> {
-    paths.into_iter().filter_map(|raw| {
-        let path = std::path::PathBuf::from(raw);
-        let metadata = std::fs::metadata(&path).ok()?;
-        if !metadata.is_file() { return None; }
-        let name = path.file_name()?.to_string_lossy().into_owned();
-        Some(PickedFile { path: path.to_string_lossy().into_owned(), name: name.clone(), size: metadata.len(), mime_type: mime_from_name(&name) })
-    }).collect()
+    paths
+        .into_iter()
+        .filter_map(|raw| {
+            let path = std::path::PathBuf::from(raw);
+            let metadata = std::fs::metadata(&path).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            Some(PickedFile {
+                path: path.to_string_lossy().into_owned(),
+                name: name.clone(),
+                size: metadata.len(),
+                mime_type: mime_from_name(&name),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
-async fn send_file_path(state: State<'_, AppState>, name: String, mime_type: String, path: String) -> Result<String, String> {
-    state.ipc.lock().await.send_file_path(name, mime_type, path).await
+async fn send_file_path(
+    state: State<'_, AppState>,
+    name: String,
+    mime_type: String,
+    path: String,
+) -> Result<String, String> {
+    state
+        .ipc
+        .lock()
+        .await
+        .send_file_path(name, mime_type, path)
+        .await
 }
 
 #[tauri::command]

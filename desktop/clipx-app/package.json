@@ -12,7 +12,8 @@
     "pretauri:dev": "node manage-tauri.mjs --sync-icons",
     "tauri:dev": "tauri dev",
     "pretauri:build": "node manage-tauri.mjs --sync-icons",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "release": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

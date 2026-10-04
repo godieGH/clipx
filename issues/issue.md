@@ -16,7 +16,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 |--------|--------|---------|
 | [0001](#0001) | fixed | Deterministic auto-connect initiator arbitration by device fingerprint. |
 | [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
-| [0003](#0002) | report | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
+| [0003](#0002) | fixed | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.

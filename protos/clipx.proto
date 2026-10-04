@@ -106,6 +106,7 @@ message IpcRequest {
     SendFileRequest send_file = 19;
     DownloadClipboardFileRequest download_clipboard_file = 20;
     SendFilePathRequest send_file_path = 21;
+    ShutdownRequest shutdown = 22;
   }
 }
 message IpcResponse {
@@ -128,6 +129,7 @@ message IpcResponse {
     ClipboardClearResponse clipboard_clear = 16;
     SendResponse send = 17;
     DownloadClipboardFileResponse download_clipboard_file = 18;
+    ShutdownResponse shutdown = 19;
   }
 }
 message SeenRequest { enum Mode { ALL = 0; TRUSTED = 1; UNTRUSTED = 2; } Mode mode = 1; }
@@ -195,3 +197,6 @@ message PairingEvent { string device_id = 1; enum State { STARTED = 0; FAILED = 
 message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; string file_name = 7; string direction = 8; }
 message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; } }
 message IpcServerMessage { oneof payload { IpcResponse response = 1; IpcEvent event = 2; } }
+
+message ShutdownRequest {}
+message ShutdownResponse {}
