@@ -13,6 +13,13 @@ import androidx.lifecycle.ViewModelProvider
 import com.godiegh.clipx.ui.ClipxApp
 import com.godiegh.clipx.ui.theme.ClipxTheme
 
+/**
+ * Application entry point for the Android UI.
+ *
+ * This activity boots the Jetpack Compose shell, requests notification
+ * permissions when required, handles shared-text/file intents, and starts the
+ * background Clipx service once the user returns to the app.
+ */
 class MainActivity : ComponentActivity() {
     private val coreViewModel: ClipxCoreViewModel by viewModels {
         object : ViewModelProvider.Factory {
@@ -22,6 +29,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Initializes the activity, configures edge-to-edge UI, and prepares the
+     * app for share-intent payloads.
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -61,6 +72,9 @@ class MainActivity : ComponentActivity() {
         handleShareIntent(intent)
     }
 
+    /**
+     * Consumes Android share intents and forwards the payload into the core view model.
+     */
     private fun handleShareIntent(intent: android.content.Intent?) {
         if (intent?.action != android.content.Intent.ACTION_SEND && intent?.action != android.content.Intent.ACTION_SEND_MULTIPLE) return
         val uris = buildList {

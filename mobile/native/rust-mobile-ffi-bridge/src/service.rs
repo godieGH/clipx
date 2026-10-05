@@ -10,6 +10,7 @@ use crate::platform::{
     NotificationPlatform, NotifierDecision,
 };
 
+/// Device metadata returned to the host app after the core initializes.
 #[derive(uniffi::Record, Clone)]
 pub struct MobileIdentity {
     pub id: String,
@@ -20,6 +21,7 @@ pub struct MobileIdentity {
     pub ws_port: u32,
 }
 
+/// Peer device information for the paired list presented by the UI.
 #[derive(uniffi::Record, Clone)]
 pub struct MobilePairedDevice {
     pub id: String,
@@ -31,6 +33,7 @@ pub struct MobilePairedDevice {
     pub auto_connect: bool,
 }
 
+/// Remote peer discovered on the local network but not yet paired.
 #[derive(uniffi::Record, Clone)]
 pub struct MobileAvailableDevice {
     pub id: String,
@@ -38,6 +41,7 @@ pub struct MobileAvailableDevice {
     pub device_type: String,
 }
 
+/// Single clipboard item surfaced through the bridge to the mobile app.
 #[derive(uniffi::Record, Clone)]
 pub struct MobileClipItem {
     pub id: String,
@@ -97,8 +101,10 @@ fn connection_name(value: ConnectionState) -> String {
     .to_string()
 }
 
-/// The FFI bridge wrapper for the running core. It owns the core task handles
-/// and exposes platform-neutral commands/events to Android/iOS.
+/// The FFI bridge wrapper for the running core.
+///
+/// It owns the background task handles and exposes platform-neutral commands and
+/// events to Android and iOS host applications.
 #[derive(uniffi::Object)]
 pub struct BridgeService {
     inner: tokio::sync::Mutex<Inner>,

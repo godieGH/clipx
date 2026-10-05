@@ -234,9 +234,10 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
         ["send", label, "pair-challenge"] => {
             let nonce = state.identity.random_nonce();
             if let Ok(arr) = <[u8; 32]>::try_from(nonce.as_slice())
-                && let Some(h) = state.conns.lock().await.get(*label) {
-                    h.session.lock().await.nonce = Some(arr);
-                }
+                && let Some(h) = state.conns.lock().await.get(*label)
+            {
+                h.session.lock().await.nonce = Some(arr);
+            }
             report(
                 netio::send_body(
                     state,
@@ -274,9 +275,10 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
         ["send", label, "connect-challenge"] => {
             let nonce = state.identity.random_nonce();
             if let Ok(arr) = <[u8; 32]>::try_from(nonce.as_slice())
-                && let Some(h) = state.conns.lock().await.get(*label) {
-                    h.session.lock().await.nonce = Some(arr);
-                }
+                && let Some(h) = state.conns.lock().await.get(*label)
+            {
+                h.session.lock().await.nonce = Some(arr);
+            }
             let own_fp = state.identity.get_this_device_fingerprint();
             report(
                 netio::send_body(
@@ -558,13 +560,14 @@ pub async fn auto_responder_loop(state: Arc<AppState>) {
             continue;
         }
         if let Event::Message { label, message } = ev
-            && let Some(Body::PairRequest(req)) = message.body {
-                let state = state.clone();
-                let bus = state.events_tx.clone();
-                tokio::spawn(async move {
-                    respond_to_pair(state, bus, label, req).await;
-                });
-            }
+            && let Some(Body::PairRequest(req)) = message.body
+        {
+            let state = state.clone();
+            let bus = state.events_tx.clone();
+            tokio::spawn(async move {
+                respond_to_pair(state, bus, label, req).await;
+            });
+        }
     }
 }
 

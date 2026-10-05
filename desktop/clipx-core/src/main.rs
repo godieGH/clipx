@@ -3,6 +3,10 @@
 use clipx_core::{logging, service::CoreService};
 use interprocess::local_socket::{ConnectOptions, GenericNamespaced, ToNsName};
 
+/// Checking if there is already another instance of the core running
+///
+/// This is indirectly assuming that on desktops — one core instance, one
+/// ipc listener
 async fn already_running() -> bool {
     match "clipx".to_ns_name::<GenericNamespaced>() {
         Ok(name) => ConnectOptions::new()

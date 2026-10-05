@@ -21,6 +21,12 @@ const MAX_CLIPBOARD_TEXT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RICH_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const STAGING_CLEANUP_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
+/// Central clipboard processing pipeline for both local and remote content.
+///
+/// The clipboard manager is responsible for deduplicating changes, storing a
+/// history window, prompting the user for remote clipboard approvals, and
+/// translating file transfer requests into the correct outbound or inbound
+/// actions.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct FileOfferManifest {
     name: String,
@@ -55,6 +61,8 @@ pub enum ClipboardPayload {
     },
 }
 
+/// Outbound instructions emitted by the clipboard manager toward the network or
+/// device layers.
 #[derive(Debug)]
 pub enum ClipboardOutbound {
     Payload(ClipboardPayload),
@@ -114,6 +122,11 @@ pub enum IncomingPayload {
     },
 }
 
+/// Commands sent into the clipboard manager's async processing loop.
+///
+/// These calls describe local history queries, incoming remote content, and file
+/// operations that need to be coordinated with the clipboard history store and the
+/// user approval flow.
 pub enum ClipboardCommand {
     GetHistory {
         limit: Option<usize>,
@@ -166,6 +179,7 @@ pub enum ClipboardCommand {
     },
 }
 
+/// Runtime coordinator for clipboard content and transfer events.
 pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
     store: ClipboardStore,
     notification: E,

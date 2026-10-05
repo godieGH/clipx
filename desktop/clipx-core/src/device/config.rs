@@ -1,7 +1,10 @@
 use crate::message::proto::DeviceType;
 use directories::ProjectDirs;
 use std::sync::OnceLock;
-use std::{fs, path::{PathBuf, Path}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const MACHINE_DEVICE_ID_FILE: &str = "device_id";
 const TRUSTED_DEVICES_FILE: &str = "trusted_devices.json";
@@ -121,7 +124,6 @@ fn migrate_state(legacy: &Path, target: &Path) -> std::io::Result<()> {
     tracing::info!(from = ?legacy, to = ?target, "migrated state to local data dir");
     Ok(())
 }
-
 
 /// This is for mobile OSes — since they need a way to tell the core
 /// where the config dir resides, this is different from desktops which already handles it

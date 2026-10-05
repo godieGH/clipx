@@ -33,6 +33,11 @@ const MAX_FILE_CHUNK_BYTES: usize = 1024 * 1024;
 const RESUME_STATE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const STALE_INCOMING_CLEANUP_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
+/// Coordinates peer discovery, pairing, connection state, and file transfer flow.
+///
+/// The device manager is the heart of the runtime. It decides whether a peer is
+/// trusted, tracks pending pair requests, maintains the live connection set, and
+/// converts incoming protocol messages into clipboard or file-transfer actions.
 pub struct DeviceManager<E: Engine> {
     incoming_files: HashMap<(String, String), IncomingFileAssembly>,
     incoming_files_dir: PathBuf,
@@ -127,12 +132,14 @@ enum NotifyResult {
     },
 }
 
+/// Filters the list of previously seen devices by trust level.
 pub enum SeenMode {
     All,
     Trusted,
     Untrusted,
 }
 
+/// A lightweight snapshot of a pending pairing operation shown to the caller.
 pub struct PendingPairEntry {
     pub device_id: String,
     pub device_name: String,
@@ -140,6 +147,11 @@ pub struct PendingPairEntry {
     pub code: Option<String>,
 }
 
+/// Commands accepted by the device manager from the rest of the runtime.
+///
+/// These inputs are intentionally narrow and message-oriented so the rest of the
+/// system can ask for identity, pairing state, and connection changes without
+/// needing direct access to internals.
 pub enum DeviceCommands {
     GetSeen {
         mode: SeenMode,

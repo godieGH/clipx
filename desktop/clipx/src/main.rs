@@ -7,6 +7,12 @@ use commands::{
     trusted::TrustedArgs,
 };
 
+/**
+ * Command-line entry point for the desktop client.
+ *
+ * This tool exposes a small surface for querying peer state, pairing devices,
+ * and issuing connection commands through the shared Clipx IPC layer.
+ */
 #[derive(Parser)]
 #[command(
     about = "clipx is a cli tool to manage devices or work with clipx-core through a command line tool"
@@ -16,6 +22,7 @@ struct Cli {
     cmd: Cmd,
 }
 
+/// Supported actions available through the desktop CLI.
 #[derive(Subcommand)]
 enum Cmd {
     #[command(about = "Displays all currently discovered devices")]
@@ -30,6 +37,7 @@ enum Cmd {
     Connect(ConnectArgs),
 }
 
+/// Starts the desktop CLI and dispatches the selected action to the IPC client.
 fn main() {
     let cli = Cli::parse();
     let mut ipc = ipc::Client::new("clipx").start();

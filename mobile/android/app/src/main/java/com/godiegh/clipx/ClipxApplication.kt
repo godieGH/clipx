@@ -13,6 +13,14 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 
+/**
+ * Android application singleton for Clipx.
+ *
+ * This class owns the app-wide bridge lifecycle, activity visibility state, and
+ * the event stream that the Compose UI listens to for device and clipboard
+ * updates. It acts as the host-side coordinator between the Rust core and the
+ * Android presentation layer.
+ */
 class ClipxApplication : Application() {
     val sheetController = ClipxSheetController()
     val transferNotifications by lazy { AndroidTransferNotificationController(this) }
@@ -84,6 +92,12 @@ class ClipxApplication : Application() {
     }
 }
 
+/**
+ * Events pushed from the Rust core into the Android UI state layer.
+ *
+ * These are converted into Compose state updates such as refreshing paired
+ * devices, update clipboard history, or showing file-transfer progress.
+ */
 sealed interface CoreUiEvent {
     data object DevicesChanged : CoreUiEvent
     data object ClipboardChanged : CoreUiEvent

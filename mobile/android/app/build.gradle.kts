@@ -1,3 +1,9 @@
+/**
+ * Android application module for Clipx.
+ *
+ * This Gradle script configures the app namespace, SDK targets, and the custom
+ * Rust-to-Android FFI build steps that generate and package the native bridge.
+ */
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)

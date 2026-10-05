@@ -19,6 +19,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * View model that exposes Clipx core state to the Android Compose UI.
+ *
+ * It keeps the current device identity, paired/available peers, clipboard history,
+ * shared files, and active connection state synchronized with the Rust bridge.
+ */
 class ClipxCoreViewModel(
     private val application: ClipxApplication,
 ) : ViewModel() {

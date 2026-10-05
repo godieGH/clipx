@@ -1,4 +1,11 @@
+//! Clipboard capture, processing, and history management.
+//!
+//! This module wraps the platform clipboard access layer and keeps the core
+//! runtime aware of local changes, remote syncs, and transfer payloads.
+
+/// Persistent clipboard storage and item serialization helpers.
 pub mod clipstore;
+/// Clipboard manager commands, event flow, and buffer coordination.
 pub mod manager;
 
 // compiles for windows, linux and macos only

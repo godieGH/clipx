@@ -4,6 +4,7 @@ use crate::{
     platform::{ClipboardSink, CoreEvent, CoreEventListener},
 };
 
+/// Runtime lifecycle state for the core clipboard service.
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use crate::platform::ArboardClipboardSink;
 use device::identity::DeviceIdentity;
@@ -24,6 +25,10 @@ pub enum ServiceState {
     Stopping,
 }
 
+/// Central coordinator for the desktop clipboard engine.
+///
+/// The service owns the main task graph used for clipboard watching, discovery,
+/// device coordination, and shutdown orchestration.
 pub struct CoreService {
     state: ServiceState,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -45,27 +50,35 @@ impl Default for CoreService {
 }
 
 impl CoreService {
+    /// Creates a new service in the stopped state.
     pub fn new() -> Self {
         Self::default()
     }
 
     #[allow(unused)]
+    /// Returns the latest lifecycle state of the service.
     pub fn state(&self) -> ServiceState {
         self.state
     }
 
+    /// Marks the service as running and activates the internal task graph.
     pub fn start(&mut self) {
         self.state = ServiceState::Running;
     }
 
+    /// Requests a graceful shutdown transition.
     pub fn stop(&mut self) {
         self.state = ServiceState::Stopping;
     }
 
+    /// Resets the service back to the stopped state after shutdown completes.
     pub fn finish_stop(&mut self) {
         self.state = ServiceState::Stopped;
     }
 
+    /// Starts the core, creates and manage all core tasks
+    /// This is only available on desktop builds — it is the entry point to make
+    /// the entire core up and running
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     pub async fn run(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.start();
@@ -105,6 +118,11 @@ impl CoreService {
         Ok(())
     }
 
+    /// Desktops use this as shutdown lifecycle hook
+    ///
+    /// Ensures that all other parts of the core are completed; The `CoreService`
+    /// broadcasts a shutdown signal to all other tasks/services
+    /// and waits for them to wrap it up, clean or release resources for a graceful shutdown
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     async fn shutdown(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
@@ -120,6 +138,10 @@ impl CoreService {
     }
 }
 
+/// Constructs the main task graph used by the clipboard runtime.
+///
+/// This helper wires clipboard observation, peer discovery, device management,
+/// transport, and event forwarding into a single set of Tokio tasks.
 pub fn spawn_core_tasks<S, N>(
     clipboard_sink: S,
     notification_engine: N,

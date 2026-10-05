@@ -1,7 +1,11 @@
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, fmt};
 
-/// Keep the returned guard alive for the whole process, or the tail of the log is lost.
+/// Initializes the tracing pipeline for the core process.
+///
+/// In debug builds the logger writes to the console. In release builds it rotates
+/// daily logs into the local application data directory so that crashes and
+/// networking issues can still be inspected after the process exits.
 pub fn init() -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
