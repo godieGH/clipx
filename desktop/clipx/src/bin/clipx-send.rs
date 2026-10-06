@@ -1,9 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use clipx_lib::{
-    ipc::non_blocking::Client,
-    message::IpcCmdBridge,
-};
+use clipx_lib::{ipc::non_blocking::Client, message::IpcCmdBridge};
 
 use std::{
     path::{Path, PathBuf},
@@ -62,9 +59,7 @@ fn spawn_core() -> Result<Child, String> {
         .map_err(|e| format!("could not start clipx-core: {e}"))
 }
 
-async fn connect_to_core(
-    client: &mut Client,
-) -> Result<Option<Child>, String> {
+async fn connect_to_core(client: &mut Client) -> Result<Option<Child>, String> {
     if client.start().await.is_ok() {
         return Ok(None);
     }
@@ -124,11 +119,7 @@ async fn main() {
     };
 
     let _ = client
-        .send_file_path(
-            name.to_string(),
-            mime_type,
-            path_string,
-        )
+        .send_file_path(name.to_string(), mime_type, path_string)
         .await;
 
     let _ = client.shutdown().await;

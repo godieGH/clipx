@@ -299,6 +299,15 @@ pub fn run() {
             reveal_file_location,
             launched_by_autostart,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+
+                if let Err(error) = window.hide() {
+                    eprintln!("ClipX: failed to hide window on close request: {error}");
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
