@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="ClipXExplorerContextMenu" Guid="*">
+
+        <RegistryKey
+          Root="HKCU"
+          Key="Software\Classes\*\shell\ClipX"
+          Action="createAndRemoveOnUninstall">
+
+          <RegistryValue
+            Type="string"
+            Value="Send with ClipX"
+            KeyPath="yes"
+          />
+
+          <RegistryValue
+            Type="string"
+            Name="Icon"
+            Value="[INSTALLDIR]clipx-app.exe,0"
+          />
+
+        </RegistryKey>
+
+        <RegistryKey
+          Root="HKCU"
+          Key="Software\Classes\*\shell\ClipX\command"
+          Action="createAndRemoveOnUninstall">
+
+          <RegistryValue
+            Type="string"
+            Value="&quot;[INSTALLDIR]clipx-send.exe&quot; &quot;%1&quot;"
+          />
+
+        </RegistryKey>
+
+      </Component>
+    </DirectoryRef>
+
+  </Fragment>
+</Wix>

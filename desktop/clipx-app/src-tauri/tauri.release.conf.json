@@ -3,6 +3,22 @@
     "beforeBuildCommand": "pnpm build && node scripts/prepare-core.mjs"
   },
   "bundle": {
-    "externalBin": ["binaries/clipx-core"]
+    "externalBin": [
+      "binaries/clipx-core",
+      "binaries/clipx-send"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": [
+          "./windows/fragments/explorer-context-menu.wxs"
+        ],
+        "componentRefs": [
+          "ClipXExplorerContextMenu"
+        ]
+      }
+    }
   }
 }
