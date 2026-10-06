@@ -49,14 +49,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var serviceStartRequested = false
-
     override fun onPostResume() {
         super.onPostResume()
-        if (!serviceStartRequested) {
-            serviceStartRequested = true
-            ClipxCoreForegroundService.start(this)
-        }
+
+        /*
+         * The UI needs the Core while Clipx is open.
+         *
+         * start() deliberately does NOT change Background Sync preference.
+         * Therefore opening Clipx cannot silently turn the user's Quick
+         * Settings choice back ON.
+         */
+        ClipxCoreForegroundService.start(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

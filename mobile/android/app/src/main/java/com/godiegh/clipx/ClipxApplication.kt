@@ -49,6 +49,8 @@ class ClipxApplication : Application() {
     var isActivityVisible: Boolean = false
         private set
 
+    private var startedActivityCount = 0
+
     /** Set by ClipxCoreForegroundService once clipboardPlatform exists; triggers
      *  a one-shot clipboard check whenever an Activity becomes active again. */
     @Volatile
@@ -72,21 +74,53 @@ class ClipxApplication : Application() {
         super.onCreate()
         initLogging()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-            override fun onActivityStarted(activity: Activity) { isActivityVisible = true }
+
+            override fun onActivityCreated(
+                activity: Activity,
+                savedInstanceState: Bundle?,
+            ) = Unit
+
+            override fun onActivityStarted(activity: Activity) {
+                startedActivityCount++
+                isActivityVisible = startedActivityCount > 0
+            }
+
             override fun onActivityResumed(activity: Activity) {
-                // A resume covers both "returned from background" (stop -> start
-                // -> resume) and "a floating window over us got dismissed"
-                // (pause -> resume, no stop/start in between). One clipboard
-                // read here, not a poll loop — redundant reads are harmless
-                // since both the local suppression guard and the core's
-                // last_known_content check no-op on unchanged content.
-                isActivityVisible = true
+                isActivityVisible = startedActivityCount > 0
+
+                /*
+                 * A resume covers both returning from background and returning from
+                 * another window. Keep the existing one-shot clipboard check.
+                 */
                 onActiveClipboardCheck?.invoke()
             }
+
             override fun onActivityPaused(activity: Activity) = Unit
-            override fun onActivityStopped(activity: Activity) { isActivityVisible = false }
-            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+
+            override fun onActivityStopped(activity: Activity) {
+                startedActivityCount = (startedActivityCount - 1).coerceAtLeast(0)
+                isActivityVisible = startedActivityCount > 0
+
+                /*
+                 * Only stop the Core when the last Clipx Activity has disappeared.
+                 *
+                 * If Background Sync is ON, stopIfNotNeeded() does nothing.
+                 *
+                 * If Background Sync is OFF, this releases the Core now that the
+                 * UI no longer needs it.
+                 */
+                if (startedActivityCount == 0) {
+                    ClipxCoreForegroundService.stopIfNotNeeded(
+                        activity.applicationContext,
+                    )
+                }
+            }
+
+            override fun onActivitySaveInstanceState(
+                activity: Activity,
+                outState: Bundle,
+            ) = Unit
+
             override fun onActivityDestroyed(activity: Activity) = Unit
         })
     }

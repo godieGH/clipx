@@ -18,21 +18,157 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 
 class ClipxCoreForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "clipx_core"
         private const val NOTIFICATION_ID = 1001
+
         const val PROMPT_CHANNEL_ID = "clipx_prompts"
         const val TRANSFER_CHANNEL_ID = "clipx_transfers"
-        private const val ACTION_KILL_CLIPX = "com.godiegh.clipx.action.KILL_PROCESS"
 
+        private const val ACTION_KILL_CLIPX =
+            "com.godiegh.clipx.action.KILL_PROCESS"
+
+        /*
+         * User preference:
+         * whether Clipx should keep its Core running in the background.
+         *
+         * Keep the same preference file/key used by the first implementation
+         * so an existing installed debug build keeps its current setting.
+         */
+        private const val CORE_PREFS = "clipx_core_state"
+        private const val KEY_BACKGROUND_SYNC_ENABLED = "enabled"
+
+        fun isBackgroundSyncEnabled(
+            context: android.content.Context,
+        ): Boolean =
+            context.getSharedPreferences(
+                CORE_PREFS,
+                android.content.Context.MODE_PRIVATE,
+            ).getBoolean(
+                KEY_BACKGROUND_SYNC_ENABLED,
+                true,
+            )
+
+        private fun setBackgroundSyncEnabledPreference(
+            context: android.content.Context,
+            enabled: Boolean,
+        ) {
+            context.getSharedPreferences(
+                CORE_PREFS,
+                android.content.Context.MODE_PRIVATE,
+            )
+                .edit {
+                    putBoolean(
+                        KEY_BACKGROUND_SYNC_ENABLED,
+                        enabled,
+                    )
+                }
+        }
+
+        private fun requestQuickSettingsTileUpdate(
+            context: android.content.Context,
+        ) {
+            android.service.quicksettings.TileService.requestListeningState(
+                context,
+                android.content.ComponentName(
+                    context,
+                    ClipxQuickSettingsTile::class.java,
+                ),
+            )
+        }
+
+        /**
+         * Starts the Core without changing the user's Background Sync setting.
+         *
+         * Used when:
+         * - Clipx UI needs the Core
+         * - refresh/restart needs the Core
+         */
         fun start(context: android.content.Context) {
-            val intent = Intent(context, ClipxCoreForegroundService::class.java)
-            context.startService(intent)
+            val intent = Intent(
+                context,
+                ClipxCoreForegroundService::class.java,
+            )
+
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /**
+         * Enables Background Sync and starts the Core.
+         */
+        fun enableBackgroundSync(
+            context: android.content.Context,
+        ) {
+            setBackgroundSyncEnabledPreference(
+                context,
+                true,
+            )
+
+            try {
+                start(context)
+            } catch (t: Throwable) {
+                // If Android rejects the foreground-service start immediately,
+                // don't leave the preference saying that Background Sync is ON.
+                setBackgroundSyncEnabledPreference(
+                    context,
+                    false,
+                )
+                throw t
+            }
+
+            requestQuickSettingsTileUpdate(context)
+        }
+
+        /**
+         * Disables Background Sync.
+         *
+         * If the Clipx UI is still visible, the Core remains running because
+         * the UI still needs the BridgeService.
+         *
+         * If the UI is not visible, the Core is stopped.
+         */
+        fun disableBackgroundSync(
+            context: android.content.Context,
+        ) {
+            setBackgroundSyncEnabledPreference(
+                context,
+                false,
+            )
+
+            requestQuickSettingsTileUpdate(context)
+            stopIfNotNeeded(context)
+        }
+
+        /**
+         * Stops the Core only when:
+         * - Background Sync is disabled, and
+         * - no Clipx Activity is visible.
+         */
+        fun stopIfNotNeeded(
+            context: android.content.Context,
+        ) {
+            val app =
+                context.applicationContext as ClipxApplication
+
+            if (
+                !isBackgroundSyncEnabled(context) &&
+                !app.isActivityVisible
+            ) {
+                app.setBridgeService(null)
+
+                context.stopService(
+                    Intent(
+                        context,
+                        ClipxCoreForegroundService::class.java,
+                    ),
+                )
+            }
         }
     }
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var bridgeService: BridgeService
     private lateinit var clipboardPlatform: AndroidClipboardPlatform
@@ -56,6 +192,7 @@ class ClipxCoreForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_KILL_CLIPX) {
+            disableBackgroundSync(this)
             stopCoreAndSelf(wait = true)
             stopSelfResult(startId)
             Process.killProcess(Process.myPid())
