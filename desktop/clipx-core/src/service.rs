@@ -204,6 +204,13 @@ where
             .expect("failed to start discovery");
     tasks.extend(discovery_tasks);
 
+    #[cfg(windows)]
+    tasks.push(netio::p2p_windows::spawn(
+        shutdown_rx.clone(),
+        hex::encode(identity.get_this_device_fingerprint()),
+        device_tx.clone(),
+    ));
+
     let device_manager = crate::device::manager::DeviceManager::new(
         device::config::trusted_devices_path(),
         identity,

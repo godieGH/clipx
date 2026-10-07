@@ -7,5 +7,8 @@
 pub mod discovery;
 /// Local IPC service used by desktop clients and the UI shell.
 pub mod ipc;
+/// Windows Wi-Fi Direct link: hosts a legacy group and joins other ClipX hosts.
+#[cfg(windows)]
+pub mod p2p_windows;
 /// Connection transport and low-level socket handling.
 pub mod transport;

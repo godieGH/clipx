@@ -2,7 +2,7 @@ use crate::device::identity::DeviceIdentity;
 use crate::message::proto;
 use prost::Message;
 use socket2::{Domain, Socket, Type};
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::{
     net::UdpSocket,
@@ -55,6 +55,25 @@ fn make_shared_socket() -> std::io::Result<UdpSocket> {
     UdpSocket::from_std(socket.into())
 }
 
+/// Directed broadcast address of every non-loopback IPv4 interface, re-read on
+/// each call so interfaces appearing/disappearing are picked up automatically.
+/// The global broadcast stays as a fallback (also covers "no interfaces").
+fn broadcast_targets() -> Vec<Ipv4Addr> {
+    let mut targets: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|iface| !iface.is_loopback())
+        .filter_map(|iface| match iface.addr {
+            if_addrs::IfAddr::V4(v4) => v4.broadcast,
+            _ => None,
+        })
+        .collect();
+    targets.push(Ipv4Addr::BROADCAST);
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
 async fn broadcast_presence(
     mut shutdown_rx: watch::Receiver<bool>,
     identity: Arc<DeviceIdentity>,
@@ -78,7 +97,12 @@ async fn broadcast_presence(
                 if *shutdown_rx.borrow() { break; }
             }
             _ = tokio::time::sleep(Duration::from_secs(2)) => {
-                let _ = socket.send_to(&message, "255.255.255.255:9999").await;
+                // One packet per interface broadcast address: a single send to
+                // 255.255.255.255 leaves via one NIC only, so peers reachable
+                // only through another interface (e.g. Wi-Fi P2P) never hear us.
+                for target in broadcast_targets() {
+                    let _ = socket.send_to(&message, (target, 9999)).await;
+                }
             }
         }
     }

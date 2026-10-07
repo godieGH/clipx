@@ -35,11 +35,15 @@ class MainActivity : ComponentActivity() {
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
-        }
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= 33) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+                add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 100)
         enableEdgeToEdge()
         handleShareIntent(intent)
         setContent {
@@ -56,9 +60,28 @@ class MainActivity : ComponentActivity() {
          * The UI needs the Core while Clipx is open.
          *
          * start() deliberately does NOT change Background Sync preference.
-         * Therefore opening Clipx cannot silently turn the user's Quick
+         * Therefore, opening Clipx cannot silently turn the user's Quick
          * Settings choice back ON.
          */
+        ClipxCoreForegroundService.start(this)
+    }
+
+    @Deprecated("This method has been deprecated in favor of using the Activity Result API\n" +
+            "      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt\n" +
+            "      contracts for common intents available in\n" +
+            "      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for\n" +
+            "      testing, and allow receiving results in separate, testable classes independent from your\n" +
+            "      activity. Use\n" +
+            "      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)} passing\n" +
+            "      in a {@link RequestMultiplePermissions} object for the {@link ActivityResultContract} and\n" +
+            "      handling the result in the {@link ActivityResultCallback#onActivityResult(Object) callback}.")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // Lets the service start Wi-Fi Direct now that the permission may exist.
         ClipxCoreForegroundService.start(this)
     }
 
@@ -81,12 +104,13 @@ class MainActivity : ComponentActivity() {
     private fun handleShareIntent(intent: android.content.Intent?) {
         if (intent?.action != android.content.Intent.ACTION_SEND && intent?.action != android.content.Intent.ACTION_SEND_MULTIPLE) return
         val uris = buildList {
-            intent?.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let(::add)
-            intent?.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let { addAll(it) }
-            intent?.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(::add) }
+            intent.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let(::add)
+            intent.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)
+                ?.let { addAll(it) }
+            intent.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(::add) }
         }.distinct()
         if (uris.isNotEmpty()) coreViewModel.enqueueFiles(this, uris)
-        else intent?.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let(coreViewModel::enqueueSharedText)
+        else intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let(coreViewModel::enqueueSharedText)
         if (uris.isNotEmpty()) coreViewModel.openSharedSync()
     }
 }

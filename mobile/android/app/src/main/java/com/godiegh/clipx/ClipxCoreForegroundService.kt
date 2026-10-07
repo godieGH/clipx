@@ -177,6 +177,7 @@ class ClipxCoreForegroundService : Service() {
     private var listening = false
     private var coreStarted = false
     private var cleanedUp = false
+    private var wifiDirect: WifiDirectLink? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -203,7 +204,11 @@ class ClipxCoreForegroundService : Service() {
             listening = true
         }
 
-        if (coreStarted) return START_STICKY
+        if (coreStarted) {
+            // Re-entry (e.g. after Wi-Fi Direct permission was just granted).
+            wifiDirect?.start()
+            return START_STICKY
+        }
         coreStarted = true
 
         scope.launch {
@@ -220,6 +225,17 @@ class ClipxCoreForegroundService : Service() {
             // ready so that clipboard changes made in another app are not lost.
             val app = application as ClipxApplication
             app.setBridgeService(bridgeService)
+            runCatching { bridgeService.getIdentity() }.onSuccess { id ->
+                wifiDirect = WifiDirectLink(
+                    applicationContext, id.fingerprint, id.name, id.wsPort.toInt(),
+                    hasPeers = {
+                        runCatching {
+                            bridgeService.getAvailableDevices().isNotEmpty() ||
+                                bridgeService.getPairedDevices().any { it.connection != "unavailable" }
+                        }.getOrDefault(true)
+                    },
+                ).also { it.start() }
+            }
             if (app.isActivityVisible && AndroidClipboardPlatform.isAutoSyncOnResumeEnabled(this@ClipxCoreForegroundService)) {
                 clipboardPlatform.checkClipboardNow()
             }
@@ -250,6 +266,8 @@ class ClipxCoreForegroundService : Service() {
     private fun stopCoreAndSelf(wait: Boolean = false) {
         if (cleanedUp) return
         cleanedUp = true
+        wifiDirect?.stop()
+        wifiDirect = null
         if (listening) {
             clipboardPlatform.stopListening()
             listening = false
