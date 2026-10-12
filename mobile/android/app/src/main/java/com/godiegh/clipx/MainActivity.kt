@@ -2,6 +2,7 @@ package com.godiegh.clipx
 
 import android.os.Bundle
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.ComponentActivity
@@ -92,7 +93,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
@@ -101,16 +102,16 @@ class MainActivity : ComponentActivity() {
     /**
      * Consumes Android share intents and forwards the payload into the core view model.
      */
-    private fun handleShareIntent(intent: android.content.Intent?) {
-        if (intent?.action != android.content.Intent.ACTION_SEND && intent?.action != android.content.Intent.ACTION_SEND_MULTIPLE) return
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND && intent?.action != Intent.ACTION_SEND_MULTIPLE) return
         val uris = buildList {
-            intent.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)?.let(::add)
-            intent.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)
+            intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.let(::add)
+            intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)
                 ?.let { addAll(it) }
             intent.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(::add) }
         }.distinct()
         if (uris.isNotEmpty()) coreViewModel.enqueueFiles(this, uris)
-        else intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let(coreViewModel::enqueueSharedText)
+        else intent.getStringExtra(Intent.EXTRA_TEXT)?.let(coreViewModel::enqueueSharedText)
         if (uris.isNotEmpty()) coreViewModel.openSharedSync()
     }
 }

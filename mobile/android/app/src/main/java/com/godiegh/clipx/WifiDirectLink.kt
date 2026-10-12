@@ -23,7 +23,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +60,7 @@ class WifiDirectLink(
     private val wifi = ctx.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val cm = ctx.getSystemService(ConnectivityManager::class.java)
     private var specifierCallback: ConnectivityManager.NetworkCallback? = null
-    private var lastWindowsJoin = 0L
+    private var nextWindowsJoinAt = 0L
 
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = onScanResults()
@@ -132,6 +131,7 @@ class WifiDirectLink(
         channel = null
         inGroup = false
         busy = false
+        releaseMulticast()
     }
 
     private fun hasPermission(): Boolean {
@@ -186,14 +186,14 @@ class WifiDirectLink(
     private fun scanForWindowsHost() {
         if (inGroup || specifierCallback != null) return
         scope.launch {
-            if (!hasPeers()) handler.post { runCatching { wifi.startScan() } }
+            if (!hasPeers()) handler.post { onScanResults(); runCatching { wifi.startScan() } }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun onScanResults() {
         if (!running || inGroup || specifierCallback != null) return
-        if (System.currentTimeMillis() - lastWindowsJoin < WINDOWS_COOLDOWN_MS) return
+        if (System.currentTimeMillis() < nextWindowsJoinAt) return
         val results = runCatching { wifi.scanResults }
         Log.d(TAG, "scan results=${results.getOrNull()?.size} err=${results.exceptionOrNull()}")
         val ssid = results.getOrNull()
@@ -206,8 +206,8 @@ class WifiDirectLink(
 
     private fun joinWindowsHost(ssid: String) {
         if (specifierCallback != null) return
-        lastWindowsJoin = System.currentTimeMillis()
         val host8 = ssid.removePrefix(WINDOWS_PREFIX)
+        nextWindowsJoinAt = System.currentTimeMillis() + WINDOWS_RETRY_MS
         val pass = sha256Hex("clipx-p2p-ap|$host8").substring(0, 32)
         val spec = WifiNetworkSpecifier.Builder().setSsid(ssid).setWpa2Passphrase(pass).build()
         val req = NetworkRequest.Builder()
@@ -217,8 +217,13 @@ class WifiDirectLink(
             .build()
         val cb = object : ConnectivityManager.NetworkCallback() {
             // Route this process through the link so new sockets can reach the PC.
-            override fun onAvailable(network: Network) { cm.bindProcessToNetwork(network) }
+            override fun onAvailable(network: Network) {
+                acquireMulticast()
+                cm.bindProcessToNetwork(network)
+            }
             override fun onLost(network: Network) {
+                nextWindowsJoinAt = System.currentTimeMillis() + 10_000L
+                releaseMulticast()
                 cm.bindProcessToNetwork(null)
                 specifierCallback = null
             }
@@ -228,29 +233,28 @@ class WifiDirectLink(
         cm.requestNetwork(req, cb, 30_000)
     }
 
-    private fun sha256Hex(text: String): String =
-        MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-
     private fun onPeer(peerFp: String, device: WifiP2pDevice) {
         if (!running || inGroup || busy || peerFp == fingerprint) return
         if (attempts >= MAX_ATTEMPTS) return
+        val hosting = shouldHostPeer(fingerprint, peerFp)
+        val targetAddress = if (hosting) null else normalizeDeviceAddress(device.deviceAddress)
+        if (!hosting && targetAddress == null) {
+            Log.w(TAG, "peer $peerFp has no valid device address; skipping")
+            return
+        }
+        val m = manager ?: return
+        val ch = channel ?: return
+
         busy = true
         attempts++
-        val (name, pass) = credentials(peerFp)
+        val (name, pass) = deriveDirectCredentials(fingerprint, peerFp)
         val config = WifiP2pConfig.Builder()
             .setNetworkName(name)
             .setPassphrase(pass)
             .apply {
-                if (fingerprint > peerFp) {
-                    // We host. Peer must be the joiner.
-                } else {
-                    setDeviceAddress(MacAddress.fromString(device.deviceAddress))
-                }
+                if (targetAddress != null) setDeviceAddress(MacAddress.fromString(targetAddress))
             }
             .build()
-        val m = manager ?: return
-        val ch = channel ?: return
         val done = object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 // inGroup flips via stateReceiver; if nothing happens, unblock later.
@@ -261,22 +265,28 @@ class WifiDirectLink(
                 handler.postDelayed({ busy = false }, RETRY_MS)
             }
         }
-        if (fingerprint > peerFp) m.createGroup(ch, config, done) else m.connect(ch, config, done)
+        if (hosting) m.createGroup(ch, config, done) else m.connect(ch, config, done)
     }
 
-    /** Same result on both sides: derived from the two fingerprints, order-independent. */
-    private fun credentials(peerFp: String): Pair<String, String> {
-        val (a, b) = if (fingerprint < peerFp) fingerprint to peerFp else peerFp to fingerprint
-        val h = sha256Hex("clipx-p2p|$a|$b")
-        return "DIRECT-cx-${h.substring(0, 8)}" to h.substring(8, 40)
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    private fun acquireMulticast() {
+        if (multicastLock?.isHeld == true) return
+        multicastLock = wifi.createMulticastLock("clipx-p2p").apply {
+            setReferenceCounted(false); acquire()
+        }
+    }
+    private fun releaseMulticast() {
+        runCatching { multicastLock?.takeIf { it.isHeld }?.release() }
+        multicastLock = null
     }
 
     private companion object {
         const val TAG = "ClipxWifiDirect"
         const val SERVICE_TYPE = "_clipx._tcp"
         const val WINDOWS_PREFIX = "DIRECT-cw-"
-        const val WINDOWS_COOLDOWN_MS = 5 * 60_000L
-        const val REDISCOVER_MS = 30_000L
+        const val WINDOWS_RETRY_MS = 45_000L
+        const val REDISCOVER_MS = 60_000L
         const val RETRY_MS = 6_000L
         const val MAX_ATTEMPTS = 6
     }

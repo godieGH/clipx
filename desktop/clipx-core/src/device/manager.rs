@@ -773,6 +773,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         }
 
         if self.connected.remove(&device_id).is_some() {
+            tracing::info!("{device_id} no longer connected: connection {connection_id} closed");
             self.notify_devices_changed();
         }
     }
@@ -1408,14 +1409,23 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
     fn on_connect_ack(&mut self, device_id: String, connection_id: String) {
         let Some(sess) = self.connect_sessions.get(&device_id) else {
+            tracing::warn!("ConnectAck from {device_id} ignored: no connect session");
             return;
         };
         if sess.role != Role::Responder
             || sess.stage != ConnectStage::AwaitingAck
             || sess.connection_id.as_deref() != Some(connection_id.as_str())
         {
+            tracing::warn!(
+                "ConnectAck from {device_id} ignored: role={:?} stage={:?} sess_conn={:?} ack_conn={}",
+                sess.role,
+                sess.stage,
+                sess.connection_id,
+                connection_id
+            );
             return;
         }
+        tracing::info!("connected to {device_id} on {connection_id}");
         self.connected.insert(device_id.clone(), connection_id);
         self.connect_sessions.remove(&device_id);
         self.resume_downloads_for_device(&device_id);
@@ -1463,6 +1473,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             &connection_id,
             Body::ConnectAck(proto::ConnectAck {}),
         );
+        tracing::info!("connected to {device_id} on {connection_id}");
         self.connected.insert(device_id.clone(), connection_id);
         self.connect_sessions.remove(&device_id);
         self.resume_downloads_for_device(&device_id);
@@ -2786,7 +2797,22 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 let devices = self
                     .connected
                     .keys()
-                    .filter_map(|id| self.seen.get(id).cloned())
+                    .filter_map(|id| {
+                        if let Some(seen) = self.seen.get(id) {
+                            return Some(seen.clone());
+                        }
+                        // Connected but not currently seen over UDP (e.g. Wi-Fi Direct).
+                        // The live connection is the truth, so still report it.
+                        let td = self.trusted.get(id)?;
+                        Some(SeenDevice {
+                            id: td.id.clone(),
+                            name: td.name.clone(),
+                            device_type: td.device_type,
+                            addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                            ws_port: 0,
+                            last_seen: Instant::now(),
+                        })
+                    })
                     .collect::<Vec<SeenDevice>>();
                 let _ = reply_to.send(devices);
             }

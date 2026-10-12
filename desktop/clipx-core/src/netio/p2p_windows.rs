@@ -19,6 +19,7 @@ use windows::{
     Devices::WiFi::{WiFiAccessStatus, WiFiAdapter, WiFiConnectionStatus, WiFiReconnectionKind},
     Devices::WiFiDirect::{
         WiFiDirectAdvertisementListenStateDiscoverability, WiFiDirectAdvertisementPublisher,
+        WiFiDirectAdvertisementPublisherStatus,
     },
     Security::Credentials::PasswordCredential,
     Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx},
@@ -28,6 +29,7 @@ use windows::{
 const HOST_PREFIX: &str = "DIRECT-cw-";
 const SCAN_EVERY: Duration = Duration::from_secs(20);
 const TICK: Duration = Duration::from_millis(500);
+const HOST_CHECK_EVERY: Duration = Duration::from_secs(10);
 
 /// Same derivation as the Android side: public by nature (the fingerprint is
 /// broadcast), it only keeps the link from being joined by accident. Real
@@ -46,6 +48,19 @@ pub fn spawn(
     tokio::task::spawn_blocking(move || run(shutdown_rx, own_fingerprint_hex, device_tx, rt))
 }
 
+fn start_or_log(ssid: &str, pass: &str) -> Option<WiFiDirectAdvertisementPublisher> {
+    match start_host(ssid, pass) {
+        Ok(p) => {
+            tracing::info!("Wi-Fi Direct host started: {ssid}");
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!("Wi-Fi Direct host unavailable: {e}");
+            None
+        }
+    }
+}
+
 fn run(
     shutdown_rx: watch::Receiver<bool>,
     own_fp: String,
@@ -56,22 +71,34 @@ fn run(
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
     let own8: String = own_fp.chars().take(8).collect();
-
-    let publisher = match start_host(&format!("{HOST_PREFIX}{own8}"), &ap_pass(&own8)) {
-        Ok(p) => {
-            tracing::info!("Wi-Fi Direct host started: {HOST_PREFIX}{own8}");
-            Some(p)
-        }
-        Err(e) => {
-            tracing::warn!("Wi-Fi Direct host unavailable: {e}");
-            None
-        }
-    };
+    let ssid = format!("{HOST_PREFIX}{own8}");
+    let pass = ap_pass(&own8);
+    let mut publisher = start_or_log(&ssid, &pass);
 
     let mut waited = Duration::ZERO;
+    let mut since_host_check = Duration::ZERO;
     while !*shutdown_rx.borrow() {
         std::thread::sleep(TICK);
         waited += TICK;
+        since_host_check += TICK;
+
+        // Watchdog: restart the host if Windows killed it.
+        if since_host_check >= HOST_CHECK_EVERY {
+            since_host_check = Duration::ZERO;
+            let dead = publisher.as_ref().is_none_or(|p| {
+                p.Status().map_or(true, |s| {
+                    s == WiFiDirectAdvertisementPublisherStatus::Aborted
+                        || s == WiFiDirectAdvertisementPublisherStatus::Stopped
+                })
+            });
+            if dead {
+                if let Some(p) = publisher.take() {
+                    let _ = p.Stop();
+                }
+                publisher = start_or_log(&ssid, &pass);
+            }
+        }
+
         if waited < SCAN_EVERY {
             continue;
         }
