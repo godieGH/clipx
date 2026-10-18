@@ -1,5 +1,9 @@
+pub mod clipboard;
 pub mod connect;
+pub mod device;
+pub mod download;
 pub mod identity;
 pub mod pair;
 pub mod seen;
+pub mod send;
 pub mod trusted;

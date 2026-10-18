@@ -3,8 +3,9 @@ use clap::{Parser, Subcommand};
 use clipx_lib::clipx;
 use clipx_lib::ipc;
 use commands::{
-    connect::ConnectArgs, identity::IdentityArgs, pair::PairArgs, seen::SeenArgs,
-    trusted::TrustedArgs,
+    clipboard::ClipboardArgs, connect::ConnectArgs, device::DeviceArgs,
+    download::DownloadArgs, identity::IdentityArgs, pair::PairArgs, seen::SeenArgs,
+    send::SendArgs, trusted::TrustedArgs,
 };
 
 /**
@@ -27,14 +28,22 @@ struct Cli {
 enum Cmd {
     #[command(about = "Displays all currently discovered devices")]
     Seen(SeenArgs),
-    #[command(about = "Display all trusted devices(paired devices)")]
+    #[command(about = "Display all trusted devices (paired devices)")]
     Trusted(TrustedArgs),
-    #[command(about = "Displays this device Identity")]
+    #[command(about = "Displays this device identity")]
     Identity(IdentityArgs),
-    #[command(about = "Pair with another devices")]
+    #[command(about = "Pair with another device")]
     Pair(PairArgs),
-    #[command(about = "Connect to a trusted device")]
+    #[command(about = "Connect to or disconnect from a trusted device")]
     Connect(ConnectArgs),
+    #[command(about = "List or manage paired devices")]
+    Device(DeviceArgs),
+    #[command(about = "Manage clipboard history and downloaded files")]
+    Clipboard(ClipboardArgs),
+    #[command(about = "Send content to another connected device")]
+    Send(SendArgs),
+    #[command(about = "Download a clipboard file by history entry id")]
+    Download(DownloadArgs),
 }
 
 /// Starts the desktop CLI and dispatches the selected action to the IPC client.
@@ -57,6 +66,18 @@ fn main() {
         }
         Cmd::Connect(args) => {
             commands::connect::ConnectArgs::run(args, &mut ipc);
+        }
+        Cmd::Device(args) => {
+            commands::device::DeviceArgs::run(args, &mut ipc);
+        }
+        Cmd::Clipboard(args) => {
+            commands::clipboard::ClipboardArgs::run(args, &mut ipc);
+        }
+        Cmd::Send(args) => {
+            commands::send::SendArgs::run(args, &mut ipc);
+        }
+        Cmd::Download(args) => {
+            commands::download::DownloadArgs::run(args, &mut ipc);
         }
     }
 }

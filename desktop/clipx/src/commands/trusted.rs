@@ -18,20 +18,31 @@ enum TrustedSubcmd {
 
 impl TrustedArgs {
     pub fn run(args: TrustedArgs, ipc: &mut Client) {
-        let ipcreq = clipx::IpcRequest {
-            request: Some(clipx::ipc_request::Request::Trusted(
-                clipx::TrustedRequest {},
-            )),
+        let request = match args.cmd {
+            Some(TrustedSubcmd::Remove { id }) => clipx::IpcRequest {
+                request: Some(clipx::ipc_request::Request::ForgetDevice(
+                    clipx::ForgetDeviceRequest { device_id: id },
+                )),
+            },
+            None => clipx::IpcRequest {
+                request: Some(clipx::ipc_request::Request::Trusted(
+                    clipx::TrustedRequest {},
+                )),
+            },
         };
 
-        if let Ok(res) = ipc.send(ipcreq) {
-            if let Some(clipx::ipc_response::Response::Trusted(response)) = res.response {
-                for device in response.devices {
-                    println!("{} ({})", device.name, device.id);
+        if let Ok(res) = ipc.send(request) {
+            match res.response {
+                Some(clipx::ipc_response::Response::Trusted(response)) => {
+                    for device in response.devices {
+                        println!("{} ({})", device.name, device.id);
+                    }
                 }
+                Some(clipx::ipc_response::Response::ForgetDevice(response)) => {
+                    println!("{}: {}", response.device_id, response.status);
+                }
+                _ => {}
             }
         }
-
-        let _ = args.cmd;
     }
 }
