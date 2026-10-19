@@ -398,7 +398,11 @@ fun CantSeeDeviceScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     Text("3. Return here and open Scan again.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(12.dp))
-                    Text("Wi-Fi Direct support can be added later without changing this pairing flow.", color = palette.mutedText, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "This version uses local Wi‑Fi discovery and pairing; if the device still does not appear, keep both phones on the same Wi‑Fi and leave Clipx open on both sides.",
+                        color = palette.mutedText,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
