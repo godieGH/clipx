@@ -794,7 +794,7 @@ function App() {
       // Reuse the existing native window for a small centered splash, then
       // restore the normal app dimensions after initial data has loaded.
       try {
-        await appWindow.setSize(new PhysicalSize(320, 260));
+        await appWindow.setSize(new PhysicalSize(320, 280));
         const monitor = await currentMonitor();
         if (monitor) {
           const splashSize = await appWindow.outerSize();
@@ -846,7 +846,13 @@ function App() {
       try {
         startup = await prepareStartupWindow();
       } catch (error) {
-        console.debug("ClipX: startup window preparation failed.", error);
+        console.debug("ClipX: startup window preparation failed; opening the main UI without a splash.", error);
+        startup = { autostarted: false, mainSize: null };
+        try {
+          await appWindow.show();
+        } catch (showError) {
+          console.debug("ClipX: fallback window show failed.", showError);
+        }
       }
 
       await Promise.allSettled(initialLoads);
