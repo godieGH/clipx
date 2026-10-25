@@ -117,11 +117,11 @@ fun DevicesScreen(
                         )
                     }
                 }
-                IconButton(onClick = onOpenThisDevice) {
-                    Icon(Icons.Filled.Fingerprint, contentDescription = "This device identity", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
-                }
                 IconButton(onClick = onOpenDiagnostics) {
                     Icon(Icons.Filled.BugReport, contentDescription = "Help and diagnostics", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                }
+                IconButton(onClick = onOpenThisDevice) {
+                    Icon(Icons.Filled.Fingerprint, contentDescription = "This device", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
                 }
             },
         )
@@ -323,7 +323,7 @@ fun ThisDeviceScreen(identity: com.godiegh.clipx.ThisDeviceInfo?, onBack: () -> 
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("This Device (Identity)", onBack, elevated = elevated)
+        ScreenHeader("This Device", onBack, elevated = elevated)
         LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(
@@ -601,14 +601,20 @@ fun DiagnosticsScreen(
             Spacer(Modifier.height(5.dp))
             Text("This in-memory feed keeps up to 250 recent ClipX core/bridge events while the app process is running. It is not the full Android system log. Review entries before sharing them.", style = MaterialTheme.typography.bodySmall, color = palette.mutedText)
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) }, enabled = logs.isNotEmpty()) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp)); Text("Copy logs")
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy logs")
                 }
                 TextButton(onClick = onClear, enabled = logs.isNotEmpty()) {
                     Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp)); Text("Clear")
+                    Spacer(Modifier.width(4.dp))
+                    Text("Clear")
                 }
             }
         }

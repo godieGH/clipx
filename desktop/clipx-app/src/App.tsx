@@ -78,6 +78,13 @@ interface DiagnosticSnapshot {
   recentLogs: string[];
 }
 
+function visibleDiagnosticLogs(snapshot: DiagnosticSnapshot | null, clearMarker: string | null): string[] {
+  const logs = snapshot?.recentLogs ?? [];
+  if (!clearMarker) return logs;
+  const markerIndex = logs.lastIndexOf(clearMarker);
+  return markerIndex >= 0 ? logs.slice(markerIndex + 1) : logs;
+}
+
 const OWN_IDENTITY: OwnIdentity = {
   name: "Clipx Laptop",
   fingerprint: "",
@@ -657,6 +664,7 @@ function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [sendingReadyItems, setSendingReadyItems] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticSnapshot | null>(null);
+  const [diagnosticsClearMarker, setDiagnosticsClearMarker] = useState<string | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
 
@@ -994,6 +1002,7 @@ function App() {
   }
 
   async function handleCopyDiagnosticReport() {
+    const reportLogs = visibleDiagnosticLogs(diagnostics, diagnosticsClearMarker);
     const report = [
       "ClipX diagnostic report",
       `Application version: ${diagnostics?.appVersion ?? "unknown"}`,
@@ -1002,13 +1011,19 @@ function App() {
       `Log directory: ${diagnostics?.logDirectory ?? "unknown"}`,
       `Latest log file: ${diagnostics?.latestLogFile ?? "none"}`,
       "",
-      ...(diagnostics?.recentLogs ?? []),
+      ...reportLogs,
     ].join("\n");
     try {
       if (!navigator.clipboard) throw new Error("Clipboard access is unavailable");
       await navigator.clipboard.writeText(report);
       showToast("Diagnostic report copied. Review it before sharing.");
     } catch (error) { showToast(String(error), { variant: "error" }); }
+  }
+
+  function handleClearDiagnosticView() {
+    const logs = diagnostics?.recentLogs ?? [];
+    setDiagnosticsClearMarker(logs.length ? logs[logs.length - 1] : null);
+    showToast("Cleared the visible log view. Saved log files were not changed.");
   }
 
   function renderDevicesScreen() {
@@ -1213,27 +1228,43 @@ function App() {
   }
 
   function renderDiagnosticsScreen() {
+    const visibleLogs = visibleDiagnosticLogs(diagnostics, diagnosticsClearMarker);
+
     return (
-      <section style={{height:"100%",overflowY:"auto",padding:"16px 18px",display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-          <div><h2 style={{fontSize:18,margin:"0 0 5px"}}>Help & diagnostics</h2><p style={{fontSize:12,margin:0,opacity:.7}}>Inspect recent core logs. Logs stay on this device unless you copy them.</p></div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            <button className="scan-button" onClick={() => {setDiagnosticsLoading(true);void refreshDiagnostics();}} disabled={diagnosticsLoading}>Refresh</button>
-            <button className="scan-button" onClick={handleOpenLogsFolder}>Open logs folder</button>
-            <button className="scan-button" onClick={handleCopyDiagnosticReport}>Copy diagnostic report</button>
+      <section className="diagnostics-screen">
+        <div className="diagnostics-heading">
+          <div>
+            <h2>Help & diagnostics</h2>
+            <p>Inspect recent core logs. Clear view hides entries here only; saved log files are kept.</p>
+          </div>
+          <div className="diagnostics-actions">
+            <button className="diagnostics-action-button" onClick={() => { setDiagnosticsLoading(true); void refreshDiagnostics(); }} disabled={diagnosticsLoading} title="Refresh recent logs" aria-label="Refresh recent logs">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.5 9A7 7 0 0 1 18 6.5L20 12M4 12l2 5.5A7 7 0 0 0 18.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+            <button className="diagnostics-action-button" onClick={handleOpenLogsFolder} title="Open the folder containing saved log files" aria-label="Open logs folder">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /><path d="M3 9h18" stroke="currentColor" strokeWidth="1.5" /></svg>
+            </button>
+            <button className="diagnostics-action-button" onClick={handleCopyDiagnosticReport} disabled={!diagnostics} title="Copy diagnostic report to clipboard" aria-label="Copy diagnostic report">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><rect x="8" y="8" width="11" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" /><path d="M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v10A1.5 1.5 0 0 0 5.5 17H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            </button>
+            <button className="diagnostics-action-button" onClick={handleClearDiagnosticView} disabled={visibleLogs.length === 0} title="Clear visible log entries (saved log files are kept)" aria-label="Clear visible log entries without deleting saved log files">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
-          <div style={{border:"1px solid #8885",borderRadius:10,padding:10}}><small>Application version</small><div>{diagnostics?.appVersion ?? "Checking…"}</div></div>
-          <div style={{border:"1px solid #8885",borderRadius:10,padding:10}}><small>Core status</small><div>{diagnostics?.coreStatus ?? "Checking…"}</div></div>
-          <div style={{border:"1px solid #8885",borderRadius:10,padding:10,overflowWrap:"anywhere"}}><small>Log location</small><div style={{fontSize:11}}>{diagnostics?.logDirectory ?? "Loading…"}</div></div>
+        <div className="diagnostics-summary">
+          <div className="diagnostics-card"><span>Application version</span><strong>{diagnostics?.appVersion ?? "Checking…"}</strong></div>
+          <div className="diagnostics-card"><span>Core status</span><strong className={`diagnostics-status diagnostics-status--${diagnostics?.coreStatus ?? "unknown"}`}>{diagnostics?.coreStatus ?? "Checking…"}</strong></div>
+          <div className="diagnostics-card"><span>Log location</span><strong className="diagnostics-path">{diagnostics?.logDirectory ?? "Loading…"}</strong></div>
         </div>
-        <section style={{display:"flex",flexDirection:"column",minHeight:160,flex:"1 0 160px",border:"1px solid #8885",borderRadius:10,overflow:"hidden"}}>
-          <div style={{padding:10,borderBottom:"1px solid #8885",fontSize:13,fontWeight:600}}>Recent logs · live refresh every 2 seconds</div>
-          {diagnosticsError && <p style={{color:"#d94848",padding:"0 10px"}}>{diagnosticsError}</p>}
-          <pre style={{margin:0,padding:10,flex:1,overflow:"auto",whiteSpace:"pre-wrap",overflowWrap:"anywhere",userSelect:"text",font:"11px/1.55 ui-monospace,monospace"}}>{diagnostics?.recentLogs.length ? diagnostics.recentLogs.join("\n") : "No log entries available yet."}</pre>
+        <section className="diagnostics-log-panel">
+          <div className="diagnostics-log-heading"><h3>Recent logs</h3><span>Live · refreshes every 2 seconds</span></div>
+          {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
+          <ScrollFade className="diagnostics-log-scroll">
+            <pre className="diagnostics-log">{visibleLogs.length ? visibleLogs.join("\n") : "No visible log entries. New events will appear here."}</pre>
+          </ScrollFade>
         </section>
-        <p style={{fontSize:12,opacity:.7}}>Logs can include technical details such as paths or device/network information. Review the report before sharing.</p>
+        <p className="diagnostics-privacy">Diagnostic logs can contain technical details such as local paths, device names, or network information. Review the report before sharing it.</p>
       </section>
     );
   }
