@@ -104,8 +104,8 @@ button {
 
 /*
  * The document stays opaque until the native backdrop call succeeds.
- * Mica itself falls back to a solid system color when Windows disables
- * transparency, Battery Saver is active, or composition cannot use the effect.
+ * Windows may render a system-controlled fallback when the requested backdrop
+ * is unavailable or system settings prevent the material from being shown.
  */
 :root.window-material-active {
   background-color: transparent;
