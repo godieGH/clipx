@@ -8,6 +8,9 @@ use std::{
     time::Duration,
 };
 
+const DEVICE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
+const DEVICE_POLL_INTERVAL: Duration = Duration::from_millis(300);
+
 fn mime_from_name(name: &str) -> String {
     match Path::new(name)
         .extension()
@@ -83,44 +86,119 @@ async fn connect_to_core(client: &mut Client) -> Result<Option<Child>, String> {
     Err(last_error)
 }
 
-#[tokio::main]
-async fn main() {
+/// Wait for discovery/auto-connect to finish before asking the core to offer the file.
+/// This deliberately respects each paired device's persisted auto-connect preference.
+async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + DEVICE_CONNECTION_TIMEOUT;
+
+    loop {
+        let devices = client.get_paired_devices().await?;
+
+        if devices.iter().any(|device| device.connection == "connected") {
+            return Ok(());
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            return Err(connection_timeout_message(&devices));
+        }
+
+        tokio::time::sleep(DEVICE_POLL_INTERVAL).await;
+    }
+}
+
+fn connection_timeout_message(
+    devices: &[clipx_lib::message::types::PairedDevice],
+) -> String {
+    if devices.is_empty() {
+        return "No paired ClipX devices were found. Open ClipX and pair a device before sending files.".into();
+    }
+
+    if devices.iter().all(|device| device.connection == "unavailable") {
+        return "No paired ClipX devices are currently reachable. Make sure ClipX is running on the receiving device and both devices can discover each other.".into();
+    }
+
+    "No ClipX device connected within 15 seconds. Open ClipX and connect a paired device, or enable auto-connect for that device, then try again.".into()
+}
+
+#[cfg(windows)]
+fn show_error(error: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONERROR, MB_OK,
+    };
+
+    let message = format!("ClipX could not send this file.\n\n{error}");
+    let message: Vec<u16> = std::ffi::OsStr::new(&message)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let title: Vec<u16> = std::ffi::OsStr::new("ClipX")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_error(error: &str) {
+    eprintln!("ClipX: {error}");
+}
+
+async fn run() -> Result<(), String> {
     let mut args = std::env::args_os();
     let _program = args.next();
 
     let Some(raw_path) = args.next() else {
-        return;
+        return Err("No file path was provided.".into());
     };
 
     if args.next().is_some() {
-        // Phase 1 intentionally supports one file only.
-        return;
+        return Err("This version of Send with ClipX supports one file at a time. Select a single file and try again.".into());
     }
 
     let path = PathBuf::from(raw_path);
 
     if !path.is_file() {
-        eprintln!("Invalid file path");
-        return;
+        return Err(format!("The selected path is not a file: {}", path.display()));
     }
 
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return;
+        return Err("The selected file has an invalid or unsupported name.".into());
     };
 
     let path_string = path.to_string_lossy().into_owned();
     let mime_type = mime_from_name(name);
-
     let mut client = Client::new("clipx");
 
-    let _owned_core = match connect_to_core(&mut client).await {
-        Ok(child) => child,
-        Err(_) => return,
-    };
+    // If this helper started the core, keep its child handle alive through the send.
+    // Dropping the Child handle does not stop the background process.
+    let _owned_core = connect_to_core(&mut client).await?;
 
-    let _ = client
-        .send_file_path(name.to_string(), mime_type, path_string)
-        .await;
+    let send_result = async {
+        wait_for_connected_peer(&mut client).await?;
+        client
+            .send_file_path(name.to_string(), mime_type, path_string)
+            .await
+            .map(|_| ())
+            .map_err(|error| format!("Could not offer the file: {error}"))
+    }
+    .await;
 
     let _ = client.shutdown().await;
+    send_result
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(error) = run().await {
+        show_error(&error);
+    }
 }
