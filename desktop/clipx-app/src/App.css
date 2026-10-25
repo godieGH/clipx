@@ -1813,3 +1813,94 @@ button.device-hit:active {
 .diagnostics-log { margin:0; padding:10px; min-height:100%; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; -webkit-user-select:text; color:inherit; background:rgba(90,100,115,.045); font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
 .diagnostics-error { color:#d94848; margin:7px 10px 0; font-size:12px; }
 @media (max-width:520px) { .diagnostics-summary { grid-template-columns:1fr; } .diagnostics-heading { align-items:stretch; } }
+
+/* ---- transparent ClipX startup splash ---- */
+:root.startup-splash-active {
+  background-color: transparent;
+  --page-bg: transparent;
+  color: #ffffff;
+}
+
+:root.startup-splash-active body,
+:root.startup-splash-active #root {
+  background-color: transparent;
+}
+
+.startup-splash {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  overflow: hidden;
+  background: transparent;
+  color: #ffffff;
+}
+
+.startup-splash-card {
+  display: flex;
+  width: min(100%, 280px);
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 30px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  background: rgba(25, 29, 44, 0.82);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.2);
+  color: #ffffff;
+  text-align: center;
+}
+
+.startup-splash-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.2));
+}
+
+.startup-splash-name {
+  margin-top: 15px;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+}
+
+.startup-splash-caption {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.startup-splash-progress {
+  width: 112px;
+  height: 3px;
+  margin-top: 21px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.startup-splash-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+  animation: startup-splash-progress 1.25s ease-in-out infinite;
+}
+
+@keyframes startup-splash-progress {
+  from { transform: translateX(-115%); }
+  to { transform: translateX(265%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-splash-progress span {
+    animation: none;
+    width: 100%;
+  }
+}
