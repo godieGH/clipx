@@ -200,6 +200,15 @@ Compare the result with the matching line in `SHA256SUMS.txt` from the same rele
 
 Only download ClipX from this repository's Releases page. Signing for Windows may be added in the future.
 
+### Send with ClipX (Windows right-click menu)
+
+The Windows installer adds a **Send with ClipX** entry to the file right-click menu.
+
+- **Windows 10:** right-click a file and choose **Send with ClipX**.
+- **Windows 11:** right-click a file, choose **Show more options** (or press **Shift+F10**), then choose **Send with ClipX**. It does not appear in the new compact menu yet.
+
+It sends one file at a time, to a paired device. Folders are not supported yet.
+
 ---
 
 ## Prerequisites
