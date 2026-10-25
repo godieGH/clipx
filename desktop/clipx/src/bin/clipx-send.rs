@@ -96,7 +96,10 @@ async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
     loop {
         let devices = client.get_paired_devices().await?;
 
-        if devices.iter().any(|device| device.connection == "connected") {
+        if devices
+            .iter()
+            .any(|device| device.connection == "connected")
+        {
             return Ok(());
         }
 
@@ -126,14 +129,15 @@ async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
     }
 }
 
-fn connection_timeout_message(
-    devices: &[clipx_lib::message::types::PairedDevice],
-) -> String {
+fn connection_timeout_message(devices: &[clipx_lib::message::types::PairedDevice]) -> String {
     if devices.is_empty() {
         return "No paired ClipX devices were found. Open ClipX and pair a device before sending files.".into();
     }
 
-    if devices.iter().all(|device| device.connection == "unavailable") {
+    if devices
+        .iter()
+        .all(|device| device.connection == "unavailable")
+    {
         return "No paired ClipX devices are currently reachable. Make sure ClipX is running on the receiving device and both devices can discover each other.".into();
     }
 
@@ -143,9 +147,7 @@ fn connection_timeout_message(
 #[cfg(windows)]
 fn show_error(error: &str) {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        MessageBoxW, MB_ICONERROR, MB_OK,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
     let message = format!("ClipX could not send this file.\n\n{error}");
     let message: Vec<u16> = std::ffi::OsStr::new(&message)
@@ -187,7 +189,10 @@ async fn run() -> Result<(), String> {
     let path = PathBuf::from(raw_path);
 
     if !path.is_file() {
-        return Err(format!("The selected path is not a file: {}", path.display()));
+        return Err(format!(
+            "The selected path is not a file: {}",
+            path.display()
+        ));
     }
 
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {

@@ -807,8 +807,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
- "windows-sys 0.61.2",
  "tungstenite 0.24.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
