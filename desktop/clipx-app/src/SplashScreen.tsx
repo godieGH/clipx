@@ -1,4 +1,13 @@
+import { useEffect } from "react";
+
 export function SplashScreen() {
+  useEffect(() => {
+    // Keep only the splash window transparent; the regular app returns to its
+    // solid CSS fallback if the native Windows material is unavailable.
+    document.documentElement.classList.add("startup-splash-active");
+    return () => document.documentElement.classList.remove("startup-splash-active");
+  }, []);
+
   return (
     <div className="startup-splash" role="status" aria-label="ClipX is starting">
       <div className="startup-splash-card">
