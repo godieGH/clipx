@@ -150,6 +150,58 @@ The UI and service layer communicate through a structured IPC protocol; the `pro
 
 ---
 
+## Installing a release
+
+Prebuilt installers are attached to each [GitHub release](../../releases). All release files are built automatically by GitHub Actions from the tagged source, and every release includes a `SHA256SUMS.txt` file.
+
+### About unsigned desktop builds
+
+The Windows and macOS desktop installers are **not code-signed yet**. Code signing certificates cost money every year, and ClipX does not use one at this stage. The app is safe to run if you downloaded it from this repository's Releases page, but your operating system does not know that, so it will show a warning the first time.
+
+**Windows (SmartScreen)**
+
+You may see "Windows protected your PC" with an "Unknown publisher" label.
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+**macOS (Gatekeeper)**
+
+macOS may say the app cannot be opened because the developer cannot be verified.
+
+1. Right-click (or Control-click) the app and choose **Open**, then confirm.
+2. Or go to **System Settings > Privacy & Security** and click **Open Anyway** after the first blocked attempt.
+
+**Linux**
+
+No warning is expected. Use the `.deb`, `.rpm`, or `.AppImage` that matches your system.
+
+**Android**
+
+Release APKs are signed with the project's release key.
+
+### Verify your download (recommended)
+
+Since the installers are unsigned, you can check that your file matches the published checksum.
+
+Windows (PowerShell):
+
+```powershell
+Get-FileHash .\<downloaded-file> -Algorithm SHA256
+```
+
+macOS / Linux:
+
+```bash
+sha256sum <downloaded-file>   # on macOS: shasum -a 256 <downloaded-file>
+```
+
+Compare the result with the matching line in `SHA256SUMS.txt` from the same release. If the hashes differ, do not run the file.
+
+Only download ClipX from this repository's Releases page. Signing for Windows may be added in the future.
+
+---
+
 ## Prerequisites
 
 You will typically need:
