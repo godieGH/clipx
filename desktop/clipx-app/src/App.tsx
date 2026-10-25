@@ -1,6 +1,5 @@
-import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
+import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import "./App.css";
-import { SplashScreen } from "./SplashScreen";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast, subscribeToast, ToastState } from "./components/toast";
@@ -651,7 +650,6 @@ function CollapsibleList<T>({
 function App() {
   const appWindow = getCurrentWindow();
   const [screen, setScreen] = useState<Screen>("devices");
-  const [showStartupSplash, setShowStartupSplash] = useState(true);
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [available, setAvailable] = useState<AvailableDevice[]>([]);
   const [history, setHistory] = useState<ClipItem[]>([]);
@@ -780,89 +778,29 @@ function App() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function prepareStartupWindow(): Promise<{ autostarted: boolean; mainSize: PhysicalSize | null }> {
-      const autostarted = await invoke<boolean>("launched_by_autostart").catch(() => false);
-      if (autostarted) {
-        // Keep system/background startup quiet; no splash window is shown.
-        handleScan();
-        return { autostarted: true, mainSize: null };
-      }
-
-      const mainSize = await appWindow.outerSize();
-      try {
-        // Reuse the existing Tauri window for a compact splash instead of
-        // creating a second native window just for startup.
-        await appWindow.setSize(new PhysicalSize(320, 280));
-        const monitor = await currentMonitor();
-        if (monitor) {
-          const splashSize = await appWindow.outerSize();
-          const workArea = monitor.workArea;
-          const x = workArea.position.x + Math.round((workArea.size.width - splashSize.width) / 2);
-          const y = workArea.position.y + Math.round((workArea.size.height - splashSize.height) / 2);
-          await appWindow.setPosition(new PhysicalPosition(x, y));
-        }
-      } catch (error) {
-        console.debug("ClipX: could not center the startup splash; using the default position.", error);
-      }
-
-      await appWindow.show();
+    async function positionAppWindow() {
+      const monitor = await currentMonitor();
+      if (!monitor) return;
+      const windowSize = await appWindow.outerSize();
+      const workArea = monitor.workArea;
+      const margin = 30;
+      const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
+      const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
+      await appWindow.setPosition(new PhysicalPosition(x, y));
+      const autostarted = await invoke<boolean>("launched_by_autostart");
+      if (!autostarted) await appWindow.show();
       handleScan();
-      return { autostarted: false, mainSize };
     }
-
-    async function showMainWindow(mainSize: PhysicalSize | null) {
-      if (!mainSize) return;
-      try {
-        await appWindow.setSize(mainSize);
-        const monitor = await currentMonitor();
-        if (monitor) {
-          const windowSize = await appWindow.outerSize();
-          const workArea = monitor.workArea;
-          const margin = 30;
-          const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
-          const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
-          await appWindow.setPosition(new PhysicalPosition(x, y));
-        }
-      } catch (error) {
-        console.debug("ClipX: could not restore the main window position; using its current position.", error);
-      }
-    }
-
-    const initialLoads = [
-      getThisDeviceIdenty(),
-      refreshPaired(),
-      refreshHistory(),
-    ];
-
-    void (async () => {
-      let startup: { autostarted: boolean; mainSize: PhysicalSize | null } = {
-        autostarted: true,
-        mainSize: null,
-      };
-      try {
-        startup = await prepareStartupWindow();
-      } catch (error) {
-        console.debug("ClipX: startup preparation failed; opening the main UI without the splash.", error);
-        startup = { autostarted: false, mainSize: null };
-        try {
-          await appWindow.show();
-        } catch (showError) {
-          console.debug("ClipX: fallback window show failed.", showError);
-        }
-      }
-
-      await Promise.allSettled(initialLoads);
-      if (cancelled) return;
-      if (!startup.autostarted) await showMainWindow(startup.mainSize);
-      setShowStartupSplash(false);
-    })();
+    getThisDeviceIdenty();
+    refreshPaired();
+    refreshHistory();
+    positionAppWindow();
 
     // Push-based sync: the core emits these whenever paired/connection or
     // clipboard-history state actually changes, so we just re-fetch on
     // demand instead of guessing an interval. refreshPaired/refreshHistory
     // are unchanged from the polling version — only what triggers them did.
+    let cancelled = false;
     const unlistenPromises = [
       listen("devices-changed", () => { if (!cancelled) refreshPaired(); }),
       listen("clipboard-changed", () => { if (!cancelled) refreshHistory(); }),
@@ -1389,8 +1327,6 @@ function App() {
       </section>
     );
   }
-
-  if (showStartupSplash) return <SplashScreen />;
 
   return (
     <>
