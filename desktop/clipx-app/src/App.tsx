@@ -1,5 +1,6 @@
 import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import "./App.css";
+import { SplashScreen } from "./SplashScreen";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast, subscribeToast, ToastState } from "./components/toast";
@@ -650,6 +651,7 @@ function CollapsibleList<T>({
 function App() {
   const appWindow = getCurrentWindow();
   const [screen, setScreen] = useState<Screen>("devices");
+  const [showStartupSplash, setShowStartupSplash] = useState(true);
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [available, setAvailable] = useState<AvailableDevice[]>([]);
   const [history, setHistory] = useState<ClipItem[]>([]);
@@ -778,23 +780,49 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false;
+
     async function positionAppWindow() {
-      const monitor = await currentMonitor();
-      if (!monitor) return;
-      const windowSize = await appWindow.outerSize();
-      const workArea = monitor.workArea;
-      const margin = 30;
-      const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
-      const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
-      await appWindow.setPosition(new PhysicalPosition(x, y));
-      const autostarted = await invoke<boolean>("launched_by_autostart");
+      // Positioning is best-effort: still show the app if the monitor query
+      // fails (for example during a display change or remote-session startup).
+      try {
+        const monitor = await currentMonitor();
+        if (monitor) {
+          const windowSize = await appWindow.outerSize();
+          const workArea = monitor.workArea;
+          const margin = 30;
+          const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
+          const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
+          await appWindow.setPosition(new PhysicalPosition(x, y));
+        }
+      } catch (error) {
+        console.debug("ClipX: could not position the startup window; using the default position.", error);
+      }
+
+      const autostarted = await invoke<boolean>("launched_by_autostart").catch(() => false);
       if (!autostarted) await appWindow.show();
       handleScan();
     }
-    getThisDeviceIdenty();
-    refreshPaired();
-    refreshHistory();
-    positionAppWindow();
+
+    // Start data loading immediately, in parallel with positioning/showing.
+    // The splash remains visible only for a normal interactive launch and is
+    // dismissed after the initial data requests settle. Background autostart
+    // stays hidden and will show the real UI when the user opens the tray.
+    const initialLoads = [
+      getThisDeviceIdenty(),
+      refreshPaired(),
+      refreshHistory(),
+    ];
+
+    void (async () => {
+      try {
+        await positionAppWindow();
+      } catch (error) {
+        console.debug("ClipX: startup window could not be shown.", error);
+      }
+      await Promise.allSettled(initialLoads);
+      if (!cancelled) setShowStartupSplash(false);
+    })();
 
     // Push-based sync: the core emits these whenever paired/connection or
     // clipboard-history state actually changes, so we just re-fetch on
@@ -1327,6 +1355,8 @@ function App() {
       </section>
     );
   }
+
+  if (showStartupSplash) return <SplashScreen />;
 
   return (
     <>
