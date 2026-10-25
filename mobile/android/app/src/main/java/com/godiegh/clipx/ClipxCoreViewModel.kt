@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewModelScope
 import com.godiegh.clipx.ffi.BridgeService
+import com.godiegh.clipx.ffi.clearLogEntries
+import com.godiegh.clipx.ffi.recentLogEntries
 import com.godiegh.clipx.ui.ClipxHistoryItem
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -47,6 +49,8 @@ class ClipxCoreViewModel(
     var loading by androidx.compose.runtime.mutableStateOf(true)
         private set
     var lastError by androidx.compose.runtime.mutableStateOf<String?>(null)
+        private set
+    var diagnosticLogs by androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
         private set
     var pendingFiles by androidx.compose.runtime.mutableStateOf<List<OutgoingFile>>(emptyList())
         private set
@@ -96,6 +100,16 @@ class ClipxCoreViewModel(
                 fileTransfers = fileTransfers + (event.entryId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message)) + (event.fileId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message))
             }
         }
+    }
+
+    fun refreshDiagnosticLogs() {
+        diagnosticLogs = runCatching { recentLogEntries() }
+            .getOrElse { error -> listOf("[error] Unable to read ClipX diagnostics: ${error.message ?: "unknown error"}") }
+    }
+    fun clearDiagnosticLogs() {
+        runCatching { clearLogEntries() }
+            .onSuccess { diagnosticLogs = emptyList() }
+            .onFailure { error -> diagnosticLogs = listOf("[error] Unable to clear diagnostics: ${error.message ?: "unknown error"}") }
     }
 
     suspend fun refreshAll() {

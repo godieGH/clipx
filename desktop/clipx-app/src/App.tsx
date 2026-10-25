@@ -9,7 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 type DeviceType = "windows" | "android" | "linux" | "macos" | "ios";
 type ConnectionState = "connected" | "connecting" | "disconnected" | "unavailable";
 type PairingState = "idle" | "requesting";
-type Screen = "devices" | "sync" | "history";
+type Screen = "devices" | "sync" | "history" | "diagnostics";
 type CurrentClipboard = { kind: "text" | "rich_text" | "image"; text: string; html?: string; width?: number; height?: number; rgba?: number[] };
 
 interface PairedDevice {
@@ -68,6 +68,14 @@ interface OwnIdentity {
   deviceType: string;
   wsPort: number;
   ipAddress: string;
+}
+
+interface DiagnosticSnapshot {
+  appVersion: string;
+  coreStatus: string;
+  logDirectory: string;
+  latestLogFile: string | null;
+  recentLogs: string[];
 }
 
 const OWN_IDENTITY: OwnIdentity = {
@@ -648,6 +656,9 @@ function App() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { done: number; total: number; state: string; message: string }>>({});
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [sendingReadyItems, setSendingReadyItems] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticSnapshot | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY);
@@ -764,6 +775,7 @@ function App() {
         if (cancelled) return;
         setDownloadProgress((prev) => ({ ...prev, [payload.entry_id]: payload, [payload.file_id]: payload }));
       }),
+      listen("open-diagnostics", () => { if (!cancelled) setScreen("diagnostics"); }),
       listen<PairingEventPayload>("pairing-event", ({ payload }) => {
         if (cancelled) return;
         if (payload.state === PAIRING_STATE.STARTED) return;
@@ -959,6 +971,45 @@ function App() {
   async function handleRevealHistoryFile(path: string) { try { await invoke("reveal_file_location", { path }); } catch (e) { showToast(`${e}`, { variant: "error" }); } }
 
   const detailDevice = paired.find((d) => d.fingerprint === detailFingerprint) ?? null;
+
+  const refreshDiagnostics = useCallback(async () => {
+    try {
+      setDiagnostics(await invoke<DiagnosticSnapshot>("get_diagnostic_snapshot"));
+      setDiagnosticsError(null);
+    } catch (error) { setDiagnosticsError(String(error)); }
+    finally { setDiagnosticsLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (screen !== "diagnostics") return;
+    setDiagnosticsLoading(true);
+    void refreshDiagnostics();
+    const timer = window.setInterval(() => { void refreshDiagnostics(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [screen, refreshDiagnostics]);
+
+  async function handleOpenLogsFolder() {
+    try { const path = await invoke<string>("open_logs_folder"); showToast(`Opened logs folder: ${path}`); }
+    catch (error) { showToast(String(error), { variant: "error" }); }
+  }
+
+  async function handleCopyDiagnosticReport() {
+    const report = [
+      "ClipX diagnostic report",
+      `Application version: ${diagnostics?.appVersion ?? "unknown"}`,
+      `Platform: ${navigator.userAgent}`,
+      `Core status: ${diagnostics?.coreStatus ?? "unknown"}`,
+      `Log directory: ${diagnostics?.logDirectory ?? "unknown"}`,
+      `Latest log file: ${diagnostics?.latestLogFile ?? "none"}`,
+      "",
+      ...(diagnostics?.recentLogs ?? []),
+    ].join("\n");
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(report);
+      showToast("Diagnostic report copied. Review it before sharing.");
+    } catch (error) { showToast(String(error), { variant: "error" }); }
+  }
 
   function renderDevicesScreen() {
     return (
@@ -1161,6 +1212,32 @@ function App() {
     );
   }
 
+  function renderDiagnosticsScreen() {
+    return (
+      <section style={{height:"100%",overflowY:"auto",padding:"16px 18px",display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div><h2 style={{fontSize:18,margin:"0 0 5px"}}>Help & diagnostics</h2><p style={{fontSize:12,margin:0,opacity:.7}}>Inspect recent core logs. Logs stay on this device unless you copy them.</p></div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button className="scan-button" onClick={() => {setDiagnosticsLoading(true);void refreshDiagnostics();}} disabled={diagnosticsLoading}>Refresh</button>
+            <button className="scan-button" onClick={handleOpenLogsFolder}>Open logs folder</button>
+            <button className="scan-button" onClick={handleCopyDiagnosticReport}>Copy diagnostic report</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
+          <div style={{border:"1px solid #8885",borderRadius:10,padding:10}}><small>Application version</small><div>{diagnostics?.appVersion ?? "Checking…"}</div></div>
+          <div style={{border:"1px solid #8885",borderRadius:10,padding:10}}><small>Core status</small><div>{diagnostics?.coreStatus ?? "Checking…"}</div></div>
+          <div style={{border:"1px solid #8885",borderRadius:10,padding:10,overflowWrap:"anywhere"}}><small>Log location</small><div style={{fontSize:11}}>{diagnostics?.logDirectory ?? "Loading…"}</div></div>
+        </div>
+        <section style={{display:"flex",flexDirection:"column",minHeight:160,flex:"1 0 160px",border:"1px solid #8885",borderRadius:10,overflow:"hidden"}}>
+          <div style={{padding:10,borderBottom:"1px solid #8885",fontSize:13,fontWeight:600}}>Recent logs · live refresh every 2 seconds</div>
+          {diagnosticsError && <p style={{color:"#d94848",padding:"0 10px"}}>{diagnosticsError}</p>}
+          <pre style={{margin:0,padding:10,flex:1,overflow:"auto",whiteSpace:"pre-wrap",overflowWrap:"anywhere",userSelect:"text",font:"11px/1.55 ui-monospace,monospace"}}>{diagnostics?.recentLogs.length ? diagnostics.recentLogs.join("\n") : "No log entries available yet."}</pre>
+        </section>
+        <p style={{fontSize:12,opacity:.7}}>Logs can include technical details such as paths or device/network information. Review the report before sharing.</p>
+      </section>
+    );
+  }
+
   function renderHistoryScreen() {
     return (
       <section className="history-screen">
@@ -1232,6 +1309,9 @@ function App() {
               </svg>
             )}
           </button>
+          <button className="icon-button titlebar-icon" title="Help & diagnostics" onClick={() => setScreen("diagnostics")}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5"/><path d="M9.7 9a2.35 2.35 0 1 1 4.05 1.62c-1.1 1.05-1.75 1.4-1.75 2.88M12 17.1h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
           <button className="closing-button" onClick={() => appWindow.hide()}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1240,7 +1320,7 @@ function App() {
         </div>
       </header>
 
-      <main>{screen === "devices" ? renderDevicesScreen() : screen === "sync" ? renderSyncScreen() : renderHistoryScreen()}</main>
+      <main>{screen === "devices" ? renderDevicesScreen() : screen === "sync" ? renderSyncScreen() : screen === "history" ? renderHistoryScreen() : renderDiagnosticsScreen()}</main>
 
       {showIdentity && <DeviceIdentity identity={ownIdentity} onClose={() => setShowIdentity(false)} />}
 

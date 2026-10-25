@@ -36,6 +36,7 @@ private enum class AppRoute {
     DEVICE_DETAILS,
     SYNC,
     CANT_SEE_DEVICE,
+    DIAGNOSTICS,
 }
 
 enum class RootTab { DEVICES, HISTORY }
@@ -114,6 +115,7 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                             },
                             onOpenPair = { route = AppRoute.PAIR_NEW },
                             onOpenThisDevice = { route = AppRoute.THIS_DEVICE },
+                            onOpenDiagnostics = { route = AppRoute.DIAGNOSTICS },
                             onOpenSync = {
                                 viewModel.clearSyncClipboardItem()
                                 route = AppRoute.SYNC
@@ -178,6 +180,12 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
 
                         AppRoute.CANT_SEE_DEVICE -> CantSeeDeviceScreen(onBack = { route = AppRoute.PAIR_NEW })
 
+                        AppRoute.DIAGNOSTICS -> DiagnosticsScreen(
+                            logs = viewModel.diagnosticLogs,
+                            onBack = ::openDevices,
+                            onRefresh = viewModel::refreshDiagnosticLogs,
+                            onClear = viewModel::clearDiagnosticLogs,
+                        )
                         AppRoute.HISTORY -> HistoryScreen(
                             items = viewModel.historyItems,
                             fileTransfers = viewModel.fileTransfers,

@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
@@ -60,7 +62,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import com.godiegh.clipx.ClipType
@@ -78,6 +83,7 @@ fun DevicesScreen(
     availableDevices: List<AvailableDeviceUi>,
     onOpenPair: () -> Unit,
     onOpenThisDevice: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onOpenSync: () -> Unit,
     onOpenDetails: (String) -> Unit,
     onPair: (String) -> Unit,
@@ -112,12 +118,10 @@ fun DevicesScreen(
                     }
                 }
                 IconButton(onClick = onOpenThisDevice) {
-                    Icon(
-                        Icons.Filled.Fingerprint,
-                        contentDescription = "This device identity",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(21.dp),
-                    )
+                    Icon(Icons.Filled.Fingerprint, contentDescription = "This device identity", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                }
+                IconButton(onClick = onOpenDiagnostics) {
+                    Icon(Icons.Filled.BugReport, contentDescription = "Help and diagnostics", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
                 }
             },
         )
@@ -437,11 +441,6 @@ fun SyncScreen(
             title = "Sync",
             onBack = onBack,
             elevated = elevated,
-            rightContent = {
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh clipboard", tint = MaterialTheme.colorScheme.onSurface)
-                }
-            },
         )
 
         LazyColumn(
@@ -576,6 +575,49 @@ fun SyncScreen(
                     if (sendingFiles) { androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp) } else { Icon(Icons.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp)) }
                     Spacer(Modifier.width(7.dp))
                     Text(if (sendingFiles) "Preparing…" else "Send")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DiagnosticsScreen(
+    logs: List<String>,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+    val clipboardManager = LocalClipboardManager.current
+    val listState = rememberLazyListState()
+    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+    LaunchedEffect(Unit) { while (true) { onRefresh(); delay(1_000) } }
+    LaunchedEffect(logs.lastOrNull()) { if (logs.isNotEmpty()) listState.animateScrollToItem(logs.lastIndex) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScreenHeader("Help & diagnostics", onBack, elevated = elevated)
+        GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp)) {
+            Text("Live diagnostic logs", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(5.dp))
+            Text("This in-memory feed keeps up to 250 recent ClipX core/bridge events while the app process is running. It is not the full Android system log. Review entries before sharing them.", style = MaterialTheme.typography.bodySmall, color = palette.mutedText)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) }, enabled = logs.isNotEmpty()) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp)); Text("Copy logs")
+                }
+                TextButton(onClick = onClear, enabled = logs.isNotEmpty()) {
+                    Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp)); Text("Clear")
+                }
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp)) {
+            if (logs.isEmpty()) item {
+                Text("Waiting for ClipX events…", style = MaterialTheme.typography.bodyMedium, color = palette.mutedText, modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp))
+            } else items(logs) { line ->
+                SelectionContainer {
+                    Text(line, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp))
                 }
             }
         }

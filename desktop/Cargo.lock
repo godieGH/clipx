@@ -816,6 +816,7 @@ name = "clipx-app"
 version = "0.1.7"
 dependencies = [
  "clipx",
+ "directories",
  "rfd",
  "serde",
  "serde_json",

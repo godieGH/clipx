@@ -2,7 +2,13 @@ mod core_supervisor;
 
 #[cfg(windows)]
 mod error_dialog;
-use std::sync::Arc;
+use std::{
+    fs,
+    io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
 
 use clipx_lib::{clipx, ipc, message::types, message::IpcCmdBridge};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +34,57 @@ pub struct AppState {
 }
 
 static EXIT_SHUTDOWN_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticSnapshot {
+    app_version: String,
+    core_status: String,
+    log_directory: String,
+    latest_log_file: Option<String>,
+    recent_logs: Vec<String>,
+}
+
+fn logs_directory() -> PathBuf {
+    directories::ProjectDirs::from("com", "godiegh", "clipx")
+        .map(|dirs| dirs.data_local_dir().join("logs"))
+        .unwrap_or_else(|| std::env::temp_dir().join("clipx-logs"))
+}
+
+fn newest_log_file(directory: &Path) -> Option<PathBuf> {
+    fs::read_dir(directory).ok()?.filter_map(Result::ok).map(|entry| entry.path())
+        .filter(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("clipx-core"))
+            && path.extension().and_then(|ext| ext.to_str()) == Some("log"))
+        .max_by_key(|path| fs::metadata(path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH))
+}
+
+fn read_recent_log_lines(path: &Path) -> Result<Vec<String>, String> {
+    const MAX_BYTES: u64 = 256 * 1024;
+    const MAX_LINES: usize = 200;
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let length = file.metadata().map_err(|e| e.to_string())?.len();
+    let truncated = length > MAX_BYTES;
+    if truncated { file.seek(SeekFrom::Start(length - MAX_BYTES)).map_err(|e| e.to_string())?; }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let mut content = String::from_utf8_lossy(&bytes).into_owned();
+    if truncated { if let Some(newline) = content.find('\n') { content.drain(..=newline); } }
+    let lines: Vec<String> = content.lines().map(str::to_owned).collect();
+    let skip = lines.len().saturating_sub(MAX_LINES);
+    Ok(lines.into_iter().skip(skip).collect())
+}
+
+fn reveal_logs_folder() -> Result<String, String> {
+    let path = logs_directory();
+    fs::create_dir_all(&path).map_err(|e| format!("Could not create logs folder {}: {e}", path.display()))?;
+    #[cfg(windows)]
+    Command::new("explorer.exe").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    #[cfg(target_os = "macos")]
+    Command::new("open").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    Command::new("xdg-open").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
 
 fn mime_from_name(name: &str) -> String {
     match std::path::Path::new(name)
@@ -170,6 +227,8 @@ pub fn run() {
             }
 
             let show_item = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
+            let diagnostics_item = MenuItem::with_id(app, "diagnostics", "Help & diagnostics", true, None::<&str>)?;
+            let logs_item = MenuItem::with_id(app, "logs", "Open logs folder", true, None::<&str>)?;
             // let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let status_item =
                 MenuItem::with_id(app, "core_status", "Core: running", false, None::<&str>)?;
@@ -190,6 +249,8 @@ pub fn run() {
                 app,
                 &[
                     &show_item,
+                    &diagnostics_item,
+                    &logs_item,
                     //&settings_item,
                     &status_item,
                     &restart_item,
@@ -217,9 +278,14 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-                    // "settings" => {
-                    //     println!("Settings from the tray!");
-                    // }
+                    "diagnostics" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = app.emit("open-diagnostics", ());
+                        }
+                    }
+                    "logs" => { if let Err(error) = reveal_logs_folder() { eprintln!("ClipX: {error}"); } }
                     "core_restart" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -297,6 +363,8 @@ pub fn run() {
             send_file_path,
             download_clipboard_file,
             reveal_file_location,
+            get_diagnostic_snapshot,
+            open_logs_folder,
             launched_by_autostart,
         ])
         .on_window_event(|window, event| {
@@ -557,6 +625,24 @@ async fn send_file_path(
 async fn download_clipboard_file(state: State<'_, AppState>, id: String) -> Result<String, String> {
     state.ipc.lock().await.download_clipboard_file(id).await
 }
+
+#[tauri::command]
+fn get_diagnostic_snapshot(state: State<'_, AppState>) -> DiagnosticSnapshot {
+    let log_directory = logs_directory();
+    let latest_log_file = newest_log_file(&log_directory);
+    let recent_logs = latest_log_file.as_deref().map(|p| read_recent_log_lines(p)
+        .unwrap_or_else(|e| vec![format!("Could not read log file: {e}")])).unwrap_or_default();
+    DiagnosticSnapshot {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        core_status: format!("{:?}", state.supervisor.status()).to_lowercase(),
+        log_directory: log_directory.to_string_lossy().into_owned(),
+        latest_log_file: latest_log_file.map(|p| p.to_string_lossy().into_owned()),
+        recent_logs,
+    }
+}
+
+#[tauri::command]
+fn open_logs_folder() -> Result<String, String> { reveal_logs_folder() }
 
 #[tauri::command]
 fn launched_by_autostart() -> bool {
