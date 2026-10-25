@@ -1,4 +1,5 @@
 import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { getWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -778,6 +779,14 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // These are the same initial requests as before; the splash is only a
+    // separate presentation window and never replaces or resizes the main UI.
+    const initialLoads = [
+      getThisDeviceIdenty(),
+      refreshPaired(),
+      refreshHistory(),
+    ];
+
     async function positionAppWindow() {
       const monitor = await currentMonitor();
       if (!monitor) return;
@@ -788,12 +797,34 @@ function App() {
       const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
       await appWindow.setPosition(new PhysicalPosition(x, y));
       const autostarted = await invoke<boolean>("launched_by_autostart");
-      if (!autostarted) await appWindow.show();
+      if (!autostarted) {
+        const splashWindow = getWebviewWindow("splash");
+        const splashShownAt = Date.now();
+        try {
+          await splashWindow.show();
+        } catch (error) {
+          console.debug("ClipX: splash window could not be shown; continuing with the main window.", error);
+        }
+
+        // Keep the established main-window show/position behavior unchanged.
+        await appWindow.show();
+
+        // Avoid a blink on fast starts, but don't delay the main window while
+        // device/history requests are still running.
+        void Promise.allSettled(initialLoads).then(async () => {
+          const remaining = Math.max(0, 900 - (Date.now() - splashShownAt));
+          if (remaining > 0) {
+            await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+          }
+          try {
+            await splashWindow.close();
+          } catch (error) {
+            console.debug("ClipX: splash window could not be closed cleanly.", error);
+          }
+        });
+      }
       handleScan();
     }
-    getThisDeviceIdenty();
-    refreshPaired();
-    refreshHistory();
     positionAppWindow();
 
     // Push-based sync: the core emits these whenever paired/connection or
