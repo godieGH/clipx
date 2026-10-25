@@ -52,10 +52,20 @@ fn logs_directory() -> PathBuf {
 }
 
 fn newest_log_file(directory: &Path) -> Option<PathBuf> {
-    fs::read_dir(directory).ok()?.filter_map(Result::ok).map(|entry| entry.path())
-        .filter(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("clipx-core"))
-            && path.extension().and_then(|ext| ext.to_str()) == Some("log"))
-        .max_by_key(|path| fs::metadata(path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH))
+    fs::read_dir(directory)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("clipx-core"))
+                && path.extension().and_then(|ext| ext.to_str()) == Some("log")
+        })
+        .max_by_key(|path| {
+            fs::metadata(path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+        })
 }
 
 fn read_recent_log_lines(path: &Path) -> Result<Vec<String>, String> {
@@ -64,11 +74,18 @@ fn read_recent_log_lines(path: &Path) -> Result<Vec<String>, String> {
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
     let length = file.metadata().map_err(|e| e.to_string())?.len();
     let truncated = length > MAX_BYTES;
-    if truncated { file.seek(SeekFrom::Start(length - MAX_BYTES)).map_err(|e| e.to_string())?; }
+    if truncated {
+        file.seek(SeekFrom::Start(length - MAX_BYTES))
+            .map_err(|e| e.to_string())?;
+    }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let mut content = String::from_utf8_lossy(&bytes).into_owned();
-    if truncated { if let Some(newline) = content.find('\n') { content.drain(..=newline); } }
+    if truncated {
+        if let Some(newline) = content.find('\n') {
+            content.drain(..=newline);
+        }
+    }
     let lines: Vec<String> = content.lines().map(str::to_owned).collect();
     let skip = lines.len().saturating_sub(MAX_LINES);
     Ok(lines.into_iter().skip(skip).collect())
@@ -76,13 +93,23 @@ fn read_recent_log_lines(path: &Path) -> Result<Vec<String>, String> {
 
 fn reveal_logs_folder() -> Result<String, String> {
     let path = logs_directory();
-    fs::create_dir_all(&path).map_err(|e| format!("Could not create logs folder {}: {e}", path.display()))?;
+    fs::create_dir_all(&path)
+        .map_err(|e| format!("Could not create logs folder {}: {e}", path.display()))?;
     #[cfg(windows)]
-    Command::new("explorer.exe").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    Command::new("explorer.exe")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Could not open logs folder: {e}"))?;
     #[cfg(target_os = "macos")]
-    Command::new("open").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Could not open logs folder: {e}"))?;
     #[cfg(all(unix, not(target_os = "macos")))]
-    Command::new("xdg-open").arg(&path).spawn().map_err(|e| format!("Could not open logs folder: {e}"))?;
+    Command::new("xdg-open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Could not open logs folder: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -227,7 +254,8 @@ pub fn run() {
             }
 
             let show_item = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
-            let diagnostics_item = MenuItem::with_id(app, "diagnostics", "Help & diagnostics", true, None::<&str>)?;
+            let diagnostics_item =
+                MenuItem::with_id(app, "diagnostics", "Help & diagnostics", true, None::<&str>)?;
             let logs_item = MenuItem::with_id(app, "logs", "Open logs folder", true, None::<&str>)?;
             // let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let status_item =
@@ -285,7 +313,11 @@ pub fn run() {
                             let _ = app.emit("open-diagnostics", ());
                         }
                     }
-                    "logs" => { if let Err(error) = reveal_logs_folder() { eprintln!("ClipX: {error}"); } }
+                    "logs" => {
+                        if let Err(error) = reveal_logs_folder() {
+                            eprintln!("ClipX: {error}");
+                        }
+                    }
                     "core_restart" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -630,8 +662,13 @@ async fn download_clipboard_file(state: State<'_, AppState>, id: String) -> Resu
 fn get_diagnostic_snapshot(state: State<'_, AppState>) -> DiagnosticSnapshot {
     let log_directory = logs_directory();
     let latest_log_file = newest_log_file(&log_directory);
-    let recent_logs = latest_log_file.as_deref().map(|p| read_recent_log_lines(p)
-        .unwrap_or_else(|e| vec![format!("Could not read log file: {e}")])).unwrap_or_default();
+    let recent_logs = latest_log_file
+        .as_deref()
+        .map(|p| {
+            read_recent_log_lines(p)
+                .unwrap_or_else(|e| vec![format!("Could not read log file: {e}")])
+        })
+        .unwrap_or_default();
     DiagnosticSnapshot {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         core_status: format!("{:?}", state.supervisor.status()).to_lowercase(),
@@ -642,7 +679,9 @@ fn get_diagnostic_snapshot(state: State<'_, AppState>) -> DiagnosticSnapshot {
 }
 
 #[tauri::command]
-fn open_logs_folder() -> Result<String, String> { reveal_logs_folder() }
+fn open_logs_folder() -> Result<String, String> {
+    reveal_logs_folder()
+}
 
 #[tauri::command]
 fn launched_by_autostart() -> bool {

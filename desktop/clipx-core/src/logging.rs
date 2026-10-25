@@ -18,7 +18,10 @@ pub fn init() -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let dir = log_directory();
     if let Err(error) = std::fs::create_dir_all(&dir) {
-        eprintln!("ClipX: could not create log directory {}: {error}", dir.display());
+        eprintln!(
+            "ClipX: could not create log directory {}: {error}",
+            dir.display()
+        );
         fmt().with_env_filter(filter).init();
         return None;
     }
@@ -36,10 +39,19 @@ pub fn init() -> Option<WorkerGuard> {
     if cfg!(debug_assertions) {
         tracing_subscriber::registry()
             .with(fmt::layer().with_filter(filter.clone()))
-            .with(fmt::layer().with_writer(writer).with_ansi(false).with_filter(filter))
+            .with(
+                fmt::layer()
+                    .with_writer(writer)
+                    .with_ansi(false)
+                    .with_filter(filter),
+            )
             .init();
     } else {
-        fmt().with_env_filter(filter).with_writer(writer).with_ansi(false).init();
+        fmt()
+            .with_env_filter(filter)
+            .with_writer(writer)
+            .with_ansi(false)
+            .init();
     }
     std::panic::set_hook(Box::new(|info| tracing::error!("panic: {info}")));
     Some(guard)
