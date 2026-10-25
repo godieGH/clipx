@@ -1,3 +1,4 @@
+import "./App.css";
 import { useLayoutEffect } from "react";
 
 export function SplashScreen() {
