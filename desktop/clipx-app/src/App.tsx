@@ -1,4 +1,4 @@
-import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import "./App.css";
 import { SplashScreen } from "./SplashScreen";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -782,10 +782,40 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    async function positionAppWindow() {
-      // Positioning is best-effort: still show the app if the monitor query
-      // fails (for example during a display change or remote-session startup).
+    async function prepareStartupWindow(): Promise<{ autostarted: boolean; mainSize: PhysicalSize | null }> {
+      const autostarted = await invoke<boolean>("launched_by_autostart").catch(() => false);
+      if (autostarted) {
+        // Do not flash a splash window during background/system startup.
+        handleScan();
+        return { autostarted: true, mainSize: null };
+      }
+
+      const mainSize = await appWindow.outerSize();
+      // Reuse the existing native window for a small centered splash, then
+      // restore the normal app dimensions after initial data has loaded.
       try {
+        await appWindow.setSize(new PhysicalSize(320, 260));
+        const monitor = await currentMonitor();
+        if (monitor) {
+          const splashSize = await appWindow.outerSize();
+          const workArea = monitor.workArea;
+          const x = workArea.position.x + Math.round((workArea.size.width - splashSize.width) / 2);
+          const y = workArea.position.y + Math.round((workArea.size.height - splashSize.height) / 2);
+          await appWindow.setPosition(new PhysicalPosition(x, y));
+        }
+      } catch (error) {
+        console.debug("ClipX: could not center the startup splash; using the default position.", error);
+      }
+
+      await appWindow.show();
+      handleScan();
+      return { autostarted: false, mainSize };
+    }
+
+    async function showMainWindow(mainSize: PhysicalSize | null) {
+      if (!mainSize) return;
+      try {
+        await appWindow.setSize(mainSize);
         const monitor = await currentMonitor();
         if (monitor) {
           const windowSize = await appWindow.outerSize();
@@ -796,18 +826,12 @@ function App() {
           await appWindow.setPosition(new PhysicalPosition(x, y));
         }
       } catch (error) {
-        console.debug("ClipX: could not position the startup window; using the default position.", error);
+        console.debug("ClipX: could not restore the main window position; using its current position.", error);
       }
-
-      const autostarted = await invoke<boolean>("launched_by_autostart").catch(() => false);
-      if (!autostarted) await appWindow.show();
-      handleScan();
     }
 
-    // Start data loading immediately, in parallel with positioning/showing.
-    // The splash remains visible only for a normal interactive launch and is
-    // dismissed after the initial data requests settle. Background autostart
-    // stays hidden and will show the real UI when the user opens the tray.
+    // Start data loading immediately, while the compact splash is positioned
+    // and shown. The real UI replaces it once the initial requests settle.
     const initialLoads = [
       getThisDeviceIdenty(),
       refreshPaired(),
@@ -815,13 +839,23 @@ function App() {
     ];
 
     void (async () => {
+      let startup: { autostarted: boolean; mainSize: PhysicalSize | null } = {
+        autostarted: true,
+        mainSize: null,
+      };
       try {
-        await positionAppWindow();
+        startup = await prepareStartupWindow();
       } catch (error) {
-        console.debug("ClipX: startup window could not be shown.", error);
+        console.debug("ClipX: startup window preparation failed.", error);
       }
+
       await Promise.allSettled(initialLoads);
-      if (!cancelled) setShowStartupSplash(false);
+      if (cancelled) return;
+
+      if (!startup.autostarted) {
+        await showMainWindow(startup.mainSize);
+      }
+      setShowStartupSplash(false);
     })();
 
     // Push-based sync: the core emits these whenever paired/connection or
