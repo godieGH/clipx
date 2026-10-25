@@ -102,6 +102,28 @@ button {
   }
 }
 
+/*
+ * The document stays opaque until the native backdrop call succeeds.
+ * Windows may render a system-controlled fallback when the requested backdrop
+ * is unavailable or system settings prevent the material from being shown.
+ */
+:root.window-material-active {
+  background-color: transparent;
+  /* Keep scroll-edge fades subtly tinted without painting an opaque band. */
+  --page-bg: rgba(246, 246, 246, 0.78);
+}
+
+:root.window-material-active body,
+:root.window-material-active #root {
+  background-color: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root.window-material-active {
+    --page-bg: rgba(47, 47, 47, 0.78);
+  }
+}
+
 /* ---- custom scroll: hairline indicator + edge fades, no native scrollbar ---- */
 
 .scroll-fade-wrap {

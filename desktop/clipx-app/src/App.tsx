@@ -1,4 +1,4 @@
-import { currentMonitor, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -670,6 +670,34 @@ function App() {
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY);
+
+  useEffect(() => {
+    // Mica is the lightweight native backdrop for Windows 11. Other platforms
+    // keep the existing opaque page background, and Windows chooses its own
+    // solid fallback when transparency is disabled or the system requires it.
+    if (!navigator.userAgent.includes("Windows")) return;
+
+    let cancelled = false;
+    getCurrentWindow()
+      .setEffects({ effects: [Effect.Mica] })
+      .then(() => {
+        if (!cancelled) {
+          document.documentElement.classList.add("window-material-active");
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        document.documentElement.classList.remove("window-material-active");
+        // Unsupported Windows versions/graphics environments must not prevent
+        // startup; the ordinary theme background remains in place.
+        console.debug("ClipX: native Mica unavailable; keeping the solid background.", error);
+      });
+
+    return () => {
+      cancelled = true;
+      document.documentElement.classList.remove("window-material-active");
+    };
+  }, []);
 
   useEffect(() => subscribeToast(setToast), []);
 
