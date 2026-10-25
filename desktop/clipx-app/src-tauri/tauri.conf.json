@@ -19,6 +19,21 @@
         "decorations": false,
         "resizable": true,
         "transparent": true
+      },
+      {
+        "label": "splash",
+        "title": "ClipX",
+        "url": "index.html?splash=1",
+        "visible": false,
+        "width": 320,
+        "height": 280,
+        "center": true,
+        "decorations": false,
+        "resizable": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false
       }
     ],
     "security": {
