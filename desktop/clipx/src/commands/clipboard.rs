@@ -31,14 +31,19 @@ impl ClipboardArgs {
                 };
 
                 if let Ok(res) = ipc.send(request) {
-                    if let Some(clipx::ipc_response::Response::ClipboardHistory(response)) = res.response {
+                    if let Some(clipx::ipc_response::Response::ClipboardHistory(response)) =
+                        res.response
+                    {
                         if response.entries.is_empty() {
                             println!("Clipboard history is empty.");
                             return;
                         }
 
                         for entry in response.entries {
-                            println!("{} [{}] from {}", entry.id, entry.kind, entry.source_device_name);
+                            println!(
+                                "{} [{}] from {}",
+                                entry.id, entry.kind, entry.source_device_name
+                            );
                             if !entry.content.is_empty() {
                                 println!("  {}", entry.content);
                             }
@@ -57,7 +62,9 @@ impl ClipboardArgs {
                 };
 
                 if let Ok(res) = ipc.send(request) {
-                    if let Some(clipx::ipc_response::Response::ClipboardRemove(response)) = res.response {
+                    if let Some(clipx::ipc_response::Response::ClipboardRemove(response)) =
+                        res.response
+                    {
                         println!("removed={}", response.removed);
                     }
                 }

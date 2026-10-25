@@ -3,7 +3,10 @@ use clap::Args;
 
 #[derive(Args, Debug)]
 pub struct DownloadArgs {
-    #[arg(value_name = "ENTRY_ID", help = "Clipboard history entry id to download")]
+    #[arg(
+        value_name = "ENTRY_ID",
+        help = "Clipboard history entry id to download"
+    )]
     entry_id: String,
 }
 
@@ -18,7 +21,9 @@ impl DownloadArgs {
         };
 
         if let Ok(res) = ipc.send(request) {
-            if let Some(clipx::ipc_response::Response::DownloadClipboardFile(response)) = res.response {
+            if let Some(clipx::ipc_response::Response::DownloadClipboardFile(response)) =
+                res.response
+            {
                 println!("{}", response.message);
             }
         }

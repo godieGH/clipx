@@ -3,9 +3,8 @@ use clap::{Parser, Subcommand};
 use clipx_lib::clipx;
 use clipx_lib::ipc;
 use commands::{
-    clipboard::ClipboardArgs, connect::ConnectArgs, device::DeviceArgs,
-    download::DownloadArgs, identity::IdentityArgs, pair::PairArgs, seen::SeenArgs,
-    send::SendArgs, trusted::TrustedArgs,
+    clipboard::ClipboardArgs, connect::ConnectArgs, device::DeviceArgs, download::DownloadArgs,
+    identity::IdentityArgs, pair::PairArgs, seen::SeenArgs, send::SendArgs, trusted::TrustedArgs,
 };
 
 /**

@@ -66,7 +66,11 @@ impl SendArgs {
                     )),
                 }
             }
-            SendSubcmd::File { path, name, mime_type } => {
+            SendSubcmd::File {
+                path,
+                name,
+                mime_type,
+            } => {
                 let data = match fs::read(&path) {
                     Ok(data) => data,
                     Err(error) => {
@@ -92,9 +96,17 @@ impl SendArgs {
                     )),
                 }
             }
-            SendSubcmd::FilePath { name, mime_type, path } => clipx::IpcRequest {
+            SendSubcmd::FilePath {
+                name,
+                mime_type,
+                path,
+            } => clipx::IpcRequest {
                 request: Some(clipx::ipc_request::Request::SendFilePath(
-                    clipx::SendFilePathRequest { name, mime_type, path },
+                    clipx::SendFilePathRequest {
+                        name,
+                        mime_type,
+                        path,
+                    },
                 )),
             },
         };

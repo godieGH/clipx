@@ -9,7 +9,10 @@ pub struct ConnectArgs {
     #[arg(long, help = "Disconnect from a connected device")]
     disconnect: bool,
 
-    #[arg(value_name = "DEVICE_ID", help = "Connect to or disconnect from a trusted device")]
+    #[arg(
+        value_name = "DEVICE_ID",
+        help = "Connect to or disconnect from a trusted device"
+    )]
     device_id: Option<String>,
 }
 
