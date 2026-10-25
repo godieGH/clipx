@@ -3,6 +3,7 @@
 use clipx_lib::{ipc::non_blocking::Client, message::IpcCmdBridge};
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::Duration,
@@ -90,12 +91,31 @@ async fn connect_to_core(client: &mut Client) -> Result<Option<Child>, String> {
 /// This deliberately respects each paired device's persisted auto-connect preference.
 async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + DEVICE_CONNECTION_TIMEOUT;
+    let mut connect_requested = HashSet::new();
 
     loop {
         let devices = client.get_paired_devices().await?;
 
         if devices.iter().any(|device| device.connection == "connected") {
             return Ok(());
+        }
+
+        // Only initiate connections for devices whose saved preference permits
+        // auto-connect. This also handles the case where the core was already
+        // running and had discovered a peer before this helper was launched.
+        for device in &devices {
+            if device.auto_connect
+                && device.connection == "disconnected"
+                && !device.ip_address.is_empty()
+                && connect_requested.insert(device.fingerprint.clone())
+            {
+                if let Err(error) = client.connect_device(device.fingerprint.clone()).await {
+                    eprintln!(
+                        "ClipX: could not initiate connection to {}: {}",
+                        device.name, error
+                    );
+                }
+            }
         }
 
         if tokio::time::Instant::now() >= deadline {
