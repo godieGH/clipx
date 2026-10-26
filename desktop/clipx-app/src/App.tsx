@@ -212,8 +212,19 @@ function useScrollFade<T extends HTMLDivElement>() {
  *  - top/bottom fade gradients that appear only when there's more content that way
  * `className` controls the sizing behavior per context (see App.css).
  */
-function ScrollFade({ className, children }: { className?: string; children: React.ReactNode }) {
+function ScrollFade({ className, children, autoScrollKey }: { className?: string; children: React.ReactNode; autoScrollKey?: string }) {
   const { ref, state, onScroll, thumbProps } = useScrollFade<HTMLDivElement>();
+  useEffect(() => {
+    if (autoScrollKey === undefined) return;
+    const el = ref.current;
+    if (!el) return;
+    if (el.scrollHeight - el.clientHeight > 1) {
+      el.scrollTop = el.scrollHeight;
+    }
+    // Update the custom scrollbar indicator after the log content changes.
+    onScroll();
+  }, [autoScrollKey, onScroll]);
+
 
   return (
     <div className={`scroll-fade-wrap ${className ?? ""}`}>
@@ -1293,6 +1304,7 @@ function App() {
 
   function renderDiagnosticsScreen() {
     const visibleLogs = visibleDiagnosticLogs(diagnostics, diagnosticsClearMarker);
+    const visibleLogText = visibleLogs.length ? visibleLogs.join("\n") : "No visible log entries. New events will appear here.";
 
     return (
       <section className="diagnostics-screen">
@@ -1324,8 +1336,8 @@ function App() {
         <section className="diagnostics-log-panel">
           <div className="diagnostics-log-heading"><h3>Recent logs</h3><span>Live · refreshes every 2 seconds</span></div>
           {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
-          <ScrollFade className="diagnostics-log-scroll">
-            <pre className="diagnostics-log">{visibleLogs.length ? visibleLogs.join("\n") : "No visible log entries. New events will appear here."}</pre>
+          <ScrollFade className="diagnostics-log-scroll" autoScrollKey={visibleLogText}>
+            <pre className="diagnostics-log">{visibleLogText}</pre>
           </ScrollFade>
         </section>
         <p className="diagnostics-privacy">Diagnostic logs can contain technical details such as local paths, device names, or network information. Review the report before sharing it.</p>
