@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "clipx"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "clipx-app"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "clipx",
  "directories",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "clipx-core"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "arboard",
