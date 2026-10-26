@@ -1790,7 +1790,8 @@ button.device-hit:active {
 
 
 /* Help & diagnostics: compact controls and the same custom ScrollFade as device/history lists. */
-.diagnostics-screen { flex:1; min-height:0; overflow-x:hidden; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:12px; scrollbar-width:thin; scrollbar-color:rgba(128,128,128,.4) transparent; }
+.diagnostics-screen { flex:1; min-height:0; overflow-x:hidden; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:12px; scrollbar-width:none; -ms-overflow-style:none; }
+.diagnostics-screen::-webkit-scrollbar { display:none; width:0; height:0; }
 /* The whole screen scrolls when the window is short; children must not shrink away. */
 .diagnostics-screen > * { flex-shrink:0; }
 .diagnostics-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
