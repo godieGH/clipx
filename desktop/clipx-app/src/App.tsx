@@ -1,5 +1,4 @@
 import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -790,8 +789,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    // These are the same initial requests as before; the splash is only a
-    // separate presentation window and never replaces or resizes the main UI.
+    // The main window stays hidden until these first requests settle, so it
+    // opens already populated instead of flashing empty lists.
     const initialLoads = [
       getThisDeviceIdenty(),
       refreshPaired(),
@@ -809,35 +808,13 @@ function App() {
       await appWindow.setPosition(new PhysicalPosition(x, y));
       const autostarted = await invoke<boolean>("launched_by_autostart");
       if (!autostarted) {
-        const splashWindow = await WebviewWindow.getByLabel("splash");
-        const splashShownAt = Date.now();
-        if (splashWindow) {
-          try {
-            await splashWindow.show();
-          } catch (error) {
-            console.debug("ClipX: splash window could not be shown; continuing with the main window.", error);
-          }
-        }
-
-        // Keep the established main-window show/position behavior unchanged.
+        // Wait for the first device/history data (capped, so a slow or failed
+        // request can never keep the window from opening), then show it.
+        await Promise.race([
+          Promise.allSettled(initialLoads),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 2000)),
+        ]);
         await appWindow.show();
-
-        // Avoid a blink on fast starts, but don't delay the main window while
-        // device/history requests are still running. If the splash window
-        // could not be retrieved, the main window still opens normally.
-        if (splashWindow) {
-          void Promise.allSettled(initialLoads).then(async () => {
-            const remaining = Math.max(0, 900 - (Date.now() - splashShownAt));
-            if (remaining > 0) {
-              await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
-            }
-            try {
-              await splashWindow.close();
-            } catch (error) {
-              console.debug("ClipX: splash window could not be closed cleanly.", error);
-            }
-          });
-        }
       }
       handleScan();
     }
