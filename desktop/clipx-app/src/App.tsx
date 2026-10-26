@@ -1,5 +1,5 @@
 import { currentMonitor, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
-import { getWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -798,30 +798,35 @@ function App() {
       await appWindow.setPosition(new PhysicalPosition(x, y));
       const autostarted = await invoke<boolean>("launched_by_autostart");
       if (!autostarted) {
-        const splashWindow = getWebviewWindow("splash");
+        const splashWindow = await WebviewWindow.getByLabel("splash");
         const splashShownAt = Date.now();
-        try {
-          await splashWindow.show();
-        } catch (error) {
-          console.debug("ClipX: splash window could not be shown; continuing with the main window.", error);
+        if (splashWindow) {
+          try {
+            await splashWindow.show();
+          } catch (error) {
+            console.debug("ClipX: splash window could not be shown; continuing with the main window.", error);
+          }
         }
 
         // Keep the established main-window show/position behavior unchanged.
         await appWindow.show();
 
         // Avoid a blink on fast starts, but don't delay the main window while
-        // device/history requests are still running.
-        void Promise.allSettled(initialLoads).then(async () => {
-          const remaining = Math.max(0, 900 - (Date.now() - splashShownAt));
-          if (remaining > 0) {
-            await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
-          }
-          try {
-            await splashWindow.close();
-          } catch (error) {
-            console.debug("ClipX: splash window could not be closed cleanly.", error);
-          }
-        });
+        // device/history requests are still running. If the splash window
+        // could not be retrieved, the main window still opens normally.
+        if (splashWindow) {
+          void Promise.allSettled(initialLoads).then(async () => {
+            const remaining = Math.max(0, 900 - (Date.now() - splashShownAt));
+            if (remaining > 0) {
+              await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+            }
+            try {
+              await splashWindow.close();
+            } catch (error) {
+              console.debug("ClipX: splash window could not be closed cleanly.", error);
+            }
+          });
+        }
       }
       handleScan();
     }
