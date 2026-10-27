@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 use std::{
@@ -30,6 +30,12 @@ const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RICH_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_FILE_CHUNK_BYTES: usize = 1024 * 1024;
+/// A download that has received no chunk for this long is considered stalled
+/// (for example a lost ack, or a sender task still bound to a dead socket).
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(45);
+/// Number of times a stalled download re-asks the sender before reporting the
+/// transfer as interrupted.
+const DOWNLOAD_MAX_STALL_RETRIES: u8 = 3;
 const RESUME_STATE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const STALE_INCOMING_CLEANUP_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
@@ -70,8 +76,9 @@ pub struct DeviceManager<E: Engine> {
     // slower subscriber and make a large transfer appear stuck.
     transfer_progress: HashMap<String, (String, u8)>,
     upload_sessions: HashMap<(String, String), UploadSession>,
-    upload_done_tx: mpsc::UnboundedSender<(String, String)>,
-    upload_done_rx: mpsc::UnboundedReceiver<(String, String)>,
+    upload_done_tx: mpsc::UnboundedSender<(String, String, u64)>,
+    upload_done_rx: mpsc::UnboundedReceiver<(String, String, u64)>,
+    next_upload_id: u64,
     resume_candidates: HashMap<String, ResumeState>,
     transport_connections: HashMap<String, String>,
 }
@@ -90,6 +97,12 @@ struct PendingDownload {
     offer_expires_at_ms: u64,
     received_size: u64,
     received_complete: bool,
+    /// Last time a chunk arrived (or the request was made). Drives the stall
+    /// watchdog.
+    last_activity: Instant,
+    /// How many times the watchdog has re-requested this file since the last
+    /// chunk. Above DOWNLOAD_MAX_STALL_RETRIES means the watchdog gave up.
+    stall_retries: u8,
 }
 
 #[allow(unused)]
@@ -116,8 +129,14 @@ struct ResumeState {
 }
 
 struct UploadSession {
+    /// Identifies this session so a late "done" message from a replaced
+    /// session cannot remove its replacement.
+    id: u64,
     cancel: CancellationToken,
     interrupt: CancellationToken,
+    /// Set when a newer request for the same file replaced this session, so
+    /// the old task exits quietly without reporting "interrupted".
+    superseded: Arc<AtomicBool>,
     ack_tx: mpsc::UnboundedSender<u64>,
 }
 
@@ -231,6 +250,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             upload_sessions: HashMap::new(),
             upload_done_tx,
             upload_done_rx,
+            next_upload_id: 0,
             resume_candidates: HashMap::new(),
         }
     }
@@ -307,6 +327,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         self.notify_devices_changed();
                     }
                     self.prune_expired_sessions();
+                    self.check_stalled_downloads();
                 }
                 Some(cmd) = device_rx.recv() => { self.handle_device_command(cmd).await; }
                 Some(event) = peer_event_rx.recv() => { self.handle_transport_event(event, &notify_tx); }
@@ -315,7 +336,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 // handed us plain text — dispatch is entirely our call, it
                 // never knows this happened.
                 Some(outbound) = clipboard_out_rx.recv() => { self.handle_clipboard_outbound(outbound, &clipboard_tx); }
-                Some((device_id, file_id)) = self.upload_done_rx.recv() => { self.upload_sessions.remove(&(device_id, file_id)); }
+                Some((device_id, file_id, session_id)) = self.upload_done_rx.recv() => {
+                    let key = (device_id, file_id);
+                    if self.upload_sessions.get(&key).is_some_and(|s| s.id == session_id) {
+                        self.upload_sessions.remove(&key);
+                    }
+                }
                 _ = incoming_cleanup_interval.tick() => { self.cleanup_stale_incoming_files(); }
             }
         }
@@ -440,6 +466,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         offer_expires_at_ms,
                         received_size: 0,
                         received_complete: false,
+                        last_activity: Instant::now(),
+                        stall_retries: 0,
                     },
                 );
                 self.notify_transfer(
@@ -1652,6 +1680,17 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         if pending.device_id != device_id || pending.received_complete {
             return;
         }
+        // A chunk we already have (a restarted or replaced sender stream
+        // re-sending data from before our confirmed offset) is harmless. Drop it
+        // quietly rather than aborting the whole download.
+        if chunk.total_size == pending.total_size
+            && !chunk.data.is_empty()
+            && chunk.data.len() <= MAX_FILE_CHUNK_BYTES
+            && chunk.offset.saturating_add(chunk.data.len() as u64) <= pending.received_size
+        {
+            tracing::debug!(file_id = %chunk.file_id, offset = chunk.offset, "ignoring duplicate file chunk");
+            return;
+        }
         if chunk.total_size != pending.total_size
             || chunk.data.len() > MAX_FILE_CHUNK_BYTES
             || chunk.offset != pending.received_size
@@ -1755,6 +1794,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         };
         if let Some(active) = self.pending_downloads.get_mut(&chunk.file_id) {
             active.received_size = new_offset;
+            active.last_activity = Instant::now();
+            active.stall_retries = 0;
         }
         if let Some(active) = self.pending_downloads.get(&chunk.file_id) {
             self.persist_resume_state(&device_id, &chunk.file_id, active, new_offset);
@@ -1886,6 +1927,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 offer_expires_at_ms,
                 received_size: offset,
                 received_complete: false,
+                last_activity: Instant::now(),
+                stall_retries: 0,
             },
         );
         self.notify_transfer(
@@ -1909,6 +1952,77 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             &device_id,
             Body::FileDownloadRequest(proto::FileDownloadRequest { file_id, offset }),
         );
+    }
+
+    /// Watchdog for incoming transfers. Runs on the manager's 10s tick.
+    ///
+    /// If a download is still wanted and the peer is connected but no chunk has
+    /// arrived for DOWNLOAD_STALL_TIMEOUT, ask the sender to continue from our
+    /// current offset over the same connection. After DOWNLOAD_MAX_STALL_RETRIES
+    /// unanswered attempts, report the transfer as interrupted; it still resumes
+    /// on the next reconnect (`resume_downloads_for_device`) or if chunks resume.
+    fn check_stalled_downloads(&mut self) {
+        let stalled: Vec<String> = self
+            .pending_downloads
+            .iter()
+            .filter(|(_, p)| {
+                !p.received_complete
+                    && p.stall_retries <= DOWNLOAD_MAX_STALL_RETRIES
+                    && self.connected.contains_key(&p.device_id)
+                    && p.last_activity.elapsed() >= DOWNLOAD_STALL_TIMEOUT
+            })
+            .map(|(file_id, _)| file_id.clone())
+            .collect();
+        for file_id in stalled {
+            let Some(p) = self.pending_downloads.get_mut(&file_id) else {
+                continue;
+            };
+            let give_up = p.stall_retries >= DOWNLOAD_MAX_STALL_RETRIES;
+            p.last_activity = Instant::now();
+            p.stall_retries = p.stall_retries.saturating_add(1);
+            let snapshot = p.clone();
+            if give_up {
+                tracing::warn!(%file_id, "download stalled; giving up until retried");
+                self.notify_transfer(
+                    &snapshot.entry_id,
+                    &file_id,
+                    &snapshot.file_name,
+                    "download",
+                    snapshot.received_size,
+                    snapshot.total_size,
+                    "interrupted",
+                    "The sender stopped responding; the download can resume later",
+                );
+            } else {
+                tracing::info!(
+                    %file_id,
+                    attempt = snapshot.stall_retries,
+                    offset = snapshot.received_size,
+                    "download stalled; re-requesting from current offset"
+                );
+                self.notify_transfer(
+                    &snapshot.entry_id,
+                    &file_id,
+                    &snapshot.file_name,
+                    "download",
+                    snapshot.received_size,
+                    snapshot.total_size,
+                    "requesting",
+                    format!(
+                        "Resuming {} · {}%",
+                        snapshot.file_name,
+                        Self::percentage(snapshot.received_size, snapshot.total_size)
+                    ),
+                );
+                self.send_peer(
+                    &snapshot.device_id,
+                    Body::FileDownloadRequest(proto::FileDownloadRequest {
+                        file_id: file_id.clone(),
+                        offset: snapshot.received_size,
+                    }),
+                );
+            }
+        }
     }
 
     fn resume_downloads_for_device(&mut self, device_id: &str) {
@@ -1960,13 +2074,22 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
         let key = (device_id.clone(), file_id.clone());
 
-        if self.upload_sessions.contains_key(&key) {
-            return;
-        }
-
         let Some(connection_id) = self.connected.get(&device_id).cloned() else {
             return;
         };
+
+        // The receiver asked again while an older stream for the same file was
+        // still registered (for example that task is bound to a socket that has
+        // since been replaced). The newest request reflects the receiver's real
+        // offset, so retire the old stream and start from the new one.
+        if let Some(old) = self.upload_sessions.remove(&key) {
+            old.superseded.store(true, Ordering::Release);
+            old.interrupt.cancel();
+        }
+        self.next_upload_id = self.next_upload_id.wrapping_add(1);
+        let session_id = self.next_upload_id;
+        let superseded = Arc::new(AtomicBool::new(false));
+        let superseded_task = superseded.clone();
 
         let cancel = CancellationToken::new();
         let interrupt = CancellationToken::new();
@@ -1975,8 +2098,10 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         self.upload_sessions.insert(
             key.clone(),
             UploadSession {
+                id: session_id,
                 cancel: cancel.clone(),
                 interrupt: interrupt.clone(),
+                superseded,
                 ack_tx,
             },
         );
@@ -2049,6 +2174,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     let end = offset.saturating_add(n as u64);
                     let eof = end == total_size;
                     let digest = Sha256::digest(&data).to_vec();
+
+                    // Re-check right before queueing so a retired stream does
+                    // not slip one more chunk onto the connection.
+                    if cancel.is_cancelled() {
+                        return Err("CANCELLED".into());
+                    }
+                    if interrupt.is_cancelled() {
+                        return Err("INTERRUPTED".into());
+                    }
 
                     let (reply_tx, reply_rx) = oneshot::channel();
 
@@ -2160,7 +2294,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             .await;
 
-            if let Err(error) = result {
+            if let Err(error) = result
+                && !superseded_task.load(Ordering::Acquire)
+            {
                 if error == "CANCELLED" {
                     Self::emit_transfer(
                         &events_tx,
@@ -2210,7 +2346,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 }
             }
 
-            let _ = done_tx.send(key);
+            let _ = done_tx.send((key.0, key.1, session_id));
         });
     }
 
