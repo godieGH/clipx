@@ -13,7 +13,7 @@ impl From<DeviceType> for String {
             DeviceType::Ios => "Ios".to_string(),
             DeviceType::Linux => "Linux".to_string(),
             DeviceType::Macos => "Macos".to_string(),
-            DeviceType::Unspecified => "Unkknow".to_string(),
+            DeviceType::Unspecified => "Unknown".to_string(),
             DeviceType::Windows => "Windows".to_string(),
         }
     }
