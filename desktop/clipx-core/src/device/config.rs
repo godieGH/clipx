@@ -1,6 +1,7 @@
 use crate::message::proto::DeviceType;
 use directories::ProjectDirs;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -148,8 +149,29 @@ pub fn clipboard_history_path() -> PathBuf {
     state_dir().join(CLIPBOARD_HISTORY_FILE)
 }
 
+/// The preferred (default) WS port. Under a port collision the listener binds
+/// something else, so anything peers can observe must use
+/// `get_effective_ws_port()` instead.
 pub fn get_ws_port() -> u32 {
     WEBSOCKET_SERVER_PORT
+}
+
+/// The port the WS listener actually bound; 0 = not bound yet. Overwritten on
+/// every (re)start, because the mobile bridge can stop and start the core
+/// in-process and a fallback port may differ between runs.
+static EFFECTIVE_WS_PORT: AtomicU32 = AtomicU32::new(0);
+
+/// Port policy is fixed-first, random-fallback (see `netio::transport`). Read
+/// this for everything peers or the UI observe: announces, identity, display.
+pub fn get_effective_ws_port() -> u32 {
+    match EFFECTIVE_WS_PORT.load(Ordering::Acquire) {
+        0 => WEBSOCKET_SERVER_PORT,
+        p => p,
+    }
+}
+
+pub fn record_effective_ws_port(port: u32) {
+    EFFECTIVE_WS_PORT.store(port, Ordering::Release);
 }
 
 pub fn get_current_device_type() -> DeviceType {

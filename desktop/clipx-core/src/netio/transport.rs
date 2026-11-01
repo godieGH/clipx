@@ -114,18 +114,45 @@ pub struct Transport {
 }
 
 impl Transport {
-    pub async fn create_transport(
+    /// Port policy, in one place: try the default port first so the common
+    /// case stays deterministic (existing firewall rules and docs keep
+    /// working); if it is unavailable, let the OS pick a free port instead of
+    /// dying. The port actually bound is recorded in config so discovery and
+    /// identity advertise the truth, never a stale preference.
+    ///
+    /// Bound synchronously (then handed to tokio) so the effective port is
+    /// recorded before discovery or the device manager can read it. Must be
+    /// called from inside a tokio runtime (`TcpListener::from_std`).
+    fn bind_listener() -> std::io::Result<TcpListener> {
+        use std::io::ErrorKind;
+        let preferred = crate::device::config::get_ws_port() as u16;
+        let std_listener = match std::net::TcpListener::bind(("0.0.0.0", preferred)) {
+            Ok(l) => l,
+            // PermissionDenied: Windows reports excluded / exclusively-held
+            // ports this way instead of AddrInUse.
+            Err(e) if matches!(e.kind(), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => {
+                tracing::warn!(
+                    "preferred WS port {preferred} unavailable ({e}); falling back to an OS-assigned port"
+                );
+                std::net::TcpListener::bind(("0.0.0.0", 0))?
+            }
+            Err(e) => return Err(e),
+        };
+        std_listener.set_nonblocking(true)?;
+        let port = std_listener.local_addr()?.port();
+        crate::device::config::record_effective_ws_port(port as u32);
+        tracing::info!("WS server running on port={port} ...");
+        TcpListener::from_std(std_listener)
+    }
+
+    pub fn create_transport(
         shutdown_rx: watch::Receiver<bool>,
         command_rx: mpsc::UnboundedReceiver<TransportCommand>,
         event_tx: mpsc::UnboundedSender<TransportEvent>,
-    ) -> Self {
-        let ws_port = crate::device::config::get_ws_port();
-        let listener = TcpListener::bind(format!("0.0.0.0:{ws_port}"))
-            .await
-            .expect("websocket listener failed bind");
-        tracing::info!("WS server running on port={ws_port} ...");
+    ) -> std::io::Result<Self> {
+        let listener = Self::bind_listener()?;
         let (register_tx, register_rx) = mpsc::unbounded_channel();
-        Self {
+        Ok(Self {
             listener,
             connections: HashMap::new(),
             pending_connections: HashMap::new(),
@@ -134,7 +161,7 @@ impl Transport {
             event_tx,
             register_tx,
             register_rx,
-        }
+        })
     }
 
     pub async fn run(mut self) {

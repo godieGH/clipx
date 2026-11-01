@@ -84,7 +84,7 @@ async fn broadcast_presence(
         fingerprint: identity.get_this_device_fingerprint().to_vec(),
         device_name: crate::device::config::get_hostname(),
         device_type,
-        ws_port: crate::device::config::get_ws_port(),
+        ws_port: crate::device::config::get_effective_ws_port(),
     };
 
     let mut message: Vec<u8> = vec![];

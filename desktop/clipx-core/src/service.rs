@@ -171,14 +171,15 @@ where
     let (peer_event_tx, peer_event_rx) = mpsc::unbounded_channel();
     let (core_events_tx, _) = broadcast::channel::<CoreEvent>(32);
 
-    let shutdown_for_transport = shutdown_rx.clone();
+    // Bind synchronously, before discovery or the device manager exist, so
+    // the effective WS port is recorded before anything can read it.
+    let transport = crate::netio::transport::Transport::create_transport(
+        shutdown_rx.clone(),
+        transport_rx,
+        peer_event_tx,
+    )
+    .expect("websocket listener failed bind");
     tasks.push(tokio::spawn(async move {
-        let transport = crate::netio::transport::Transport::create_transport(
-            shutdown_for_transport,
-            transport_rx,
-            peer_event_tx,
-        )
-        .await;
         transport.run().await;
     }));
 

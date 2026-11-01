@@ -2958,7 +2958,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     device_id: hex::encode(self.identity.get_this_device_fingerprint()),
                     device_name: config::get_hostname(),
                     public_key_hex: hex::encode(self.identity.public_key_bytes()),
-                    ws_port: config::get_ws_port(),
+                    ws_port: config::get_effective_ws_port(),
                     device_type: config::get_current_device_type(),
                     ip_addr: addr.to_string(),
                 });
