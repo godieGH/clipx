@@ -1,9 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{mpsc, oneshot, watch},
+    sync::{Semaphore, mpsc, oneshot, watch},
 };
 use tokio_tungstenite::{
     WebSocketStream, accept_async, client_async, tungstenite::Message as WsMessage,
@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::message::proto::{self, peer_message::Body};
 
+const MAX_INBOUND_CONNECTIONS: usize = 32;
 #[derive(Debug, Clone)]
 pub struct ConnectedDevice {
     pub id: String,
@@ -111,6 +112,9 @@ pub struct Transport {
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
     register_rx: mpsc::UnboundedReceiver<Registration>,
+
+    // how many concurrent connections
+    inbound_slots: Arc<Semaphore>,
 }
 
 impl Transport {
@@ -161,6 +165,7 @@ impl Transport {
             event_tx,
             register_tx,
             register_rx,
+            inbound_slots: Arc::new(Semaphore::new(MAX_INBOUND_CONNECTIONS)),
         })
     }
 
@@ -494,14 +499,27 @@ impl Transport {
         let register_tx = self.register_tx.clone();
         let event_tx = self.event_tx.clone();
 
+        let Ok(permit) = self.inbound_slots.clone().try_acquire_owned() else {
+            tracing::warn!("inbound connection limit reached; rejecting {addr}");
+            return;
+        };
+
         tokio::spawn(async move {
-            let mut ws = match accept_async(stream).await {
-                Ok(ws) => ws,
-                Err(e) => {
-                    tracing::warn!("inbound ws handshake failed from {addr}: {e}");
-                    return;
-                }
-            };
+            let _permit = permit;
+            let mut ws =
+                match tokio::time::timeout(Duration::from_secs(10), accept_async(stream)).await {
+                    Ok(Ok(ws)) => ws,
+
+                    Ok(Err(e)) => {
+                        tracing::warn!("inbound handshake failed from {addr}: {e}");
+                        return;
+                    }
+
+                    Err(_) => {
+                        tracing::warn!("inbound handshake timed out from {addr}");
+                        return;
+                    }
+                };
 
             // First frame must self-identify — a fresh PairRequest (carries
             // a public key + fingerprint) or a ConnectChallenge (carries the
