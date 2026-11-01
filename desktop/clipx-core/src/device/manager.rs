@@ -861,7 +861,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         }
         match message.body {
-            Some(Body::PairRequest(req)) => self.on_pair_request(device_id, req, notify_tx),
+            Some(Body::PairRequest(req)) => {
+                self.on_pair_request(device_id, connection_id, req, notify_tx)
+            }
             Some(Body::PairResponse(res)) => self.on_pair_response(device_id, res, notify_tx),
             Some(Body::PairChallenge(c)) => self.on_pair_challenge(device_id, c, notify_tx),
             Some(Body::PairChallengeResponse(r)) => self.on_pair_challenge_response(device_id, r),
@@ -891,33 +893,43 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         }
     }
 
+    fn reject_pair_request(&self, device_id: &str, connection_id: &str, code: u32, message: &str) {
+        self.send_control_on_connection(device_id, connection_id, code, message);
+
+        self.request_transport_disconnect_on_connection(device_id, connection_id);
+    }
+
     // ---------------- Pair: responder side ----------------
 
     fn on_pair_request(
         &mut self,
         device_id: String,
+        connection_id: String,
         req: proto::PeerPairRequest,
         notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
         if self.trusted.is_trusted(&device_id) {
-            self.send_control(
+            self.reject_pair_request(
                 &device_id,
+                &connection_id,
                 pairing::control::ALREADY_TRUSTED,
                 "already trusted",
             );
             return;
         }
         let Ok(pubkey): Result<[u8; 32], _> = req.public_key.as_slice().try_into() else {
-            self.send_control(
+            self.reject_pair_request(
                 &device_id,
+                &connection_id,
                 pairing::control::PROTOCOL_ERROR,
                 "malformed public key",
             );
             return;
         };
         if hex::encode(DeviceIdentity::get_fingerprint_for(pubkey)) != device_id {
-            self.send_control(
+            self.reject_pair_request(
                 &device_id,
+                &connection_id,
                 pairing::control::PROTOCOL_ERROR,
                 "fingerprint does not match public key",
             );
