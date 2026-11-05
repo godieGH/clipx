@@ -59,6 +59,8 @@ tasks.register<Exec>("buildRustAndroidFfiBridge") {
     inputs.property("targetAbis", targetAbis)
     outputs.dir("src/main/jniLibs")
 
+    outputs.file("../../native/target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so")
+
     workingDir("../../native")
     val abiFlags = targetAbis.flatMap { listOf("-t", it) }
     commandLine(
