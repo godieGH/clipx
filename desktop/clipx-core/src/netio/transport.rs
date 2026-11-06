@@ -1,6 +1,11 @@
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{Semaphore, mpsc, oneshot, watch},
@@ -10,6 +15,7 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
+use super::transport_profile::{InboundMessageProfile, MessageTrace};
 use crate::message::proto::{self, peer_message::Body};
 
 const MAX_INBOUND_CONNECTIONS: usize = 32;
@@ -35,6 +41,8 @@ pub enum TransportEvent {
         device_id: String,
         connection_id: String,
         message: proto::PeerMessage,
+        /// Timing metadata, only set for FileChunk / FileChunkAck.
+        profile: Option<InboundMessageProfile>,
     },
 }
 
@@ -62,12 +70,14 @@ pub enum TransportCommand {
     SendPeerMessage {
         device_id: String,
         message: proto::PeerMessage,
+        enqueued_at: Instant,
         reply_to: oneshot::Sender<bool>,
     },
     SendPeerMessageOnConnection {
         device_id: String,
         connection_id: String,
         message: proto::PeerMessage,
+        enqueued_at: Instant,
         reply_to: oneshot::Sender<bool>,
     },
     ListConnections {
@@ -80,7 +90,7 @@ enum Registration {
         device_id: String,
         connection_id: String,
         addr: SocketAddr,
-        outbound_tx: mpsc::Sender<WsMessage>,
+        outbound_tx: mpsc::Sender<OutboundFrame>,
         reply_to: Option<oneshot::Sender<bool>>,
         allow_duplicate: bool,
     },
@@ -94,10 +104,18 @@ enum Registration {
     },
 }
 
+/// A frame waiting in a connection's outbound channel, with the metadata
+/// needed to profile how long it sat there.
+struct OutboundFrame {
+    message: WsMessage,
+    enqueued_at: Instant,
+    trace: Option<MessageTrace>,
+}
+
 struct Conn {
     connection_id: String,
     addr: SocketAddr,
-    outbound_tx: mpsc::Sender<WsMessage>,
+    outbound_tx: mpsc::Sender<OutboundFrame>,
 }
 
 pub struct Transport {
@@ -192,6 +210,62 @@ impl Transport {
         tracing::info!("transport stopped");
     }
 
+    /// Hands an encoded frame to the connection's outbound channel and logs how
+    /// long each pre-wire stage took (ACK-path profiling).
+    #[allow(clippy::too_many_arguments)]
+    fn queue_outbound(
+        outbound_tx: mpsc::Sender<OutboundFrame>,
+        device_id: String,
+        connection_id: String,
+        bytes: Vec<u8>,
+        trace: Option<MessageTrace>,
+        command_delay_us: u64,
+        encode_us: u64,
+        route_us: u64,
+        reply_to: oneshot::Sender<bool>,
+    ) {
+        tokio::spawn(async move {
+            let wire_bytes = bytes.len();
+            let started = Instant::now();
+
+            // Wait until the connection channel has capacity.
+            let queued = match outbound_tx.reserve().await {
+                Ok(permit) => {
+                    permit.send(OutboundFrame {
+                        message: WsMessage::binary(bytes),
+                        enqueued_at: Instant::now(),
+                        trace: trace.clone(),
+                    });
+                    true
+                }
+                Err(_) => false,
+            };
+
+            let outbound_enqueue_us = started.elapsed().as_micros() as u64;
+
+            if let Some(trace) = trace {
+                tracing::debug!(
+                    %device_id,
+                    %connection_id,
+                    message_type = trace.message_type,
+                    file_id = %trace.file_id,
+                    confirmed_offset = trace.confirmed_offset,
+                    seq = ?trace.seq,
+                    payload_bytes = trace.payload_bytes,
+                    wire_bytes,
+                    command_delay_us,
+                    encode_us,
+                    route_us,
+                    outbound_enqueue_us,
+                    queued,
+                    "transport outbound queue profile"
+                );
+            }
+
+            let _ = reply_to.send(queued);
+        });
+    }
+
     fn handle_command(&mut self, cmd: TransportCommand) {
         match cmd {
             TransportCommand::Connect {
@@ -276,37 +350,64 @@ impl Transport {
             TransportCommand::SendPeerMessage {
                 device_id,
                 message,
+                enqueued_at,
                 reply_to,
             } => {
+                let command_delay_us = enqueued_at.elapsed().as_micros() as u64;
+                let trace = MessageTrace::from_message(&message);
+
+                // Protobuf encoding.
+                let started = Instant::now();
                 let mut buf = Vec::new();
                 if message.encode(&mut buf).is_err() {
                     let _ = reply_to.send(false);
                     return;
                 }
-                let Some(outbound_tx) = self
-                    .connections
-                    .get(&device_id)
-                    .map(|c| c.outbound_tx.clone())
-                else {
+                let encode_us = started.elapsed().as_micros() as u64;
+
+                // Active connection lookup.
+                let started = Instant::now();
+                let Some(conn) = self.connections.get(&device_id) else {
                     let _ = reply_to.send(false);
                     return;
                 };
-                tokio::spawn(async move {
-                    let ok = outbound_tx.send(WsMessage::binary(buf)).await.is_ok();
-                    let _ = reply_to.send(ok);
-                });
+                let connection_id = conn.connection_id.clone();
+                let outbound_tx = conn.outbound_tx.clone();
+                let route_us = started.elapsed().as_micros() as u64;
+
+                Self::queue_outbound(
+                    outbound_tx,
+                    device_id,
+                    connection_id,
+                    buf,
+                    trace,
+                    command_delay_us,
+                    encode_us,
+                    route_us,
+                    reply_to,
+                );
             }
             TransportCommand::SendPeerMessageOnConnection {
                 device_id,
                 connection_id,
                 message,
+                enqueued_at,
                 reply_to,
             } => {
+                let command_delay_us = enqueued_at.elapsed().as_micros() as u64;
+                let trace = MessageTrace::from_message(&message);
+
+                // Protobuf encoding.
+                let started = Instant::now();
                 let mut buf = Vec::new();
                 if message.encode(&mut buf).is_err() {
                     let _ = reply_to.send(false);
                     return;
                 }
+                let encode_us = started.elapsed().as_micros() as u64;
+
+                // Exact active or pending connection lookup.
+                let started = Instant::now();
                 let outbound_tx = if let Some(conn) = self.connections.get(&device_id) {
                     if conn.connection_id == connection_id {
                         Some(conn.outbound_tx.clone())
@@ -324,14 +425,24 @@ impl Transport {
                         })
                         .map(|(_, conn)| conn.outbound_tx.clone())
                 });
+                let route_us = started.elapsed().as_micros() as u64;
+
                 let Some(outbound_tx) = outbound_tx else {
                     let _ = reply_to.send(false);
                     return;
                 };
-                tokio::spawn(async move {
-                    let ok = outbound_tx.send(WsMessage::binary(buf)).await.is_ok();
-                    let _ = reply_to.send(ok);
-                });
+
+                Self::queue_outbound(
+                    outbound_tx,
+                    device_id,
+                    connection_id,
+                    buf,
+                    trace,
+                    command_delay_us,
+                    encode_us,
+                    route_us,
+                    reply_to,
+                );
             }
             TransportCommand::ListConnections { reply_to } => {
                 let devices = self
@@ -581,6 +692,7 @@ impl Transport {
                 device_id: device_id.clone(),
                 connection_id: connection_id.clone(),
                 message,
+                profile: None,
             });
 
             run_connection(
@@ -602,11 +714,15 @@ async fn run_connection(
     mut ws: WebSocketStream<TcpStream>,
     device_id: String,
     connection_id: String,
-    mut outbound_rx: mpsc::Receiver<WsMessage>,
+    mut outbound_rx: mpsc::Receiver<OutboundFrame>,
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
 ) {
     let mut ping_interval = tokio::time::interval(Duration::from_secs(15));
+    // ACK-path profiling: when the last FileChunk finished `ws.send`, and when
+    // the last FileChunk frame arrived from the peer.
+    let mut last_big_send_done: Option<Instant> = None;
+    let mut last_big_rx: Option<Instant> = None;
     loop {
         tokio::select! {
             _ = ping_interval.tick() => {
@@ -614,15 +730,98 @@ async fn run_connection(
             }
             outbound = outbound_rx.recv() => {
                 match outbound {
-                    Some(msg) => { if ws.send(msg).await.is_err() { break; } }
+                    Some(frame) => {
+                        let OutboundFrame {
+                            message,
+                            enqueued_at,
+                            trace,
+                        } = frame;
+
+                        // Time spent waiting inside the connection channel.
+                        let outbound_wait_us = enqueued_at.elapsed().as_micros() as u64;
+
+                        // Actual WebSocket send duration (local; not remote delivery).
+                        let started = Instant::now();
+                        let success = ws.send(message).await.is_ok();
+                        let done = Instant::now();
+                        let ws_send_us = done.duration_since(started).as_micros() as u64;
+
+                        match trace.as_ref().map(|t| t.message_type) {
+                            Some("FileChunk") => last_big_send_done = Some(done),
+                            Some("FileChunkAck") => {
+                                if let Some(rx_at) = last_big_rx.take() {
+                                    tracing::debug!(
+                                        %device_id,
+                                        rx_to_ack_sent_us = done.duration_since(rx_at).as_micros() as u64,
+                                        "transport ack leave profile"
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        if let Some(trace) = trace {
+                            tracing::debug!(
+                                %device_id,
+                                %connection_id,
+                                message_type = trace.message_type,
+                                file_id = %trace.file_id,
+                                confirmed_offset = trace.confirmed_offset,
+                                seq = ?trace.seq,
+                                payload_bytes = trace.payload_bytes,
+                                outbound_wait_us,
+                                ws_send_us,
+                                success,
+                                "transport websocket send profile"
+                            );
+                        }
+
+                        if !success {
+                            break;
+                        }
+                    }
                     None => break, // Disconnect dropped the sender
                 }
             }
             incoming = ws.next() => {
                 match incoming {
                     Some(Ok(WsMessage::Binary(bytes))) => {
+                        // Frame fully read from the socket: this is its arrival time.
+                        let started = Instant::now();
+
                         match proto::PeerMessage::decode(bytes.as_ref()) {
-                            Ok(message) => { let _ = event_tx.send(TransportEvent::PeerMessage { device_id: device_id.clone(), connection_id: connection_id.clone(), message }); }
+                            Ok(message) => {
+                                let decode_us = started.elapsed().as_micros() as u64;
+
+                                let profile = MessageTrace::from_message(&message).map(|trace| {
+                                    InboundMessageProfile {
+                                        trace,
+                                        decode_us,
+                                        event_enqueued_at: Instant::now(),
+                                    }
+                                });
+
+                                match profile.as_ref().map(|p| p.trace.message_type) {
+                                    Some("FileChunk") => last_big_rx = Some(started),
+                                    Some("FileChunkAck") => {
+                                        if let Some(sent_at) = last_big_send_done.take() {
+                                            tracing::debug!(
+                                                %device_id,
+                                                send_done_to_ack_us = started.duration_since(sent_at).as_micros() as u64,
+                                                "transport ack arrive profile"
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+
+                                let _ = event_tx.send(TransportEvent::PeerMessage {
+                                    device_id: device_id.clone(),
+                                    connection_id: connection_id.clone(),
+                                    message,
+                                    profile,
+                                });
+                            }
                             Err(e) => tracing::warn!("undecodable frame from {device_id}: {e}"),
                         }
                     }

@@ -26,6 +26,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
+use super::transfer_profile::{ReceiverProfile, SenderProfile};
+
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RICH_TEXT_BYTES: usize = 8 * 1024 * 1024;
@@ -113,6 +115,7 @@ struct IncomingFileAssembly {
     temp_path: PathBuf,
     state_path: PathBuf,
     file: File,
+    profile: ReceiverProfile,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -671,6 +674,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 device_id,
                 connection_id,
                 message,
+                profile,
             } => {
                 if self
                     .connected
@@ -679,7 +683,38 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 {
                     return;
                 }
-                self.on_peer_message(device_id, connection_id, message, notify_tx)
+
+                // Time spent waiting in the Transport -> DeviceManager channel.
+                let event_queue_us = profile
+                    .as_ref()
+                    .map(|p| p.event_enqueued_at.elapsed().as_micros() as u64)
+                    .unwrap_or(0);
+
+                let device_id_for_log = device_id.clone();
+                let connection_id_for_log = connection_id.clone();
+
+                // Time spent processing the incoming message in DeviceManager.
+                let started = Instant::now();
+
+                self.on_peer_message(device_id, connection_id, message, notify_tx);
+
+                let manager_dispatch_us = started.elapsed().as_micros() as u64;
+
+                if let Some(profile) = profile {
+                    tracing::debug!(
+                        device_id = %device_id_for_log,
+                        connection_id = %connection_id_for_log,
+                        message_type = profile.trace.message_type,
+                        file_id = %profile.trace.file_id,
+                        confirmed_offset = profile.trace.confirmed_offset,
+                        seq = ?profile.trace.seq,
+                        payload_bytes = profile.trace.payload_bytes,
+                        decode_us = profile.decode_us,
+                        event_queue_us,
+                        manager_dispatch_us,
+                        "device manager inbound profile"
+                    );
+                }
             }
         }
     }
@@ -754,8 +789,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
         }
         for (file_id, pending) in interrupted {
-            self.incoming_files
-                .remove(&(device_id.clone(), file_id.clone()));
+            if let Some(s) = self
+                .incoming_files
+                .remove(&(device_id.clone(), file_id.clone()))
+            {
+                s.profile.log_summary(&file_id, "interrupted");
+            }
             self.notify_transfer(
                 &pending.entry_id,
                 &file_id,
@@ -1686,6 +1725,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn on_file_chunk(&mut self, device_id: String, chunk: proto::FileChunk) {
+        let handler_start = Instant::now();
+
         let Some(pending) = self.pending_downloads.get(&chunk.file_id).cloned() else {
             return;
         };
@@ -1711,7 +1752,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             self.abort_download(&chunk.file_id, "Invalid file chunk metadata");
             return;
         }
+        let t = Instant::now();
         let digest = Sha256::digest(&chunk.data);
+        let hash_time = t.elapsed();
         if chunk.sha256.len() != digest.len() || chunk.sha256.as_slice() != digest.as_slice() {
             self.abort_download(&chunk.file_id, "File chunk integrity check failed");
             return;
@@ -1780,6 +1823,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     temp_path: temp_path.clone(),
                     state_path: state_path.clone(),
                     file,
+                    profile: ReceiverProfile::new(),
                 },
             );
         }
@@ -1792,13 +1836,25 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 self.abort_download(&chunk.file_id, "Invalid file chunk sequence");
                 return;
             }
-            if state
+
+            let t = Instant::now();
+            let mut ok = state
                 .file
                 .seek(SeekFrom::Start(state.received_size))
-                .is_err()
-                || state.file.write_all(&chunk.data).is_err()
-                || state.file.sync_all().is_err()
-            {
+                .is_ok();
+            state.profile.seek.record(t.elapsed());
+
+            if ok {
+                let t = Instant::now();
+                ok = state.file.write_all(&chunk.data).is_ok();
+                state.profile.write.record(t.elapsed());
+            }
+            if ok {
+                let t = Instant::now();
+                ok = state.file.sync_all().is_ok();
+                state.profile.sync.record(t.elapsed());
+            }
+            if !ok {
                 self.abort_download(&chunk.file_id, "Could not persist incoming file data");
                 return;
             }
@@ -1809,9 +1865,13 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             active.last_activity = Instant::now();
             active.stall_retries = 0;
         }
+        let mut resume_time = Duration::ZERO;
         if let Some(active) = self.pending_downloads.get(&chunk.file_id) {
+            let t = Instant::now();
             self.persist_resume_state(&device_id, &chunk.file_id, active, new_offset);
+            resume_time = t.elapsed();
         }
+        let t = Instant::now();
         self.send_peer(
             &device_id,
             Body::FileChunkAck(proto::FileChunkAck {
@@ -1819,6 +1879,16 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 confirmed_offset: new_offset,
             }),
         );
+        let ack_time = t.elapsed();
+
+        if let Some(state) = self.incoming_files.get_mut(&key) {
+            let p = &mut state.profile;
+            p.hash.record(hash_time);
+            p.resume_state.record(resume_time);
+            p.ack_queue.record(ack_time);
+            p.handler.record(handler_start.elapsed());
+            p.bytes += chunk.data.len() as u64;
+        }
         if chunk.eof {
             if new_offset != pending.total_size {
                 self.abort_download(&chunk.file_id, "File ended before all data arrived");
@@ -1827,6 +1897,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             let Some(done_state) = self.incoming_files.remove(&key) else {
                 return;
             };
+            done_state.profile.log_summary(&chunk.file_id, "complete");
             let _ = fs::remove_file(&done_state.state_path);
             if let Some(active) = self.pending_downloads.get_mut(&chunk.file_id) {
                 active.received_complete = true;
@@ -2133,6 +2204,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let confirmed_offset_task = confirmed_offset.clone();
 
         tokio::spawn(async move {
+            let mut profile = SenderProfile::new();
+
             let result: Result<(), String> = async {
                 let mut file = tokio::fs::File::open(&path)
                     .await
@@ -2175,7 +2248,11 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
                     let mut data = vec![0u8; MAX_FILE_CHUNK_BYTES];
 
+                    let cycle_start = Instant::now();
+
+                    let t = Instant::now();
                     let n = file.read(&mut data).await.map_err(|e| e.to_string())?;
+                    profile.read.record(t.elapsed());
 
                     if n == 0 && offset != total_size {
                         return Err("Source file ended before the advertised size".into());
@@ -2185,7 +2262,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
                     let end = offset.saturating_add(n as u64);
                     let eof = end == total_size;
+                    let t = Instant::now();
                     let digest = Sha256::digest(&data).to_vec();
+                    profile.hash.record(t.elapsed());
 
                     // Re-check right before queueing so a retired stream does
                     // not slip one more chunk onto the connection.
@@ -2196,6 +2275,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         return Err("INTERRUPTED".into());
                     }
 
+                    let t = Instant::now();
                     let (reply_tx, reply_rx) = oneshot::channel();
 
                     transport_tx
@@ -2213,63 +2293,43 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                                     sha256: digest,
                                 })),
                             },
+                            enqueued_at: Instant::now(),
                             reply_to: reply_tx,
-                        })
-                        .map_err(|_| "Transport is unavailable".to_string())?;
+                        }).map_err(|_| "Transport is unavailable".to_string())?;
 
-                    tokio::select! {
-                        _ = cancel.cancelled() => {
-                            return Err("CANCELLED".into());
-                        }
-
-                        _ = interrupt.cancelled() => {
-                            return Err("INTERRUPTED".into());
-                        }
-
+                    let queue_result: Result<(), String> = tokio::select! {
+                        _ = cancel.cancelled() => Err("CANCELLED".to_string()),
+                        _ = interrupt.cancelled() => Err("INTERRUPTED".to_string()),
                         r = tokio::time::timeout(Duration::from_secs(15), reply_rx) => {
-                            if !matches!(r, Ok(Ok(true))) {
-                                return Err(
-                                    "Transport rejected or timed out queuing file data".into()
-                                );
+                            if matches!(r, Ok(Ok(true))) {
+                                Ok(())
+                            } else {
+                                Err("Transport rejected or timed out queuing file data".to_string())
                             }
                         }
-                    }
+                    };
+                    profile.queue.record(t.elapsed());
+                    queue_result?;
 
-                    tokio::select! {
-                        _ = cancel.cancelled() => {
-                            return Err("CANCELLED".into());
-                        }
-
-                        _ = interrupt.cancelled() => {
-                            return Err("INTERRUPTED".into());
-                        }
-
-                        ack = tokio::time::timeout(
-                            Duration::from_secs(30),
-                            ack_rx.recv(),
-                        ) => {
+                    let t = Instant::now();
+                    let ack_result: Result<(), String> = tokio::select! {
+                        _ = cancel.cancelled() => Err("CANCELLED".to_string()),
+                        _ = interrupt.cancelled() => Err("INTERRUPTED".to_string()),
+                        ack = tokio::time::timeout(Duration::from_secs(30), ack_rx.recv()) => {
                             match ack {
-                                Ok(Some(v)) if v == end => {}
-
-                                Ok(Some(v)) => {
-                                    return Err(
-                                        format!(
-                                            "Unexpected transfer acknowledgement offset {v}"
-                                        )
-                                    );
-                                }
-
-                                _ => {
-                                    return Err(
-                                        "Timed out waiting for transfer acknowledgement".into()
-                                    );
-                                }
+                                Ok(Some(v)) if v == end => Ok(()),
+                                Ok(Some(v)) => Err(format!("Unexpected transfer acknowledgement offset {v}")),
+                                _ => Err("Timed out waiting for transfer acknowledgement".to_string()),
                             }
                         }
-                    }
+                    };
+                    profile.ack_wait.record(t.elapsed());
+                    ack_result?;
 
                     offset = end;
                     confirmed_offset_task.store(offset, Ordering::Release);
+                    profile.cycle.record(cycle_start.elapsed());
+                    profile.bytes += n as u64;
 
                     let state = if eof { "complete" } else { "sending" };
 
@@ -2282,6 +2342,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         )
                     };
 
+                    let t = Instant::now();
                     Self::emit_transfer(
                         &events_tx,
                         &notification,
@@ -2294,6 +2355,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         msg,
                     )
                     .await;
+                    profile.notify.record(t.elapsed());
 
                     if eof {
                         break;
@@ -2305,6 +2367,13 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 Ok(())
             }
             .await;
+            profile.log_summary(
+                &file_id,
+                match &result {
+                    Ok(()) => "complete",
+                    Err(e) => e.as_str(),
+                },
+            );
 
             if let Err(error) = result
                 && !superseded_task.load(Ordering::Acquire)
@@ -2369,6 +2438,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 .incoming_files
                 .remove(&(p.device_id.clone(), file_id.to_string()))
             {
+                s.profile.log_summary(file_id, "aborted");
                 let _ = fs::remove_file(s.temp_path);
             }
             self.resume_candidates.remove(file_id);
@@ -2737,11 +2807,36 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let Some(tx) = self.transport_tx.as_ref() else {
             return;
         };
-        let (reply_tx, _reply_rx) = oneshot::channel();
-        let _ = tx.send(TransportCommand::SendPeerMessage {
-            device_id: device_id.to_string(),
-            message: proto::PeerMessage { body: Some(body) },
-            reply_to: reply_tx,
+
+        let device_id = device_id.to_string();
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        if tx
+            .send(TransportCommand::SendPeerMessage {
+                device_id: device_id.clone(),
+                message: proto::PeerMessage { body: Some(body) },
+                enqueued_at: Instant::now(),
+                reply_to: reply_tx,
+            })
+            .is_err()
+        {
+            tracing::warn!(%device_id, "transport command channel is closed");
+            return;
+        }
+
+        tokio::spawn(async move {
+            match reply_rx.await {
+                Ok(true) => {
+                    tracing::debug!(%device_id, "peer message queued for transport");
+                }
+                Ok(false) => {
+                    tracing::warn!(%device_id, "transport rejected peer message");
+                }
+                Err(_) => {
+                    tracing::warn!(%device_id, "transport dropped peer-message reply");
+                }
+            }
         });
     }
 
@@ -2754,6 +2849,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             device_id: device_id.to_string(),
             connection_id: connection_id.to_string(),
             message: proto::PeerMessage { body: Some(body) },
+            enqueued_at: Instant::now(),
             reply_to: reply_tx,
         });
     }

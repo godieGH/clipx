@@ -1311,7 +1311,7 @@ impl Engine for NotificationEngine {
         message: String,
         override_config: Option<TransferNotificationOverride>,
     ) -> NotificationFuture<'static, ()> {
-        tracing::info!(
+        tracing::debug!(
             %file_id, %file_name, %direction, done, total, %state, %message,
             "notify_file_transfer event"
         );

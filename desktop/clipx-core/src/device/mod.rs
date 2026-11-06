@@ -17,3 +17,5 @@ pub mod seen;
 pub mod trusted;
 /// Shared device metadata structures.
 pub mod types;
+
+mod transfer_profile;

@@ -12,3 +12,5 @@ pub mod ipc;
 pub mod p2p_windows;
 /// Connection transport and low-level socket handling.
 pub mod transport;
+
+pub mod transport_profile;
