@@ -798,16 +798,26 @@ function App() {
     ];
 
     async function positionAppWindow() {
-      const monitor = await currentMonitor();
-      if (!monitor) return;
-      const windowSize = await appWindow.outerSize();
-      const workArea = monitor.workArea;
-      const margin = 30;
-      const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
-      const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
-      await appWindow.setPosition(new PhysicalPosition(x, y));
-      const autostarted = await invoke<boolean>("launched_by_autostart");
-      if (!autostarted) {
+      // Positioning is best-effort. On Wayland/WSLg there may be no monitor
+      // info or setPosition may be refused; that must never keep the window
+      // from being shown, or the app is invisible on desktops without a tray.
+      try {
+        const monitor = await currentMonitor();
+        if (monitor) {
+          const windowSize = await appWindow.outerSize();
+          const workArea = monitor.workArea;
+          const margin = 30;
+          const x = workArea.position.x + workArea.size.width - windowSize.width - margin;
+          const y = workArea.position.y + workArea.size.height - windowSize.height - margin;
+          await appWindow.setPosition(new PhysicalPosition(x, y));
+        }
+      } catch (error) {
+        console.debug("ClipX: could not position the window; using default placement.", error);
+      }
+      // Hidden only for login launches on systems that have a tray to reopen
+      // it from (decided by the core side); a manual launch always shows.
+      const hidden = await invoke<boolean>("start_hidden").catch(() => false);
+      if (!hidden) {
         // Wait for the first device/history data (capped, so a slow or failed
         // request can never keep the window from opening), then show it.
         await Promise.race([

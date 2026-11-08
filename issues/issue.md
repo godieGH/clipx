@@ -14,7 +14,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 
 | issues | status | comment |
 |--------|--------|---------|
-| [0001](#0001) | fixed | Deterministic auto-connect initiator arbitration by device fingerprint. |
+| [0001](#0001) | fixed | Auto-connect overlap resolved in the handshake (earlier fix: fingerprint tie-breaker, since replaced; see 0001 update). |
 | [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
 | [0003](#0002) | fixed | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
 
@@ -27,6 +27,8 @@ Developers of this codebase must ensure to report any observed issues in here, a
 ## 0001
 **Observation:** when two devices start and both have already trusted each other they both simultaneously try to connect if auto-connect is turned on for both of them — sometimes one might win but sometimes both can stuck is the connecting state which delay/stops the connection.
 Fixed by deterministic connection arbitration: when both trusted peers have auto-connect enabled, only the lexicographically smaller device fingerprint initiates the connection. The other peer stays passive and accepts the inbound handshake.
+
+**Update:** the fingerprint tie-breaker described above was later replaced. Overlapping auto-connect attempts are now resolved in the handshake itself (`device/manager.rs`, `on_connect_challenge`): a request that arrives before our own challenge is sent wins; if both challenges are already in flight, the lower random nonce wins and the other side backs off. Status stays `fixed`.
 
 ## 0002
 **Observation:** When the desktop app is opened they're two or three ways to stop it or shut-it-down. the close button on the reactUI is only used to hide the app to a tray. to close/quit/shutdown the app one has to either close it through taskbar-close or through the tray menus where they can click `Quit`. the bug is shown in that second option(the tray `Quit`). it closes/shutdown the app but something is failing so the terminals show an error.

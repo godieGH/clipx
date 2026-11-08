@@ -200,10 +200,16 @@ where
     }));
 
     let shutdown_for_discovery = shutdown_rx.clone();
-    let discovery_tasks =
-        netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx)
-            .expect("failed to start discovery");
-    tasks.extend(discovery_tasks);
+    // Discovery is best-effort: a busy UDP port (for example another core on
+    // a shared network namespace) must not take the whole core down. Without
+    // discovery the core still starts; IPC and the transport stay up.
+    match netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx) {
+        Ok(discovery_tasks) => tasks.extend(discovery_tasks),
+        Err(error) => tracing::warn!(
+            %error,
+            "UDP discovery unavailable (port 9999 in use?); running without auto-discovery"
+        ),
+    }
 
     #[cfg(windows)]
     tasks.push(netio::p2p_windows::spawn(

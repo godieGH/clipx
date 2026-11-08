@@ -397,7 +397,7 @@ pub fn run() {
             reveal_file_location,
             get_diagnostic_snapshot,
             open_logs_folder,
-            launched_by_autostart,
+            start_hidden,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -683,7 +683,52 @@ fn open_logs_folder() -> Result<String, String> {
     reveal_logs_folder()
 }
 
+/// Whether a system tray is reachable from this session.
+///
+/// Windows and macOS always have one. On Linux the tray needs a
+/// StatusNotifier host on the session bus, and plenty of setups have none
+/// (WSLg, minimal window managers, stock GNOME without the AppIndicator
+/// extension). A window hidden with no tray is unreachable, so when this
+/// cannot confirm a tray it answers false and the window gets shown.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn tray_available() -> bool {
+    [
+        "org.kde.StatusNotifierWatcher",
+        "org.freedesktop.StatusNotifierWatcher",
+    ]
+    .iter()
+    .any(|name| dbus_name_has_owner(name))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn tray_available() -> bool {
+    true
+}
+
+/// Asks the session bus whether `name` currently has an owner, via the
+/// `dbus-send` tool. Any failure (tool missing, no session bus) is "no".
+#[cfg(all(unix, not(target_os = "macos")))]
+fn dbus_name_has_owner(name: &str) -> bool {
+    Command::new("dbus-send")
+        .args([
+            "--session",
+            "--print-reply",
+            "--dest=org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.NameHasOwner",
+        ])
+        .arg(format!("string:{name}"))
+        .output()
+        .map(|out| {
+            out.status.success() && String::from_utf8_lossy(&out.stdout).contains("boolean true")
+        })
+        .unwrap_or(false)
+}
+
+/// True when the main window should stay hidden at startup: the app was
+/// launched at login (`--autostart`) AND there is a tray to reopen it from.
+/// A manual launch, or a login launch without a tray, shows the window.
 #[tauri::command]
-fn launched_by_autostart() -> bool {
-    std::env::args().any(|a| a == "--autostart")
+fn start_hidden() -> bool {
+    std::env::args().any(|a| a == "--autostart") && tray_available()
 }
