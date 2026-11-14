@@ -1,7 +1,9 @@
 use crate::netio;
 use crate::state::{AppState, Event};
+use clipx_core::device::config::{MINI_PROTO_VERSION, PROTO_VERSION};
 use clipx_core::device::identity;
 use clipx_core::device::pairing::PairSession;
+use clipx_core::message::proto::Hello;
 use clipx_core::message::proto::{self, clipboard_message, peer_message::Body};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -227,6 +229,26 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
             let body = Body::PairResponse(proto::PeerPairResponse {
                 public_key: own_pub.to_vec(),
                 name: state.device_name.clone(),
+                hello: Some(Hello {
+                    proto_version: if state.hello.proto_version != u32::default() {
+                        state.hello.proto_version
+                    } else {
+                        PROTO_VERSION
+                    },
+                    min_proto_version: if state.hello.min_proto_version != u32::default() {
+                        state.hello.min_proto_version
+                    } else {
+                        MINI_PROTO_VERSION
+                    },
+                    capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                        state.hello.capabilities.clone()
+                    } else {
+                        clipx_core::device::config::get_device_capabilities()
+                            .iter()
+                            .map(|a| *a as i32)
+                            .collect()
+                    },
+                }),
             });
             report(netio::send_body(state, label, body).await);
         }
@@ -287,6 +309,26 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
                     Body::ConnectChallenge(proto::PeerConnectChallenge {
                         nonce,
                         initiator_fingerprint: own_fp.to_vec(),
+                        hello: Some(Hello {
+                            proto_version: if state.hello.proto_version != u32::default() {
+                                state.hello.proto_version
+                            } else {
+                                PROTO_VERSION
+                            },
+                            min_proto_version: if state.hello.min_proto_version != u32::default() {
+                                state.hello.min_proto_version
+                            } else {
+                                MINI_PROTO_VERSION
+                            },
+                            capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                                state.hello.capabilities.clone()
+                            } else {
+                                clipx_core::device::config::get_device_capabilities()
+                                    .iter()
+                                    .map(|a| *a as i32)
+                                    .collect()
+                            },
+                        }),
                     }),
                 )
                 .await,
@@ -305,6 +347,26 @@ async fn dispatch(state: &Arc<AppState>, line: &str) {
                     label,
                     Body::ConnectChallengeResponse(proto::PeerConnectChallengeResponse {
                         signature: sig.to_vec(),
+                        hello: Some(Hello {
+                            proto_version: if state.hello.proto_version != u32::default() {
+                                state.hello.proto_version
+                            } else {
+                                PROTO_VERSION
+                            },
+                            min_proto_version: if state.hello.min_proto_version != u32::default() {
+                                state.hello.min_proto_version
+                            } else {
+                                MINI_PROTO_VERSION
+                            },
+                            capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                                state.hello.capabilities.clone()
+                            } else {
+                                clipx_core::device::config::get_device_capabilities()
+                                    .iter()
+                                    .map(|a| *a as i32)
+                                    .collect()
+                            },
+                        }),
                     }),
                 )
                 .await,
@@ -397,6 +459,26 @@ async fn send_pair_request(state: &Arc<AppState>, label: &str, name: Option<Stri
         name: name.unwrap_or_else(|| state.device_name.clone()),
         public_key: own_pub.to_vec(),
         fingerprint: own_fp.to_vec(),
+        hello: Some(Hello {
+            proto_version: if state.hello.proto_version != u32::default() {
+                state.hello.proto_version
+            } else {
+                PROTO_VERSION
+            },
+            min_proto_version: if state.hello.min_proto_version != u32::default() {
+                state.hello.min_proto_version
+            } else {
+                MINI_PROTO_VERSION
+            },
+            capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                state.hello.capabilities.clone()
+            } else {
+                clipx_core::device::config::get_device_capabilities()
+                    .iter()
+                    .map(|a| *a as i32)
+                    .collect()
+            },
+        }),
     });
     report(netio::send_body(state, label, body).await);
 }
@@ -478,6 +560,26 @@ async fn pair_auto(state: &Arc<AppState>, bus: &broadcast::Sender<Event>, label:
             name: state.device_name.clone(),
             public_key: own_pub.to_vec(),
             fingerprint: own_fp.to_vec(),
+            hello: Some(Hello {
+                proto_version: if state.hello.proto_version != u32::default() {
+                    state.hello.proto_version
+                } else {
+                    PROTO_VERSION
+                },
+                min_proto_version: if state.hello.min_proto_version != u32::default() {
+                    state.hello.min_proto_version
+                } else {
+                    MINI_PROTO_VERSION
+                },
+                capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                    state.hello.capabilities.clone()
+                } else {
+                    clipx_core::device::config::get_device_capabilities()
+                        .iter()
+                        .map(|a| *a as i32)
+                        .collect()
+                },
+            }),
         }),
     )
     .await
@@ -589,6 +691,26 @@ async fn respond_to_pair(
         Body::PairResponse(proto::PeerPairResponse {
             public_key: own_pub.to_vec(),
             name: state.device_name.clone(),
+            hello: Some(Hello {
+                proto_version: if state.hello.proto_version != u32::default() {
+                    state.hello.proto_version
+                } else {
+                    PROTO_VERSION
+                },
+                min_proto_version: if state.hello.min_proto_version != u32::default() {
+                    state.hello.min_proto_version
+                } else {
+                    MINI_PROTO_VERSION
+                },
+                capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                    state.hello.capabilities.clone()
+                } else {
+                    clipx_core::device::config::get_device_capabilities()
+                        .iter()
+                        .map(|a| *a as i32)
+                        .collect()
+                },
+            }),
         }),
     )
     .await

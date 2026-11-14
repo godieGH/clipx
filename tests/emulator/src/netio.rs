@@ -1,4 +1,6 @@
 use crate::state::{AppState, ConnHandle, Event, SessionInfo};
+use clipx_core::device::config::{MINI_PROTO_VERSION, PROTO_VERSION};
+use clipx_core::message::proto::Hello;
 use clipx_core::message::proto::{self, peer_message::Body};
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
@@ -47,6 +49,30 @@ pub async fn run_broadcaster(
         device_name: state.device_name.clone(),
         device_type: state.device_type as i32,
         ws_port: state.ws_port,
+        hello: Some(Hello {
+            proto_version: if state.hello.proto_version != u32::default() {
+                state.hello.proto_version
+            } else {
+                PROTO_VERSION
+            },
+            min_proto_version: if state.hello.min_proto_version != u32::default() {
+                state.hello.min_proto_version
+            } else {
+                MINI_PROTO_VERSION
+            },
+            // We can reuse the core constant capabilities definitions with:-
+            // clipx_core::device::config::get_device_capabilities().iter().map(|a| *a as i32).collect()
+            // but that defeats the flexibility to send caps over announce — emulator allows us to
+            // override and test caps but passing custom values versions.
+            capabilities: if state.hello.capabilities != Vec::<i32>::default() {
+                state.hello.capabilities.clone()
+            } else {
+                clipx_core::device::config::get_device_capabilities()
+                    .iter()
+                    .map(|a| *a as i32)
+                    .collect()
+            },
+        }),
     };
     let mut buf = Vec::new();
     announce.encode(&mut buf).unwrap();

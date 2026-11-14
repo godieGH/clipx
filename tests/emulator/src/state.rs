@@ -1,5 +1,5 @@
 use clipx_core::device::identity::DeviceIdentity;
-use clipx_core::message::proto;
+use clipx_core::message::proto::{self, Hello};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -61,6 +61,7 @@ pub struct AppState {
     pub broadcast_shutdown: Mutex<Option<watch::Sender<bool>>>,
     pub listen_shutdown: Mutex<Option<watch::Sender<bool>>>,
     pub inbound_shutdown: Mutex<Option<watch::Sender<bool>>>,
+    pub hello: Hello,
 }
 
 impl AppState {

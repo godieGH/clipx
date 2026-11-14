@@ -3,7 +3,7 @@ mod netio;
 mod state;
 
 use clipx_core::device::identity::DeviceIdentity;
-use clipx_core::message::proto::DeviceType;
+use clipx_core::message::proto::{DeviceType, Hello};
 use state::AppState;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32};
@@ -15,6 +15,7 @@ async fn main() {
     let mut id_path = std::env::temp_dir().join("clipx_emulator_identity_default");
     let mut ws_port = 8081;
     let mut device_type = "unknown".to_string();
+    let mut hello = Hello::default();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -46,23 +47,63 @@ async fn main() {
                     }
                 }
             }
+            "--proto-versions" => {
+                if let Some(v) = args.next() {
+                    let vers: Vec<u32> = v
+                        .as_str()
+                        .split("-")
+                        .map(|v| {
+                            v.trim()
+                                .parse::<u32>()
+                                .expect("Failed to parse proto versions")
+                        })
+                        .collect();
+                    if vers.len() != 2 {
+                        panic!("proto version must be in pair min-max")
+                    }
+                    let (min, max) = (vers[0], vers[1]);
+                    hello.min_proto_version = min;
+                    hello.proto_version = max;
+                }
+            }
+            "--proto-caps" => {
+                if let Some(v) = args.next() {
+                    hello.capabilities = v
+                        .as_str()
+                        .split(",")
+                        .map(|v| {
+                            v.trim()
+                                .parse::<i32>()
+                                .expect("Failed to parse proto capabilities")
+                        })
+                        .collect();
+                }
+            }
             "-h" | "--help" => {
                 println!("usage: emulator [--name NAME] [--id-path PATH]");
                 println!(
-                    "  --name NAME            display name this emulator announces/pairs as (default: emulator)"
+                    "  --name NAME                          display name this emulator announces/pairs as (default: emulator)"
                 );
                 println!(
-                    "  --id-path PATH         where to persist this emulator's keypair, so its identity"
+                    "  --id-path PATH                       where to persist this emulator's keypair, so its identity"
                 );
                 println!(
-                    "                         is stable across restarts (default: a per-name temp file)"
+                    "                                       is stable across restarts (default: a per-name temp file)"
                 );
                 println!(
-                    "  --port PORT            specify a different transport socket port (default=8081)"
+                    "  --port PORT                          specify a different transport socket port (default=8081)"
                 );
-                println!("  --device-type TYPE     specify the device type (default to unknown)");
                 println!(
-                    "                         valid values (windows|linux|macos|android|ios|unknown)"
+                    "  --device-type TYPE                   specify the device type (default to unknown)"
+                );
+                println!(
+                    "                                       valid values (windows|linux|macos|android|ios|unknown)"
+                );
+                println!(
+                    r#" --proto-versions <MIN>-<MAX>          specify the min and max protocol versions used by the app"#
+                );
+                println!(
+                    r#" --proto-caps "1,2,3"                  specify the capabilities the app offers"#
                 );
                 return;
             }
@@ -105,6 +146,7 @@ async fn main() {
         broadcast_shutdown: Mutex::new(None),
         listen_shutdown: Mutex::new(None),
         inbound_shutdown: Mutex::new(None),
+        hello,
     });
 
     println!("clipx protocol emulator — device '{name}'");

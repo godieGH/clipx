@@ -1,4 +1,5 @@
 use super::seen::SeenDeviceRegistry;
+use super::transfer_profile::{ReceiverProfile, SenderProfile};
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice, TrustedDevice};
 use crate::clipboard::manager::{ClipboardCommand, ClipboardOutbound, ClipboardPayload};
@@ -28,7 +29,14 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
-use super::transfer_profile::{ReceiverProfile, SenderProfile};
+macro_rules! shorter {
+    ($s:expr) => {{
+        let mut k = String::from($s);
+        k.truncate(16);
+        k.push_str("...");
+        k
+    }};
+}
 
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 4 * 1024 * 1024;
@@ -606,6 +614,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return "device not currently reachable".to_string();
         };
         let addr = SocketAddr::new(seen.addr, seen.ws_port as u16);
+        tracing::debug!(device_id = %shorter!(device_id), %addr, "Handle connect: triggered/auto-connect");
 
         self.connect_sessions
             .insert(device_id.to_string(), ConnectSession::new_initiator(addr));
@@ -615,8 +624,13 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         // than opening another socket. This is still gated by the caller's
         // normal fresh-discovery/manual-connect rules.
         if let Some(connection_id) = self.transport_connections.get(device_id).cloned() {
+            tracing::debug!(%connection_id, "Re-using an existing peer transport");
             self.on_transport_connected(device_id.to_string(), connection_id);
         } else {
+            tracing::debug!(
+                device_id = %shorter!(device_id),
+                "Dialing new transport: no peer transport available"
+            );
             self.dial(device_id, addr);
         }
         "connecting".to_string()
@@ -790,7 +804,6 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         }
         self.transport_connections.remove(&device_id);
-        self.connected.remove(&device_id);
         let interrupted: Vec<(String, PendingDownload)> = self
             .pending_downloads
             .iter()
