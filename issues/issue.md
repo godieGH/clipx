@@ -14,9 +14,11 @@ Developers of this codebase must ensure to report any observed issues in here, a
 
 | issues | status | comment |
 |--------|--------|---------|
-| [0001](#0001) | fixed | Auto-connect overlap resolved in the handshake (earlier fix: fingerprint tie-breaker, since replaced; see 0001 update). |
+| [0001](#0001) | fixed | Auto-connect overlap resolved in the handshake (earlier fix: fingerprint tie-breaker, since replaced; see `0001` update). |
 | [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
 | [0003](#0002) | fixed | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
+| [0004](#0004) | report(weak)| Trust revocation is local-only. A peer retaining stale trust can reject a new pairing request, preventing re-pairing until its stale trust is also removed.|
+| [0005](#0005) | report| Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID.|
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.
@@ -43,3 +45,43 @@ the terminal still shows this
 [0910/013145.061:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412
 ```
 *If it is something to be handled/fixed on code it has to be fixed right a way.*
+
+## 0004
+
+**Observation**: Trust is stored independently on each device. When device A forgets device B, A removes B from its local trusted-device store and disconnects the active connection if one exists. However, this operation does not notify B or remove B's corresponding trust record.
+
+*Consequently*, B can continue to regard A as trusted even though A no longer trusts B.
+
+This creates a problem when A attempts to pair with B again. B receives the new `PairRequest`, checks its local trusted-device store, and rejects the request with `ALREADY_TRUSTED` because it still considers A trusted.
+
+The rejection does not cause B to revoke its stale trust record. As a result, A cannot complete pairing while the two devices disagree about their trust relationship.
+
+*Interestingly*, if B attempts to connect to A instead, A rejects the `ConnectChallenge` with `UNKNOWN_DEVICE`(`not a trusted device`). B handles this control code by removing its own stale trust record. Both devices then become untrusted and can pair again.
+
+The same situation can occur when a device loses its trust records but retains the same identity key and fingerprint. A complete data wipe that also regenerates the identity key would be a different case because ClipX would recognize it as a new device.
+
+Design question: Should trust revocation be explicitly communicated to the other device, ensuring both sides remove their trust records? Or is the current behavior intentional, where each device discovers the loss of trust only when it attempts to connect?
+
+For now, this is recorded as a potential design issue rather than assuming that the current behavior is necessarily incorrect.
+
+## 0005
+
+**Observation**: When two devices are connected, disconnecting device A and subsequently trying to reconnect from A can leave A permanently stuck in the `CONNECTING` state.
+
+*Interestingly*, when device B initiates the connection instead, the connection can succeed and resolve the situation.
+
+Code investigation: The current implementation suggests that this happens because the device manager retains a stale transport connection ID after a locally initiated disconnect.
+
+The disconnect operation removes the active connection from the transport's connection registry. However, the corresponding entry in the device manager's `transport_connections` map is not explicitly removed.
+
+*Normally*, this map is cleaned up when the transport reports a `Disconnected` event. However, the transport removes the connection before its connection task reports closure. When the subsequent `Registration::Closed` event arrives, the transport no longer finds the connection in its active registry, so it does not emit the expected `Disconnected` event.
+
+*Consequently*, the device manager can retain an outdated connection ID.
+
+When A tries to connect again, "handle_connect" sees that cached entry and assumes an existing transport connection can be reused. It advances the connection session and attempts to send a new `ConnectChallenge` using the old connection ID, even though the transport no longer has that connection.
+
+The handshake therefore cannot progress, leaving the device stuck in `CONNECTING`.
+
+A new connection initiated by B can provide a fresh inbound transport connection. The handshake arbitration can then replace the stale attempt if B's challenge wins.
+
+Expected behavior: Disconnecting a device must clean up both the logical connection state and its corresponding transport connection mapping. A subsequent connection attempt from either device should establish a fresh, valid transport connection without requiring the other device to initiate the connection.

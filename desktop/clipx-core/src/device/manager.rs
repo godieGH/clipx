@@ -2,9 +2,11 @@ use super::seen::SeenDeviceRegistry;
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice, TrustedDevice};
 use crate::clipboard::manager::{ClipboardCommand, ClipboardOutbound, ClipboardPayload};
+use crate::device::config::{MINI_PROTO_VERSION, PROTO_VERSION};
 use crate::device::identity::{self, DeviceIdentity};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::device::{config, pairing};
+use crate::message::proto::Hello;
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{PairDecision, Prompt, platform::NotificationEngine as Engine};
@@ -733,6 +735,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         name: config::get_hostname(),
                         public_key: own_pub.to_vec(),
                         fingerprint: own_fp.to_vec(),
+                        hello: Some(Hello {
+                            proto_version: PROTO_VERSION,
+                            min_proto_version: MINI_PROTO_VERSION,
+                            capabilities: config::get_device_capabilities()
+                                .iter()
+                                .map(|c| *c as i32)
+                                .collect(),
+                        }),
                     }),
                 );
             }
@@ -757,6 +767,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 Body::ConnectChallenge(proto::PeerConnectChallenge {
                     nonce: nonce_vec,
                     initiator_fingerprint: own_fp.to_vec(),
+                    hello: Some(Hello {
+                        proto_version: PROTO_VERSION,
+                        min_proto_version: MINI_PROTO_VERSION,
+                        capabilities: config::get_device_capabilities()
+                            .iter()
+                            .map(|c| *c as i32)
+                            .collect(),
+                    }),
                 }),
             );
         }
@@ -771,6 +789,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         }
         self.transport_connections.remove(&device_id);
+        self.connected.remove(&device_id);
         let interrupted: Vec<(String, PendingDownload)> = self
             .pending_downloads
             .iter()
@@ -1271,6 +1290,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Body::PairResponse(proto::PeerPairResponse {
                         public_key: own_pub.to_vec(),
                         name: config::get_hostname(),
+                        hello: Some(Hello {
+                            proto_version: PROTO_VERSION,
+                            min_proto_version: MINI_PROTO_VERSION,
+                            capabilities: config::get_device_capabilities()
+                                .iter()
+                                .map(|c| *c as i32)
+                                .collect(),
+                        }),
                     }),
                 );
             }
@@ -1482,6 +1509,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             &connection_id,
             Body::ConnectChallengeResponse(proto::PeerConnectChallengeResponse {
                 signature: sig.to_vec(),
+                hello: Some(Hello {
+                    proto_version: PROTO_VERSION,
+                    min_proto_version: MINI_PROTO_VERSION,
+                    capabilities: config::get_device_capabilities()
+                        .iter()
+                        .map(|c| *c as i32)
+                        .collect(),
+                }),
             }),
         );
     }
@@ -1592,7 +1627,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         ctrl: proto::PreTransportControl,
     ) {
         tracing::warn!(
-            "pretransport control from {device_id}: {} ({})",
+            "pre-transport control from {device_id}: {} ({})",
             ctrl.code,
             ctrl.message
         );

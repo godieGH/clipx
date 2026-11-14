@@ -1,4 +1,7 @@
-use crate::message::proto::DeviceType;
+use crate::message::proto::{
+    DeviceType,
+    PeerCapabilities::{self, CapabilityFileTransferStallingReRequests, CapabilityWifiDirect},
+};
 use directories::ProjectDirs;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -24,6 +27,17 @@ const STATE_FILES: [&str; 4] = [
 static STATE_DIR: OnceLock<PathBuf> = OnceLock::new();
 static TRANSFER_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+pub type ThisDeviceCapabilities = Vec<PeerCapabilities>;
+
+// Updated +1 when an old peer can not handle, not just with schema changes
+// eg. A new step in pairing handshake, a changed meaning for an existing field or rule
+// mostly application level compatibilities related to protos
+pub const PROTO_VERSION: u32 = 1;
+// Bump when proto message field is removed, retyped, renumbered, reused a field number
+// semantic change would make peer misbehave not just ignoring. The old protocol is unsafe
+// just to limit which min old builds this current build can support
+pub const MINI_PROTO_VERSION: u32 = 1;
+
 /// For mobile Oses — Android/Ios have a real human-readable device name
 /// that only the platform layer can resolve, so it's supplied here the
 /// same way the config root is
@@ -31,6 +45,7 @@ pub fn set_device_name_override(name: String) {
     let _ = DEVICE_NAME_OVERRIDE.set(name);
 }
 
+/// Get this device hostname.
 pub fn get_hostname() -> String {
     if let Some(name) = DEVICE_NAME_OVERRIDE.get() {
         return name.clone();
@@ -234,4 +249,40 @@ pub fn preferred_local_ip() -> Option<std::net::Ipv4Addr> {
         }
     });
     candidates.into_iter().next().map(|(_, ip)| ip)
+}
+
+pub enum Gate {
+    Ok { effective: u32 },
+    PeerTooOld,
+    SelfTooOld,
+}
+
+pub fn check_proto_version(peer_ver: u32, peer_min: u32) -> Gate {
+    let (peer_ver, peer_min) = match (peer_ver, peer_min) {
+        (0, 0) => (1, 1),
+        (ver, 0) => (ver, ver),
+        (ver, min) => (ver, min),
+    };
+
+    if peer_ver < MINI_PROTO_VERSION {
+        return Gate::PeerTooOld;
+    }
+
+    if PROTO_VERSION < peer_min {
+        return Gate::SelfTooOld;
+    }
+
+    Gate::Ok {
+        effective: PROTO_VERSION.min(peer_ver),
+    }
+}
+
+/// Defines this device capabilities — reuse this function to every part in the codebase as
+/// needed
+/// This function reduces code duplicates and provide a changes once spot.
+pub fn get_device_capabilities() -> ThisDeviceCapabilities {
+    Vec::from([
+        CapabilityWifiDirect,
+        CapabilityFileTransferStallingReRequests,
+    ])
 }

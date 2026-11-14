@@ -1,7 +1,21 @@
 syntax = "proto3";
 package clipx;
 
-message Hello { uint32 proto_version = 1; }
+enum PeerCapabilities {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_COMPRESSION = 1; // later
+  CAPABILITY_TLS = 2; // later
+  CAPABILITY_WIFI_DIRECT = 3;
+  // Supports file transfer stalling re-requests
+  CAPABILITY_FILE_TRANSFER_STALLING_RE_REQUESTS = 4; 
+}
+message Hello { 
+  uint32 proto_version = 1; // What currently I speak
+  uint32 min_proto_version = 2; // old peer I accept (0 = old builds, unknown)
+  // this answers which capabilities the peer offers — something a device/peer is capable of doing or support
+  // can resume downloads, supports wifi-direct, accept images etc.
+  repeated PeerCapabilities capabilities = 3; 
+}
 
 // Clipboard payloads intentionally separate ordinary clipboard content from
 // file offers. Text/rich-text/images can be delivered immediately. Files are
@@ -54,14 +68,15 @@ message Announce {
   string device_name = 2;
   DeviceType device_type = 3;
   uint32 ws_port = 4;
+  Hello hello = 5;
 }
-message PeerPairRequest { string name = 1; bytes public_key = 2; bytes fingerprint = 3; }
-message PeerPairResponse { bytes public_key = 1; string name = 2; }
+message PeerPairRequest { string name = 1; bytes public_key = 2; bytes fingerprint = 3; Hello hello = 4; }
+message PeerPairResponse { bytes public_key = 1; string name = 2; Hello hello = 3; }
 message PeerPairChallenge { bytes nonce = 1; }
 message PeerPairChallengeResponse { bytes signature = 1; }
 message PairAck {}
-message PeerConnectChallenge { bytes nonce = 1; bytes initiator_fingerprint = 2; }
-message PeerConnectChallengeResponse { bytes signature = 1; }
+message PeerConnectChallenge { bytes nonce = 1; bytes initiator_fingerprint = 2; Hello hello = 3; }
+message PeerConnectChallengeResponse { bytes signature = 1; Hello hello = 2; }
 message ConnectAck {}
 message PreTransportControl { uint32 code = 1; string message = 2; }
 message PeerMessage {

@@ -56,7 +56,7 @@ pub struct PairSession {
     pub pending_signature: Option<[u8; 64]>,
     /// initiator only — true once the local user has confirmed the pair code matches
     /// even if the peer signature has not arrived yet. Lets confirmation
-    /// and the challange response race — which ever finishes second finalizes
+    /// and the challenge response race — which ever finishes second finalizes
     pub code_confirmed: bool,
 }
 
