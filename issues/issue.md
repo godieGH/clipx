@@ -18,7 +18,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 | [0002](#0002) | fixed | IPC shutdown now runs at Tauri ExitRequested before WebView teardown. |
 | [0003](#0002) | fixed | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
 | [0004](#0004) | report(weak)| Trust revocation is local-only. A peer retaining stale trust can reject a new pairing request, preventing re-pairing until its stale trust is also removed.|
-| [0005](#0005) | report| Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID.|
+| [0005](#0005) | fixed | Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID.|
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.

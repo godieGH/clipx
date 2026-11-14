@@ -646,6 +646,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         });
         let removed = reply_rx.await.unwrap_or(false);
         let was_connected = self.connected.remove(device_id).is_some();
+        self.transport_connections.remove(device_id);
         if was_connected {
             self.notify_devices_changed();
         }
