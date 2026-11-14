@@ -25,10 +25,15 @@
         "REUSEPORT",
         "serde",
         "sess",
+        "setshow",
         "tauri",
         "termux",
         "uniffi",
+        "unlisten",
         "USERPROFILE",
+        "vboxnet",
+        "veth",
+        "vmnet",
         "winrt"
     ]
 }

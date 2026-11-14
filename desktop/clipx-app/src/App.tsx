@@ -666,7 +666,7 @@ function App() {
   const [history, setHistory] = useState<ClipItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [showIdentity, setShowIdentity] = useState(false);
-  const [showIdentityDisabled, setshowIdentityDisabled] = useState(true);
+  const [showIdentityDisabled, setShowIdentityDisabled] = useState(true);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(null);
   const [currentClipboard, setCurrentClipboard] = useState<CurrentClipboard | null>(null);
   const [outgoingFiles, setOutgoingFiles] = useState<PickedFile[]>([]);
@@ -756,13 +756,13 @@ function App() {
       const result: { fingerprint: string; name: string; deviceType: DeviceType }[] =
         await invoke("get_available_devices");
       setAvailable((prev) => {
-        setshowIdentityDisabled(false);
+        setShowIdentityDisabled(false);
         const requesting = new Set(prev.filter((d) => d.pairing === "requesting").map((d) => d.fingerprint));
         return result.map((d) => ({ ...d, pairing: requesting.has(d.fingerprint) ? "requesting" : "idle" }));
       });
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
-      setshowIdentityDisabled(true);
+      setShowIdentityDisabled(true);
     }
   }, []);
 
@@ -868,7 +868,7 @@ function App() {
   function handleScan() {
     setScanning(true);
     refreshAvailable().finally(() => {
-      /// give a little delay to make UI feel real then call refreshAvalable again if any changes
+      /// give a little delay to make UI feel real then call refreshAvailable again if any changes
       setTimeout(async () => {
         await refreshAvailable()
         setScanning(false)
@@ -884,7 +884,7 @@ function App() {
       showToast(`${e}`, { variant: "error" });
     }
     // do not refresh wait the poll will pick it
-    // since connect device respond doesnt mean the connect it means the connectins req was succecefully made 
+    // since connect device respond doesn't mean the connect it means the connections req was successfully made 
     // the poll refresh might pick if done connected
     // this gives it time to show connecting
   }
