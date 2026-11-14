@@ -20,6 +20,7 @@ pub mod control {
     /// already in flight on a different socket, so the caller should drop
     /// its own attempt instead of treating this as a hard failure.
     pub const CONNECT_IN_PROGRESS: u32 = 4008;
+    pub const PROTOCOL_VERSION_COMPATIBILITY_ERROR: u32 = 4009;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

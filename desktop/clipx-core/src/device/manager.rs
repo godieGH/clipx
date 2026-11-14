@@ -3,11 +3,11 @@ use super::transfer_profile::{ReceiverProfile, SenderProfile};
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice, TrustedDevice};
 use crate::clipboard::manager::{ClipboardCommand, ClipboardOutbound, ClipboardPayload};
-use crate::device::config::{MINI_PROTO_VERSION, PROTO_VERSION};
+use crate::device::config::{Gate, MINI_PROTO_VERSION, PROTO_VERSION, check_proto_version, get_hostname};
 use crate::device::identity::{self, DeviceIdentity};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::device::{config, pairing};
-use crate::message::proto::Hello;
+use crate::message::proto::{Hello};
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{PairDecision, Prompt, platform::NotificationEngine as Engine};
@@ -93,6 +93,13 @@ pub struct DeviceManager<E: Engine> {
     next_upload_id: u64,
     resume_candidates: HashMap<String, ResumeState>,
     transport_connections: HashMap<String, String>,
+    // Track each peer capabilities and effective versions tied to there device_id
+    // We record and clean an entry when peer connect and disconnect to avoid bloats and stale versions
+    // Why in Device manager and per connection cycle, typically we do not want to
+    // persist in the trusted store because, device change +upgrade or -downgrade but
+    // device trusted store and identity do not change unless one clear/erase them explicitly and
+    // not just by app updates
+    effective_versions: HashMap<String, (u32, Vec<i32>)>
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -265,6 +272,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             upload_done_rx,
             next_upload_id: 0,
             resume_candidates: HashMap::new(),
+            effective_versions: HashMap::new(),
         }
     }
 
@@ -876,6 +884,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             tracing::info!("{device_id} no longer connected: connection {connection_id} closed");
             self.notify_devices_changed();
         }
+        // drop the effective_version related to avoid stale
+        self.effective_versions.remove(&device_id);
     }
 
     /// A dial never became a live connection at all (TCP connect failed/timed
@@ -980,6 +990,47 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         req: proto::PeerPairRequest,
         notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
+
+        // Checking if peer protocol is of compatible versions,
+        // and the peer capabilities offered are of compatible range with this build.
+        // The top level if-check is always `None` when peer is a legacy build.
+        // For legacy builds we just let them past (no ignoring them — allow connecting/pairing)
+        // but we control how they access some future features that are legacy incompatible
+        // through capabilities checks eg. using tls, compression later, stable wifi direct later.
+        if let Some(h) = req.hello {
+            let peer_ver = h.proto_version;
+            let peer_min = h.min_proto_version;
+
+            let effective = match check_proto_version(peer_ver, peer_min) {
+                Gate::Ok { effective } => effective,
+                Gate::PeerTooOld => {
+                    tracing::debug!(%device_id, "Peer is too old, pair/connect failed");
+                    self.reject_pair_request(
+                        &device_id,
+                        &connection_id,
+                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                        format!("App is too old, upgrade to newer versions to pair/connect with: {}", get_hostname()).as_str(),
+                    );
+                    return;
+                }
+                Gate::SelfTooOld => {
+                    tracing::warn!("App is too old to pair/connect to peer, upgrade to newer versions");
+                    self.reject_pair_request(
+                        &device_id,
+                        &connection_id,
+                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                        "Peer is too old, failed to pair/connect",
+                    );
+                    return;
+                }                
+            };
+
+            // No checking peer capabilities because they will be used as gates on providing features
+            // eg. if peer is compression capable then the new compression feature will be provided
+
+            self.effective_versions.insert(device_id.clone(), (effective, h.capabilities));
+        };
+
         if self.trusted.is_trusted(&device_id) {
             self.reject_pair_request(
                 &device_id,
@@ -1411,6 +1462,38 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             self.request_transport_disconnect_on_connection(&device_id, &connection_id);
             return;
         }
+
+          if let Some(h) = c.hello {
+            let peer_ver = h.proto_version;
+            let peer_min = h.min_proto_version;
+
+            let effective = match check_proto_version(peer_ver, peer_min) {
+                Gate::Ok { effective } => effective,
+                Gate::PeerTooOld => {
+                    tracing::debug!(%device_id, "Peer is too old, pair/connect failed");
+                    self.reject_pair_request(
+                        &device_id,
+                        &connection_id,
+                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                        format!("App is too old, upgrade to newer versions to pair/connect with: {}", get_hostname()).as_str(),
+                    );
+                    return;
+                }
+                Gate::SelfTooOld => {
+                    tracing::warn!("App is too old to pair/connect to peer, upgrade to newer versions");
+                    self.reject_pair_request(
+                        &device_id,
+                        &connection_id,
+                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                        "Peer is too old, failed to pair/connect",
+                    );
+                    return;
+                }                
+            };
+
+            self.effective_versions.insert(device_id.clone(), (effective, h.capabilities));
+        };
+
 
         let Ok(nonce_arr): Result<[u8; 32], _> = c.nonce.as_slice().try_into() else {
             self.send_control_on_connection(
