@@ -3,11 +3,11 @@ use super::transfer_profile::{ReceiverProfile, SenderProfile};
 use super::trusted::TrustedDeviceStore;
 use super::types::{IdentitySnapshot, SeenDevice, TrustedDevice};
 use crate::clipboard::manager::{ClipboardCommand, ClipboardOutbound, ClipboardPayload};
-use crate::device::config::{Gate, MINI_PROTO_VERSION, PROTO_VERSION, check_proto_version, get_hostname};
+use crate::device::config::{Gate, check_proto_version, get_hostname};
 use crate::device::identity::{self, DeviceIdentity};
 use crate::device::pairing::{ConnectSession, ConnectStage, PairSession, PairStage, Role};
 use crate::device::{config, pairing};
-use crate::message::proto::{Hello};
+use crate::message::proto::Hello;
 use crate::message::proto::{self, clipboard_message, peer_message::Body};
 use crate::netio::transport::{TransportCommand, TransportEvent};
 use crate::notification::{PairDecision, Prompt, platform::NotificationEngine as Engine};
@@ -758,14 +758,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         name: config::get_hostname(),
                         public_key: own_pub.to_vec(),
                         fingerprint: own_fp.to_vec(),
-                        hello: Some(Hello {
-                            proto_version: PROTO_VERSION,
-                            min_proto_version: MINI_PROTO_VERSION,
-                            capabilities: config::get_device_capabilities()
-                                .iter()
-                                .map(|c| *c as i32)
-                                .collect(),
-                        }),
+                        hello: Some(config::local_hello()),
                     }),
                 );
             }
@@ -790,14 +783,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 Body::ConnectChallenge(proto::PeerConnectChallenge {
                     nonce: nonce_vec,
                     initiator_fingerprint: own_fp.to_vec(),
-                    hello: Some(Hello {
-                        proto_version: PROTO_VERSION,
-                        min_proto_version: MINI_PROTO_VERSION,
-                        capabilities: config::get_device_capabilities()
-                            .iter()
-                            .map(|c| *c as i32)
-                            .collect(),
-                    }),
+                    hello: Some(config::local_hello()),
                 }),
             );
         }
@@ -975,6 +961,34 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         }
     }
 
+    /// Version gate for a peer's hello. `Ok` records effective version + capabilities
+    /// for this connection cycle; `Err(msg)` is the text to send to the peer.
+    /// No hello (legacy peer) passes.
+    fn check_hello(&mut self, device_id: &str, hello: Option<Hello>) -> Result<(), String> {
+        let Some(h) = hello else { return Ok(()) };
+        match check_proto_version(h.proto_version, h.min_proto_version) {
+            Gate::Ok { effective } => {
+                self.effective_versions
+                    .insert(device_id.to_string(), (effective, h.capabilities));
+                Ok(())
+            }
+            Gate::PeerTooOld => {
+                tracing::debug!(%device_id, "peer is too old, pair/connect failed");
+                Err(format!(
+                    "App is too old, upgrade to newer versions to pair/connect with: {}",
+                    get_hostname()
+                ))
+            }
+            Gate::SelfTooOld => {
+                tracing::warn!(%device_id, "this app is too old to pair/connect to peer, upgrade");
+                Err(format!(
+                    "{} is too old to pair/connect, update it",
+                    get_hostname()
+                ))
+            }
+        }
+    }
+
     fn reject_pair_request(&self, device_id: &str, connection_id: &str, code: u32, message: &str) {
         self.send_control_on_connection(device_id, connection_id, code, message);
 
@@ -991,45 +1005,16 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
 
-        // Checking if peer protocol is of compatible versions,
-        // and the peer capabilities offered are of compatible range with this build.
-        // The top level if-check is always `None` when peer is a legacy build.
-        // For legacy builds we just let them past (no ignoring them — allow connecting/pairing)
-        // but we control how they access some future features that are legacy incompatible
-        // through capabilities checks eg. using tls, compression later, stable wifi direct later.
-        if let Some(h) = req.hello {
-            let peer_ver = h.proto_version;
-            let peer_min = h.min_proto_version;
-
-            let effective = match check_proto_version(peer_ver, peer_min) {
-                Gate::Ok { effective } => effective,
-                Gate::PeerTooOld => {
-                    tracing::debug!(%device_id, "Peer is too old, pair/connect failed");
-                    self.reject_pair_request(
-                        &device_id,
-                        &connection_id,
-                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
-                        format!("App is too old, upgrade to newer versions to pair/connect with: {}", get_hostname()).as_str(),
-                    );
-                    return;
-                }
-                Gate::SelfTooOld => {
-                    tracing::warn!("App is too old to pair/connect to peer, upgrade to newer versions");
-                    self.reject_pair_request(
-                        &device_id,
-                        &connection_id,
-                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
-                        "Peer is too old, failed to pair/connect",
-                    );
-                    return;
-                }                
-            };
-
-            // No checking peer capabilities because they will be used as gates on providing features
-            // eg. if peer is compression capable then the new compression feature will be provided
-
-            self.effective_versions.insert(device_id.clone(), (effective, h.capabilities));
-        };
+        // Legacy peers send no hello: let them through, gate future features by capabilities.
+        if let Err(msg) = self.check_hello(&device_id, req.hello.clone()) {
+            self.reject_pair_request(
+                &device_id,
+                &connection_id,
+                pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                &msg,
+            );
+            return;
+        }
 
         if self.trusted.is_trusted(&device_id) {
             self.reject_pair_request(
@@ -1161,6 +1146,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         };
         if sess.role != Role::Initiator || sess.stage != PairStage::AwaitingPeerResponse {
+            return;
+        }
+        if let Err(msg) = self.check_hello(&device_id, res.hello.clone()) {
+            self.abort_pair(
+                &device_id,
+                pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                &msg,
+            );
             return;
         }
         let Ok(pubkey): Result<[u8; 32], _> = res.public_key.as_slice().try_into() else {
@@ -1355,14 +1348,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Body::PairResponse(proto::PeerPairResponse {
                         public_key: own_pub.to_vec(),
                         name: config::get_hostname(),
-                        hello: Some(Hello {
-                            proto_version: PROTO_VERSION,
-                            min_proto_version: MINI_PROTO_VERSION,
-                            capabilities: config::get_device_capabilities()
-                                .iter()
-                                .map(|c| *c as i32)
-                                .collect(),
-                        }),
+                        hello: Some(config::local_hello()),
                     }),
                 );
             }
@@ -1463,37 +1449,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             return;
         }
 
-          if let Some(h) = c.hello {
-            let peer_ver = h.proto_version;
-            let peer_min = h.min_proto_version;
-
-            let effective = match check_proto_version(peer_ver, peer_min) {
-                Gate::Ok { effective } => effective,
-                Gate::PeerTooOld => {
-                    tracing::debug!(%device_id, "Peer is too old, pair/connect failed");
-                    self.reject_pair_request(
-                        &device_id,
-                        &connection_id,
-                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
-                        format!("App is too old, upgrade to newer versions to pair/connect with: {}", get_hostname()).as_str(),
-                    );
-                    return;
-                }
-                Gate::SelfTooOld => {
-                    tracing::warn!("App is too old to pair/connect to peer, upgrade to newer versions");
-                    self.reject_pair_request(
-                        &device_id,
-                        &connection_id,
-                        pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
-                        "Peer is too old, failed to pair/connect",
-                    );
-                    return;
-                }                
-            };
-
-            self.effective_versions.insert(device_id.clone(), (effective, h.capabilities));
-        };
-
+        if let Err(msg) = self.check_hello(&device_id, c.hello.clone()) {
+            self.reject_pair_request(
+                &device_id,
+                &connection_id,
+                pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                &msg,
+            );
+            return;
+        }
 
         let Ok(nonce_arr): Result<[u8; 32], _> = c.nonce.as_slice().try_into() else {
             self.send_control_on_connection(
@@ -1606,14 +1570,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             &connection_id,
             Body::ConnectChallengeResponse(proto::PeerConnectChallengeResponse {
                 signature: sig.to_vec(),
-                hello: Some(Hello {
-                    proto_version: PROTO_VERSION,
-                    min_proto_version: MINI_PROTO_VERSION,
-                    capabilities: config::get_device_capabilities()
-                        .iter()
-                        .map(|c| *c as i32)
-                        .collect(),
-                }),
+                hello: Some(config::local_hello()),
             }),
         );
     }
@@ -1676,6 +1633,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 &connection_id,
                 pairing::control::INVALID_SIGNATURE,
                 "signature verification failed",
+            );
+            return;
+        }
+        if let Err(msg) = self.check_hello(&device_id, r.hello.clone()) {
+            self.abort_connect_on_connection(
+                &device_id,
+                &connection_id,
+                pairing::control::PROTOCOL_VERSION_COMPATIBILITY_ERROR,
+                &msg,
             );
             return;
         }

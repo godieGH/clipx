@@ -141,7 +141,7 @@ fun DevicesScreen(
                     )
                 }
             } else {
-                items(pairedDevices, key = { it.id }) { device ->
+                items(pairedDevices, key = { "paired:${it.id}" }) { device ->
                     DeviceRow(
                         device = device,
                         onClick = { onOpenDetails(device.id) },
@@ -167,7 +167,7 @@ fun DevicesScreen(
                     },
                 )
             }
-            items(availableDevices, key = { it.model.id }) { device ->
+            items(availableDevices, key = { "available:${it.model.id}" }) { device ->
                 AvailableDeviceRow(
                     device = device,
                     onPair = { onPair(device.model.id) },

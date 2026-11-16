@@ -260,7 +260,8 @@ pub enum Gate {
 pub fn check_proto_version(peer_ver: u32, peer_min: u32) -> Gate {
     let (peer_ver, peer_min) = match (peer_ver, peer_min) {
         (0, 0) => (1, 1),
-        (ver, 0) => (ver, ver),
+        // min unknown (0): assume the floor, not `ver`, so an unset min never rejects older builds
+        (ver, 0) => (ver, 1),
         (ver, min) => (ver, min),
     };
 
@@ -280,6 +281,15 @@ pub fn check_proto_version(peer_ver: u32, peer_min: u32) -> Gate {
 /// Defines this device capabilities — reuse this function to every part in the codebase as
 /// needed
 /// This function reduces code duplicates and provide a changes once spot.
+pub fn local_hello() -> crate::message::proto::Hello {
+    crate::message::proto::Hello {
+        proto_version: PROTO_VERSION,
+        min_proto_version: MINI_PROTO_VERSION,
+        capabilities: get_device_capabilities().iter().map(|c| *c as i32).collect(),
+    }
+}
+
+/// Defines this device capabilities (see `local_hello` for the wire form).
 pub fn get_device_capabilities() -> ThisDeviceCapabilities {
     Vec::from([
         CapabilityWifiDirect,

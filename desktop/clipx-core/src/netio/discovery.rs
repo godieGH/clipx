@@ -85,14 +85,7 @@ async fn broadcast_presence(
         device_name: crate::device::config::get_hostname(),
         device_type,
         ws_port: crate::device::config::get_effective_ws_port(),
-        hello: Some(proto::Hello {
-            proto_version: crate::device::config::PROTO_VERSION,
-            min_proto_version: crate::device::config::MINI_PROTO_VERSION,
-            capabilities: crate::device::config::get_device_capabilities()
-                .iter()
-                .map(|c| *c as i32)
-                .collect(),
-        }),
+        hello: Some(crate::device::config::local_hello()),
     };
 
     let mut message: Vec<u8> = vec![];

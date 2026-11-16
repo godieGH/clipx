@@ -844,14 +844,15 @@ function timeAgo(ts: number, locale = "en-US"): string {
 }
 
 function formatDataSize(bytes: number): string {
-  if (bytes < 1024) return bytes + "B";
-  else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
-  else if (bytes < 1024 ** 3) return (bytes / 1024 ** 2).toFixed(2) + " MB";
-  else if (bytes < 1024 ** 4) return (bytes / 1024 ** 3).toFixed(2) + " GB";
-  else if (bytes < 1024 ** 5) return (bytes / 1024 ** 4).toFixed(2) + " TB";
-  else {
-    return bytes.toFixed() + " B";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
   }
+  return `${v.toFixed(2)} ${units[i]}`;
 }
 
 function ClipRow({

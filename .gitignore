@@ -12,3 +12,7 @@ clipx.bundle
 
 # android signing keystore
 clipx-release.jks
+
+# IDE state
+mobile/android/.idea/
+.vscode/
