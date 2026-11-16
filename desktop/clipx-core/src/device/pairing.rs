@@ -10,7 +10,11 @@ use std::{
 pub mod control {
     pub const USER_DENIED: u32 = 4001;
     pub const CODE_MISMATCH: u32 = 4002;
-    pub const SIGNATURE_INVALID: u32 = 4003;
+    /// This control was changed from `SIGNATURE_INVALID` to `INVALID_SIGNATURE`
+    /// The reason is to keep wording meaningful, this change won't break the protocol
+    /// It is more of a code/wording-level change than a protocol level change, the protocol uses/sends
+    /// a number(4003) it represents/hold which was never changed
+    pub const INVALID_SIGNATURE: u32 = 4003;
     pub const TIMEOUT: u32 = 4004;
     pub const ALREADY_TRUSTED: u32 = 4005;
     pub const UNKNOWN_DEVICE: u32 = 4006;

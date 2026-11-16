@@ -1273,7 +1273,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         if !identity::verify(&pubkey, &nonce, &sig) {
             self.abort_pair(
                 device_id,
-                pairing::control::SIGNATURE_INVALID,
+                pairing::control::INVALID_SIGNATURE,
                 "signature verification failed",
             );
             return;
@@ -1674,7 +1674,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             self.abort_connect_on_connection(
                 &device_id,
                 &connection_id,
-                pairing::control::SIGNATURE_INVALID,
+                pairing::control::INVALID_SIGNATURE,
                 "signature verification failed",
             );
             return;
@@ -1762,6 +1762,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let was_pairing = self.pair_sessions.remove(&device_id).is_some();
         self.connect_sessions.remove(&device_id);
         if was_pairing {
+            tracing::debug!(%device_id, ctrl_message=%&ctrl.message, "Pairing to peer failed, core emitting `proto::pairing_event::State::Failed` change");
             self.notify_pair_events(
                 &device_id,
                 proto::pairing_event::State::Failed as i32,
