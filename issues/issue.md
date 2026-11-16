@@ -19,6 +19,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 | [0003](#0002) | fixed | re-report issue `0002` is not fixed correctly or it is fixed half — the issue need recheck carefully|
 | [0004](#0004) | report(weak)| Trust revocation is local-only. A peer retaining stale trust can reject a new pairing request, preventing re-pairing until its stale trust is also removed.|
 | [0005](#0005) | fixed | Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID.|
+| [0006](#0006) | report | Android crashes after pairing completes |
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.
@@ -85,3 +86,16 @@ The handshake therefore cannot progress, leaving the device stuck in `CONNECTING
 A new connection initiated by B can provide a fresh inbound transport connection. The handshake arbitration can then replace the stale attempt if B's challenge wins.
 
 Expected behavior: Disconnecting a device must clean up both the logical connection state and its corresponding transport connection mapping. A subsequent connection attempt from either device should establish a fresh, valid transport connection without requiring the other device to initiate the connection.
+
+## 0006
+**Observation**: just after pairing process is finished successful, android app activity crashes with a crash log:
+```log
+Process: com.godiegh.clipx, PID: 21610
+java.lang.IllegalArgumentException: Key "2afeeba80c14a2f151b54116b1187f230768a66daa47c6233fc46ba0bbe44ddb" was already used. If you are using LazyColumn/Row please make sure you provide a unique key for each item.
+```
+
+This log seems to report a reuse of an existing item key in the list items ui components. not sure which component exactly and in which code or file, but it is related to the device screen.
+
+**Normally**: In the device screen there are two lists ui components, one that show trusted devices plus their states i.e connect, disconnect or unavailable. And the other is the seen devices (discovered device). Pairing moves device from available list to trusted list. These lists use items keys(fingerprint) as their item id. What is known about jet compose LazyColumn/Row each list maintains its own keys/id, even if they tend to appear same in the two lists they are not a problem, unless there is a key duplicate on a single list. I think that is where the crash comes from, but the question is how?
+
+This bug has to be fixed, although it might seem non-serious at the moment, in terms of there is no obvious data loss observed(re-launching the app tends to continue from where it crashed on and not from pre-pairing state), but the crash happens.
