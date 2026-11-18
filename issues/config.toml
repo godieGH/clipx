@@ -1,0 +1,22 @@
+# Shared defaults for issues/issues.py (committed).
+# Personal overrides (your editor, etc.) go in issues/config.local.toml, which is gitignored.
+# A section in config.local.toml replaces the same keys here.
+
+[report]
+default_status = "report"
+# status shown in the table is "<status>" or "<status>(<weight>)", e.g. report(weak)
+statuses = ["report", "fixed"]
+weights = ["weak", "medium", "strong"]
+# true: updates are written as "**Update (YYYY-MM-DD):**" instead of "**Update:**"
+update_dates = false
+
+[editor]
+# Empty = auto-detect: $ISSUES_EDITOR, then $VISUAL, then $EDITOR, then the first found of
+# code, cursor, codium, subl, nano, vim, vi (and notepad on Windows).
+# GUI editors get their --wait flag added automatically so the tool waits for you to close the file.
+# Examples:  "code --wait"   "cursor --wait"   "nano"   "nvim"
+command = ""
+
+[wh]
+areas = ["pairing", "connect", "transfer", "clipboard", "discovery", "protocol", "ui", "platform"]
+statuses = ["untested", "tested", "issue"]

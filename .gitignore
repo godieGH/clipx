@@ -17,3 +17,7 @@ clipx.bundle
 # IDE state
 mobile/android/.idea/
 .vscode/
+
+# personal issues-tool settings
+issues/config.local.toml
+__pycache__/
