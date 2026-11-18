@@ -58,6 +58,9 @@ tasks.register<Exec>("buildRustAndroidFfiBridge") {
     inputs.file("../../native/rust-mobile-ffi-bridge/Cargo.toml")
     inputs.property("targetAbis", targetAbis)
     outputs.dir("src/main/jniLibs")
+    inputs.file("../../native/Cargo.toml")
+    inputs.file("../../native/Cargo.lock")
+    inputs.dir("../../../desktop/clipx-core")
 
     outputs.file("../../native/target/aarch64-linux-android/release/librust_mobile_ffi_bridge.so")
 
