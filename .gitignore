@@ -11,7 +11,8 @@ Thumbs.db
 clipx.bundle
 
 # android signing keystore
-clipx-release.jks
+*.jks
+*.keystore
 
 # IDE state
 mobile/android/.idea/
