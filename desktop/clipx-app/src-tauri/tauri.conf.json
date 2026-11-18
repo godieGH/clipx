@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Clipx App",
+  "productName": "Clipx",
   "version": "0.1.11",
   "identifier": "com.godiegh.clipx",
   "build": {
