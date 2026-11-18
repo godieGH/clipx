@@ -1,16 +1,16 @@
 /**
  * @file manage-tauri.mjs
  * @description CLI task runner for Tauri application maintenance and build pipeline orchestration.
- * 
+ *
  * High-level capabilities:
  *  1. Clean UI distribution output (`dist/`).
  *  2. Sync app branding assets (copies `src-tauri/icons/128x128.png` -> `src/public/`)
  *     to ensure single-source-of-truth icon usage across frontend and desktop app.
  *  3. Purge Cargo workspace artifacts (`cargo clean`).
- * 
+ *
  * @usage
  *  node manage-tauri.mjs [flag|command]
- * 
+ *
  * @example
  *  node manage-tauri.mjs --clean
  *  node manage-tauri.mjs --sync-icons
@@ -18,10 +18,10 @@
  *  node manage-tauri.mjs --all
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import fs from "node:fs";
+import path from "node:path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 const ROOT_DIR = path.resolve(".");
@@ -32,14 +32,14 @@ const ROOT_DIR = path.resolve(".");
  * Task 1: Clean frontend dist folder
  */
 async function cleanDist() {
-  const distPath = path.join(ROOT_DIR, 'dist');
-  console.log('🧹 Cleaning dist directory...');
-  
+  const distPath = path.join(ROOT_DIR, "dist");
+  console.log("🧹 Cleaning dist directory...");
+
   if (fs.existsSync(distPath)) {
     fs.rmSync(distPath, { recursive: true, force: true });
-    console.log('  ✔ dist/ removed.');
+    console.log("  ✔ dist/ removed.");
   } else {
-    console.log('  ℹ dist/ directory does not exist. Skipping.');
+    console.log("  ℹ dist/ directory does not exist. Skipping.");
   }
 }
 
@@ -47,12 +47,30 @@ async function cleanDist() {
  * Task 2: Sync icons from src-tauri to frontend public asset folder
  */
 async function syncIcons() {
-  const sourceIcon = path.join(ROOT_DIR, 'src-tauri', 'icons', '128x128.png');
-  const targetDir = path.join(ROOT_DIR, 'public');
-  const targetIcon = path.join(targetDir, 'clipx-icon.png');
+  const sourceIcon = path.join(ROOT_DIR, "src-tauri", "icons", "128x128.png");
+  const targetDir = path.join(ROOT_DIR, "public");
+  const targetIcon = path.join(targetDir, "clipx-icon.png");
 
-  console.log('🎨 Syncing Tauri icon to Vite public directory...');
+  console.log("🎨 Syncing Tauri icon to Vite public directory...");
 
+  if (!fs.existsSync(sourceIcon)) {
+    console.log("  ℹ Tauri icons missing. Generating them...");
+
+    try {
+      const { stdout, stderr } = await execAsync(
+        "pnpm tauri icon ../../assets/clipx-brand-mark-squircle.svg",
+        { cwd: ROOT_DIR },
+      );
+
+      if (stdout) process.stdout.write(stdout);
+      if (stderr) process.stderr.write(stderr);
+    } catch (error) {
+      console.error(`  ✖ Icon generation failed: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
+  // Verify that generation actually produced the required icon.
   if (!fs.existsSync(sourceIcon)) {
     console.error(`  ✖ Error: Source icon not found at ${sourceIcon}`);
     process.exit(1);
@@ -71,25 +89,25 @@ async function syncIcons() {
  * Task 3: Clean cargo workspace artifacts
  */
 async function cleanCargo() {
-  console.log('🦀 Cleaning Cargo build artifacts...');
+  console.log("🦀 Cleaning Cargo build artifacts...");
   try {
-    const { stdout } = await execAsync('cargo clean --package=clipx-app');
+    const { stdout } = await execAsync("cargo clean --package=clipx-app");
     if (stdout.trim()) console.log(stdout);
-    console.log('  ✔ Package clipx-app cleaned successfully.');
+    console.log("  ✔ Package clipx-app cleaned successfully.");
   } catch (error) {
-    console.error('  ✖ Failed to clean cargo package:', error.message);
+    console.error("  ✖ Failed to clean cargo package:", error.message);
     process.exit(1);
   }
 }
 
 async function cleanCargoAll() {
-  console.log('🦀 Cleaning Cargo build artifacts...');
+  console.log("🦀 Cleaning Cargo build artifacts...");
   try {
-    const { stdout } = await execAsync('cargo clean');
+    const { stdout } = await execAsync("cargo clean");
     if (stdout.trim()) console.log(stdout);
-    console.log('  ✔ Cargo workspace cleaned successfully.');
+    console.log("  ✔ Cargo workspace cleaned successfully.");
   } catch (error) {
-    console.error('  ✖ Failed to clean cargo workspace:', error.message);
+    console.error("  ✖ Failed to clean cargo workspace:", error.message);
     process.exit(1);
   }
 }
@@ -115,33 +133,33 @@ Options:
 async function run() {
   const args = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     showHelp();
     return;
   }
 
-  const runAll = args.includes('--all');
+  const runAll = args.includes("--all");
 
   try {
-    if (runAll || args.includes('--clean-dist')) {
+    if (runAll || args.includes("--clean-dist")) {
       await cleanDist();
     }
 
-    if (runAll || args.includes('--sync-icons')) {
+    if (runAll || args.includes("--sync-icons")) {
       await syncIcons();
     }
 
-    if (args.includes('--cargo-clean')) {
+    if (args.includes("--cargo-clean")) {
       await cleanCargo();
     }
 
-    if (runAll || args.includes('--cargo-clean-all')) {
+    if (runAll || args.includes("--cargo-clean-all")) {
       await cleanCargoAll();
     }
 
-    console.log('\n✨ Task execution completed!');
+    console.log("\n✨ Task execution completed!");
   } catch (err) {
-    console.error('\n✖ Pipeline failed:', err.message);
+    console.error("\n✖ Pipeline failed:", err.message);
     process.exit(1);
   }
 }

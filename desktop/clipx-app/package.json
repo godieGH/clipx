@@ -5,15 +5,16 @@
   "type": "module",
   "packageManager": "pnpm@11.6.0",
   "scripts": {
-    "manage:tauri": "node manage-tauri.mjs",
+    "manage:tauri": "node scripts/manage-tauri.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "pretauri:dev": "node scripts/manage-tauri.mjs --sync-icons",
+    "pretauri:dev": "pnpm manage:tauri --sync-icons",
     "tauri:dev": "tauri dev",
-    "pretauri:build": "node scripts/manage-tauri.mjs --sync-icons",
+    "pretauri:build": "pnpm manage:tauri --sync-icons",
     "tauri:build": "tauri build",
+    "prerelease": "pnpm manage:tauri --sync-icons",
     "release": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "dependencies": {
