@@ -1,8 +1,8 @@
-# ClipX
+# Clipx
 
 **Copy on one device, paste on another.**
 
-ClipX keeps the clipboards of your own devices in sync over your local network. Copy some text, an image, or a file on your PC and paste it on your phone (or the other way around) without emailing yourself, signing in to anything, or sending your data through someone else's server.
+Clipx keeps the clipboards of your own devices in sync over your local network. Copy some text, an image, or a file on your PC and paste it on your phone (or the other way around) without emailing yourself, signing in to anything, or sending your data through someone else's server.
 
 > **Status:** early and actively developed (current version is in [`VERSION`](VERSION)). Windows and Android are the main targets. See [Supported platforms](#supported-platforms) for the honest picture.
 
@@ -10,19 +10,23 @@ ClipX keeps the clipboards of your own devices in sync over your local network. 
 
 ## Table of contents
 
-- [What is ClipX?](#what-is-clipx)
-- [Which part of this README is for me?](#which-part-of-this-readme-is-for-me)
-- [Supported platforms](#supported-platforms)
-- **Using ClipX** (regular users)
+- [Clipx](#clipx)
+  - [Table of contents](#table-of-contents)
+  - [What is Clipx?](#what-is-clipx)
+  - [Which part of this README is for me?](#which-part-of-this-readme-is-for-me)
+  - [Supported platforms](#supported-platforms)
+- [Using Clipx](#using-clipx)
   - [Installing](#installing)
+    - [About the unsigned warning](#about-the-unsigned-warning)
+    - [Verify your download (recommended)](#verify-your-download-recommended)
   - [Pairing two devices](#pairing-two-devices)
   - [Everyday use](#everyday-use)
-  - [Send with ClipX (Windows right-click menu)](#send-with-clipx-windows-right-click-menu)
+  - [Send with Clipx (Windows right-click menu)](#send-with-clipx-windows-right-click-menu)
   - [Running in the background](#running-in-the-background)
   - [Privacy and security](#privacy-and-security)
   - [Troubleshooting](#troubleshooting)
-  - [Where ClipX keeps things](#where-clipx-keeps-things)
-- **Developer guide**
+  - [Where Clipx keeps things](#where-clipx-keeps-things)
+- [Developer guide](#developer-guide)
   - [Architecture at a glance](#architecture-at-a-glance)
   - [Repository layout](#repository-layout)
   - [Prerequisites](#prerequisites)
@@ -35,22 +39,22 @@ ClipX keeps the clipboards of your own devices in sync over your local network. 
   - [Platform-specific code](#platform-specific-code)
   - [Known limitations](#known-limitations)
   - [Contributing](#contributing)
-- **Maintainer guide**
+- [Maintainer guide](#maintainer-guide)
   - [Versioning](#versioning)
   - [Making a release](#making-a-release)
   - [What CI does](#what-ci-does)
   - [Signing and secrets](#signing-and-secrets)
   - [Tracking issues](#tracking-issues)
   - [Release checklist](#release-checklist)
-- [Glossary](#glossary)
-- [References](#references)
-- [License](#license)
+  - [Glossary](#glossary)
+  - [References](#references)
+  - [License](#license)
 
 ---
 
-## What is ClipX?
+## What is Clipx?
 
-ClipX lets you share these between devices you trust, as long as they are on the same network (for example the same home Wi-Fi):
+Clipx lets you share these between devices you trust, as long as they are on the same network (for example the same home Wi-Fi):
 
 - plain text
 - formatted ("rich") text
@@ -59,16 +63,16 @@ ClipX lets you share these between devices you trust, as long as they are on the
 
 There are no accounts and no cloud. Devices find each other on the local network, you **pair** them once (a short approval step on both sides), and from then on they can connect and share.
 
-Under the hood, ClipX is a shared Rust engine (the "core") with thin apps around it: a desktop app (Tauri + React), a command-line tool, and an Android app. Developers can jump to the [Developer guide](#architecture-at-a-glance).
+Under the hood, Clipx is a shared Rust engine (the "core") with thin apps around it: a desktop app (Tauri + React), a command-line tool, and an Android app. Developers can jump to the [Developer guide](#architecture-at-a-glance).
 
 ## Which part of this README is for me?
 
 | I want to... | Go to |
 |---|---|
-| Install and use ClipX | [Installing](#installing), then [Pairing two devices](#pairing-two-devices) |
+| Install and use Clipx | [Installing](#installing), then [Pairing two devices](#pairing-two-devices) |
 | Fix something that isn't working | [Troubleshooting](#troubleshooting) |
 | Know what happens to my data | [Privacy and security](#privacy-and-security) |
-| Build ClipX, fix a bug, or add a feature | [Prerequisites](#prerequisites) and [Getting started](#getting-started) |
+| Build Clipx, fix a bug, or add a feature | [Prerequisites](#prerequisites) and [Getting started](#getting-started) |
 | Understand how the code fits together | [Architecture at a glance](#architecture-at-a-glance) and [Protocol and core concepts](#protocol-and-core-concepts) |
 | Publish a new version | [Making a release](#making-a-release) |
 | Look up a word I don't know | [Glossary](#glossary) |
@@ -77,7 +81,7 @@ Under the hood, ClipX is a shared Rust engine (the "core") with thin apps around
 
 | Platform | Status | Notes |
 |---|---|---|
-| **Windows** (10/11) | Main platform, full feature set | Includes notifications, the right-click "Send with ClipX" entry, and Wi-Fi Direct (experimental). Installers are not code-signed yet. |
+| **Windows** (10/11) | Main platform, full feature set | Includes notifications, the right-click "Send with Clipx" entry, and Wi-Fi Direct (experimental). Installers are not code-signed yet. |
 | **Android** (10 or newer, 64-bit ARM) | Supported | Signed release APKs are attached to each release. |
 | **Linux** | Early: runs, but pairing doesn't work yet | The app and core start and run. Pairing asks for approval through system notifications, which are only a placeholder on Linux for now, so a new pairing can't complete there yet. Wi-Fi Direct is Windows-only. |
 | **macOS** | Builds, not tested | Built by the release pipeline but not covered by regular checks. Treat as experimental. |
@@ -85,11 +89,11 @@ Under the hood, ClipX is a shared Rust engine (the "core") with thin apps around
 
 ---
 
-# Using ClipX
+# Using Clipx
 
 ## Installing
 
-Installers are attached to each **release** on the project's Releases page. Every release also includes a file called `SHA256SUMS.txt` (see [Verify your download](#verify-your-download-recommended)). If you can't see a Releases page, ask whoever shared ClipX with you for the installer.
+Installers are attached to each **release** on the project's Releases page. Every release also includes a file called `SHA256SUMS.txt` (see [Verify your download](#verify-your-download-recommended)). If you can't see a Releases page, ask whoever shared Clipx with you for the installer.
 
 **Windows**
 
@@ -116,7 +120,7 @@ Open the `.dmg` and drag the app to Applications. See [About the unsigned warnin
 
 ### About the unsigned warning
 
-The Windows and macOS installers are **not code-signed yet**. Signing certificates cost money every year, and ClipX doesn't use one at this stage. The app is safe to run if you got it from this project's Releases page, but your system doesn't know that, so it warns you the first time.
+The Windows and macOS installers are **not code-signed yet**. Signing certificates cost money every year, and Clipx doesn't use one at this stage. The app is safe to run if you got it from this project's Releases page, but your system doesn't know that, so it warns you the first time.
 
 **Windows (SmartScreen):** you may see "Windows protected your PC" with "Unknown publisher".
 
@@ -148,13 +152,13 @@ macOS / Linux:
 sha256sum <downloaded-file>   # on macOS: shasum -a 256 <downloaded-file>
 ```
 
-Only download ClipX from the project's Releases page.
+Only download Clipx from the project's Releases page.
 
 ## Pairing two devices
 
-You do this once per pair of devices. Both devices need ClipX installed and must be on the same network.
+You do this once per pair of devices. Both devices need Clipx installed and must be on the same network.
 
-1. Open ClipX on both devices.
+1. Open Clipx on both devices.
 2. On the first device, look at **Available Devices**. If the other device isn't listed, press **Scan**.
 3. Press **Pair** next to the other device.
 4. On the *other* device, a pairing request appears (a notification on Windows). Approve it.
@@ -163,7 +167,7 @@ You do this once per pair of devices. Both devices need ClipX installed and must
 
 Pairing requests expire after about a minute and a half. If you miss it, just start again.
 
-> **Linux:** pairing can't be completed on Linux yet, because the approval prompts rely on system notifications that ClipX doesn't have for Linux so far.
+> **Linux:** pairing can't be completed on Linux yet, because the approval prompts rely on system notifications that Clipx doesn't have for Linux so far.
 
 ## Everyday use
 
@@ -182,36 +186,36 @@ Pairing requests expire after about a minute and a half. If you miss it, just st
 
 **Size limits.** Very large items can be rejected. Roughly: text up to 4 MB, formatted text and images up to 8 MB. For anything bigger, send it as a file.
 
-## Send with ClipX (Windows right-click menu)
+## Send with Clipx (Windows right-click menu)
 
-The Windows installer adds a **Send with ClipX** entry to the file right-click menu.
+The Windows installer adds a **Send with Clipx** entry to the file right-click menu.
 
-- **Windows 10:** right-click a file and choose **Send with ClipX**.
-- **Windows 11:** right-click a file, choose **Show more options** (or press **Shift+F10**), then choose **Send with ClipX**. It doesn't appear in the new compact menu yet.
+- **Windows 10:** right-click a file and choose **Send with Clipx**.
+- **Windows 11:** right-click a file, choose **Show more options** (or press **Shift+F10**), then choose **Send with Clipx**. It doesn't appear in the new compact menu yet.
 
 It sends one file at a time, to a paired device. Folders are not supported yet.
 
 ## Running in the background
 
-ClipX is meant to keep running quietly so syncing just works.
+Clipx is meant to keep running quietly so syncing just works.
 
-- **Closing the window only hides it.** ClipX keeps running in the system tray (the small icons near the clock).
+- **Closing the window only hides it.** Clipx keeps running in the system tray (the small icons near the clock).
 - **To open it again,** click the tray icon, or choose **Open** from its menu.
 - **To quit completely,** right-click the tray icon and choose **Quit**.
 - **The tray menu** also has **Start with system** (launch at login), **Restart core** / **Stop core**, **Help & diagnostics**, and **Open logs folder**.
-- **At login, the window stays hidden** so ClipX doesn't pop up every time you start your computer. If your Linux desktop has no tray, ClipX detects that and shows the window instead, so it never becomes unreachable.
+- **At login, the window stays hidden** so Clipx doesn't pop up every time you start your computer. If your Linux desktop has no tray, Clipx detects that and shows the window instead, so it never becomes unreachable.
 
 > **Linux tip:** some desktops (for example stock GNOME) don't show tray icons without an extension such as "AppIndicator and KStatusNotifierItem Support".
 
 ## Privacy and security
 
-**What stays local.** ClipX has no accounts, no cloud, and no servers. Your clipboard goes directly from one of your devices to another over your own network. Your clipboard history is stored on your own device.
+**What stays local.** Clipx has no accounts, no cloud, and no servers. Your clipboard goes directly from one of your devices to another over your own network. Your clipboard history is stored on your own device.
 
-**Who can connect.** Every device has its own secret key. Two devices only exchange clipboard data after you've paired them, and they prove who they are with that key each time they connect. A stranger on the same Wi-Fi can see that ClipX is running, but they can't pair without you approving it.
+**Who can connect.** Every device has its own secret key. Two devices only exchange clipboard data after you've paired them, and they prove who they are with that key each time they connect. A stranger on the same Wi-Fi can see that Clipx is running, but they can't pair without you approving it.
 
 **An important limit.** At the moment, the connection between your devices is **not encrypted**. That means someone who can watch traffic on your network could read what you send. So:
 
-- Use ClipX on networks you trust, like your home Wi-Fi.
+- Use Clipx on networks you trust, like your home Wi-Fi.
 - Avoid it on public or shared Wi-Fi (cafes, airports, hotels).
 - Be careful copying passwords or other secrets while it's running on an untrusted network.
 
@@ -223,10 +227,10 @@ Encrypting the connection is planned future work.
 
 **My other device doesn't show up under Available Devices.**
 
-- Make sure both devices are on the same Wi-Fi or network, and ClipX is running on both.
+- Make sure both devices are on the same Wi-Fi or network, and Clipx is running on both.
 - Press **Scan** again.
 - Some networks (guest Wi-Fi, offices, public hotspots) block devices from seeing each other. Try your home network or a phone hotspot.
-- Check your firewall. On Windows, allow ClipX on **private** networks when asked. Devices find each other using UDP port 9999, and connect using TCP port 8080 (it can pick another port if 8080 is taken, so allowing the app is better than allowing one port).
+- Check your firewall. On Windows, allow Clipx on **private** networks when asked. Devices find each other using UDP port 9999, and connect using TCP port 8080 (it can pick another port if 8080 is taken, so allowing the app is better than allowing one port).
 - Turn off VPNs while testing. They often hide you from the local network.
 
 **Pairing never completes.**
@@ -236,14 +240,14 @@ Encrypting the connection is planned future work.
 - Both devices must confirm the same code.
 - On Linux, pairing isn't available yet (see [Supported platforms](#supported-platforms)).
 
-**I can't find the ClipX window.**
+**I can't find the Clipx window.**
 
 - Click the tray icon or choose **Open** from its menu: closing the window only hides it.
 - On Linux without a tray, start the app again from your applications menu: a manual launch always shows the window.
 
-**ClipX says the core failed to start / "Address already in use".**
+**Clipx says the core failed to start / "Address already in use".**
 
-- Another copy of ClipX is probably still running. Quit it from the tray menu (or end it in Task Manager / `pkill clipx-core`) and open ClipX again.
+- Another copy of Clipx is probably still running. Quit it from the tray menu (or end it in Task Manager / `pkill clipx-core`) and open Clipx again.
 
 **It connects, but nothing arrives.**
 
@@ -255,7 +259,7 @@ Encrypting the connection is planned future work.
 
 Open **Help & diagnostics** (the **?** button in the title bar, or the tray menu). You can view recent logs and copy a report. Logs can contain device names, file paths, and network details, so read the report before posting it.
 
-## Where ClipX keeps things
+## Where Clipx keeps things
 
 | What | Windows | Linux |
 |---|---|---|
@@ -271,7 +275,7 @@ Forgetting a device in the app is the normal way to un-pair. Don't delete the id
 
 ## Architecture at a glance
 
-ClipX is split into a long-running **core** (the engine) and thin **clients** that talk to it.
+Clipx is split into a long-running **core** (the engine) and thin **clients** that talk to it.
 
 ```text
  ┌───────────────┐   ┌─────────────┐
@@ -375,7 +379,7 @@ cd desktop
 cargo run -p clipx-core
 ```
 
-**Verbose logs.** The core logs at `info` by default. Use the standard `RUST_LOG` variable, for example `RUST_LOG=debug`. Logs are also written to a rolling daily file (see [Where ClipX keeps things](#where-clipx-keeps-things)). In **release** builds the core prints nothing to the terminal, so read the log file or *Help & diagnostics* instead.
+**Verbose logs.** The core logs at `info` by default. Use the standard `RUST_LOG` variable, for example `RUST_LOG=debug`. Logs are also written to a rolling daily file (see [Where Clipx keeps things](#where-clipx-keeps-things)). In **release** builds the core prints nothing to the terminal, so read the log file or *Help & diagnostics* instead.
 
 **Fixed ports.** The core binds UDP **9999** (discovery) and prefers TCP **8080** (falls back to a random free port; discovery has no fallback). Only one real core can run per machine. If you see `Address already in use`, an earlier core is probably still running: `pkill clipx-core` (Linux/macOS) or end it in Task Manager (Windows). The tray app doesn't always stop a core it spawned if the app crashes.
 
@@ -432,7 +436,7 @@ node scripts/sync-version.mjs --check
 
 For the mobile bridge (from `mobile/native/`) run the same three cargo commands.
 
-**Testing pairing without a second device.** `tests/emulator` is a standalone tool that speaks ClipX's discovery, transport, and pairing protocol directly, reusing the real core's identity code and protobuf types, but with a manual command loop so you can stop at any stage and inspect how the other side reacts:
+**Testing pairing without a second device.** `tests/emulator` is a standalone tool that speaks Clipx's discovery, transport, and pairing protocol directly, reusing the real core's identity code and protobuf types, but with a manual command loop so you can stop at any stage and inspect how the other side reacts:
 
 ```bash
 cargo run --manifest-path tests/emulator/Cargo.toml -- --name alice
@@ -443,7 +447,7 @@ Run a second one to pair two emulators, or point one at a real running `clipx-co
 **Testing on real hardware.** Two real devices on one network is the best test. A few warnings:
 
 - Don't run two real cores on one machine (fixed ports, see above).
-- On Windows with WSL2 in *mirrored* networking mode, WSL shares the host's ports, so a core inside WSL will collide with ClipX on Windows.
+- On Windows with WSL2 in *mirrored* networking mode, WSL shares the host's ports, so a core inside WSL will collide with Clipx on Windows.
 - WSL2 in its default NAT mode can't receive LAN broadcasts, so discovery from inside WSL won't see your other devices. WSL is fine for compiling and for checking that the core starts, not for end-to-end testing.
 
 ## Android development
@@ -539,7 +543,7 @@ On Linux, the tray app decides whether to start hidden at login by asking the se
 
 ## Known limitations
 
-- **No encryption in transit.** Devices authenticate each other, but traffic is plain WebSocket. This is the most important thing to fix before recommending ClipX on untrusted networks.
+- **No encryption in transit.** Devices authenticate each other, but traffic is plain WebSocket. This is the most important thing to fix before recommending Clipx on untrusted networks.
 - **Linux:** pairing can't complete (placeholder notification engine, see above); no Wi-Fi Direct.
 - **Wi-Fi Direct (Windows and Android)** is experimental, and the offline link can be unstable.
 - **Installers aren't code-signed** on Windows and macOS.
@@ -675,12 +679,12 @@ The rules:
 | **Fingerprint** | A long code that uniquely identifies a device (a hash of its public key). Shown in device details. |
 | **Auto-connect** | Setting that makes two paired devices connect by themselves when both are around. |
 | **Core** | The background engine that does the actual syncing (`clipx-core`). The app windows are just controls for it. |
-| **Tray** | The row of small icons near the clock (Windows/Linux) or menu bar (macOS) where ClipX stays running. |
+| **Tray** | The row of small icons near the clock (Windows/Linux) or menu bar (macOS) where Clipx stays running. |
 | **LAN** | Local area network: your home or office Wi-Fi/Ethernet. |
 | **File offer** | A notice that a file is available. The other device downloads it when ready. |
 | **IPC** | How the app window talks to the core running on the same computer. |
 | **Sidecar** | A helper program bundled inside an installer (the core is one). |
-| **Protobuf** | The compact message format ClipX uses between devices and between the app and core. |
+| **Protobuf** | The compact message format Clipx uses between devices and between the app and core. |
 
 ## References
 
