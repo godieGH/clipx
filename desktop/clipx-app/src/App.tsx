@@ -904,7 +904,7 @@ function ClipRow({
   return (
     <div className="clip-row">
       <div className="clip-main">
-        <div style={{position: "relative"}}>
+        <div style={{ position: "relative" }}>
           <div>
             <div className="clip-content">{item.content}</div>
             <div className="clip-meta">
@@ -1026,16 +1026,8 @@ function ClipRow({
               />
             </div>
             <div className="file-status">
-              <div
-                style={{
-                  textOverflow: "ellipsis",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {status}
-              </div>
-              <div style={{ fontSize: "9px" }}>
+              <div className="file-status-text">{status}</div>
+              <div className="file-size">
                 {formatDataSize(item.fileSize ?? 0)}
               </div>
             </div>
