@@ -20,6 +20,7 @@ Developers of this codebase must ensure to report any observed issues in here, a
 | [0004](#0004) | report(weak)| Trust revocation is local-only. A peer retaining stale trust can reject a new pairing request, preventing re-pairing until its stale trust is also removed.|
 | [0005](#0005) | fixed | Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID.|
 | [0006](#0006) | fixed | Android crashes after pairing completes |
+| [0007](#0007) | report(medium) | Re-sending an already received file creates duplicate copies in internal storage. |
 
 **issues** = incremental number of issue reported it is a link will take user direct to issue content
 **status** = can be either report or fixed if done fixed — one can also use some tag to give a weight to issue eg. report(strong|weak etc.) — but that is what the comment field is for.
@@ -99,3 +100,8 @@ This log seems to report a reuse of an existing item key in the list items ui co
 **Normally**: In the device screen there are two lists ui components, one that show trusted devices plus their states i.e connect, disconnect or unavailable. And the other is the seen devices (discovered device). Pairing moves device from available list to trusted list. These lists use items keys(fingerprint) as their item id. What is known about jet compose LazyColumn/Row each list maintains its own keys/id, even if they tend to appear same in the two lists they are not a problem, unless there is a key duplicate on a single list. I think that is where the crash comes from, but the question is how?
 
 This bug has to be fixed, although it might seem non-serious at the moment, in terms of there is no obvious data loss observed(re-launching the app tends to continue from where it crashed on and not from pre-pairing state), but the crash happens.
+
+## 0007
+**Observation:** When a device downloads a file offered by another device, ClipX stores it in internal storage. If the same file is sent again later, ClipX does not detect the existing copy and stores it again.
+
+Expected behavior: ClipX should detect whether identical file content already exists before storing another copy. If it does, it should avoid creating an unnecessary duplicate. Detection should be based on file content rather than filenames alone.
