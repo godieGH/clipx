@@ -1,11 +1,11 @@
-//! Windows Wi-Fi Direct link (extra network path only; no ClipX traffic here).
+//! Windows Wi-Fi Direct link (extra network path only; no Clipx traffic here).
 //!
 //! * Always hosts a legacy-mode Wi-Fi Direct group, SSID `DIRECT-cw-<fp8>`.
 //!   Windows keeps its normal Wi-Fi connection while doing so. Any device
 //!   (Android via WifiNetworkSpecifier, another Windows PC) can join it as an
 //!   ordinary Wi-Fi client, after which the normal UDP discovery + WebSocket
 //!   transport run over that link unchanged.
-//! * Only when core currently sees NO peers does it look for another ClipX
+//! * Only when core currently sees NO peers does it look for another Clipx
 //!   host (`DIRECT-cw-*` with a higher fingerprint prefix) and join it.
 
 use crate::device::manager::{DeviceCommands, SeenMode};
@@ -33,7 +33,7 @@ const HOST_CHECK_EVERY: Duration = Duration::from_secs(10);
 
 /// Same derivation as the Android side: public by nature (the fingerprint is
 /// broadcast), it only keeps the link from being joined by accident. Real
-/// authentication is still ClipX pairing.
+/// authentication is still Clipx pairing.
 fn ap_pass(host_fp8: &str) -> String {
     let digest = Sha256::digest(format!("clipx-p2p-ap|{host_fp8}").as_bytes()).to_vec();
     hex::encode(digest)[..32].to_string()
@@ -107,7 +107,7 @@ fn run(
             continue;
         }
         match try_join(&own8) {
-            Ok(true) => tracing::info!("joined a ClipX Wi-Fi Direct host"),
+            Ok(true) => tracing::info!("joined a Clipx Wi-Fi Direct host"),
             Ok(false) => {}
             Err(e) => tracing::debug!("Wi-Fi Direct join attempt failed: {e}"),
         }

@@ -1,4 +1,4 @@
-// ClipX Windows notification engine
+// Clipx Windows notification engine
 //
 // Behavior:
 //   - Clipboard previews are retained but compacted/truncated.

@@ -11,7 +11,7 @@ pub fn show_core_error(error: impl Display) {
         .chain(std::iter::once(0))
         .collect();
 
-    let title: Vec<u16> = std::ffi::OsStr::new("ClipX")
+    let title: Vec<u16> = std::ffi::OsStr::new("Clipx")
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();

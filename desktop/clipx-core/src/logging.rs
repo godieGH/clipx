@@ -19,7 +19,7 @@ pub fn init() -> Option<WorkerGuard> {
     let dir = log_directory();
     if let Err(error) = std::fs::create_dir_all(&dir) {
         eprintln!(
-            "ClipX: could not create log directory {}: {error}",
+            "Clipx: could not create log directory {}: {error}",
             dir.display()
         );
         fmt().with_env_filter(filter).init();
