@@ -323,7 +323,11 @@ clipx/
 ├── protos/clipx.proto       the wire and IPC contract
 ├── scripts/                 release.mjs, sync-version.mjs
 ├── tests/                   emulator tool (separate crate), see tests/README.md
-├── issues/issue.md          developer-facing bug log (see "Tracking issues")
+├── issues/                  developer bug log and "what happens?" scenarios, one file each (see "Tracking issues")
+│   ├── README.md            how to use the tool
+│   ├── INDEX.md             generated table of every issue
+│   ├── items/ scenarios/    one markdown file per issue / per scenario
+│   └── issues.py            the tool that manages them (Python, standard library only)
 └── .github/workflows/       ci.yaml, release.yaml
 ```
 
@@ -336,6 +340,7 @@ Three separate Cargo projects exist: `desktop/`, `mobile/native/`, and `tests/em
 | **Rust** | Core, Tauri app, CLI | Use a recent stable toolchain. CI pins `1.96.0`. The code uses Rust edition 2024. |
 | **protoc** (Protocol Buffers compiler) | `clipx-core`'s build script compiles `protos/clipx.proto` | The build fails without it. Windows: `winget install protobuf`. Ubuntu/Debian: `sudo apt install protobuf-compiler`. macOS: `brew install protobuf`. |
 | **Node.js 22** and **pnpm** | Frontend and Tauri CLI | `package.json` pins `pnpm@11.6.0`: run `corepack enable` and it will use that version. |
+| **Python 3.11+** | The issues tool (`issues/issues.py`) | Standard library only, nothing to install. Needed only to log or check issues. On Windows use `py -3` if `python` isn't found. |
 | **Windows only:** MSVC Build Tools | Compiling Rust/Tauri | Install the "Desktop development with C++" workload. WebView2 ships with Windows 11. |
 | **Linux only:** system libraries | Tauri's webview and tray | `sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf` |
 
@@ -432,6 +437,13 @@ node scripts/sync-version.mjs --check
 
 For the mobile bridge (from `mobile/native/`) run the same three cargo commands.
 
+**The issues tool** has its own tests, and `check` validates every record, the generated files, and all links under `issues/`. Run both when you touch anything under `issues/` (CI runs them too):
+
+```bash
+python -m unittest discover -s issues
+python issues/issues.py check
+```
+
 **Testing pairing without a second device.** `tests/emulator` is a standalone tool that speaks ClipX's discovery, transport, and pairing protocol directly, reusing the real core's identity code and protobuf types, but with a manual command loop so you can stop at any stage and inspect how the other side reacts:
 
 ```bash
@@ -499,7 +511,7 @@ Read `protos/clipx.proto` first. It is the canonical contract for both device-to
 
 **Pairing and trust.** Pairing is a request/response exchange followed by a signed-nonce challenge, with a confirmation code shown on both sides. After pairing, the other device's public key is stored in the trusted-devices list.
 
-**Connecting.** Every connection between trusted devices starts with a signed challenge, so each side proves it holds the key it paired with. *Auto-connect* is triggered when a trusted device newly appears on the network (not on every reconnect). Both sides may try at once. The handshake settles the overlap: a request that arrives before the other side has sent its own wins, and if both are truly simultaneous the random nonces break the tie, so exactly one connection survives. Failed or dropped attempts are retried a limited number of times. (`issues/issue.md` entry 0001 still describes an earlier fingerprint tie-breaker that the code no longer uses.)
+**Connecting.** Every connection between trusted devices starts with a signed challenge, so each side proves it holds the key it paired with. *Auto-connect* is triggered when a trusted device newly appears on the network (not on every reconnect). Both sides may try at once. The handshake settles the overlap: a request that arrives before the other side has sent its own wins, and if both are truly simultaneous the random nonces break the tie, so exactly one connection survives. Failed or dropped attempts are retried a limited number of times. ([Issue 0001](issues/items/7f716d6727c7-auto-connect-overlap-between-two-trusted-devices.md) still describes, as its first fix, an earlier fingerprint tie-breaker that the code no longer uses; its update explains the change.)
 
 **Transport.** Peers talk Protobuf `PeerMessage`s over a plain WebSocket on TCP. The connection is not encrypted (see [Known limitations](#known-limitations)).
 
@@ -547,7 +559,7 @@ On Linux, the tray app decides whether to start hidden at login by asking the se
 - **Android** builds only `arm64-v8a` by default.
 - **Folders** can't be sent, only files, and one at a time from the Windows right-click menu.
 - **WSL** isn't a supported runtime (graphics and NAT networking get in the way).
-- **Quitting on Windows** can still print a Chromium/WebView2 teardown message to a terminal (issue 0002 in `issues/issue.md`). It's treated as an upstream diagnostic.
+- **Quitting on Windows** can still print a Chromium/WebView2 teardown message to a terminal ([issue 0002](issues/items/6c2cef33b661-tray-quit-prints-a-webview2-teardown-error.md)). It's treated as an upstream diagnostic.
 
 ## Contributing
 
@@ -555,7 +567,7 @@ On Linux, the tray app decides whether to start hidden at login by asking the se
 2. Create a branch and make your change. Keep protocol (`protos/clipx.proto`) and implementation changes aligned: they're consumed by desktop and mobile alike.
 3. Run the checks in [Testing](#testing). CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and the tests on Ubuntu and Windows for every pull request, so run them locally first.
 4. Don't edit version numbers by hand. See [Versioning](#versioning).
-5. Found a bug you won't fix right now? Log it in `issues/issue.md` (see [Tracking issues](#tracking-issues)).
+5. Found a bug you won't fix right now? Log it with `python issues/issues.py report` (see [Tracking issues](#tracking-issues)).
 6. Open a pull request against `main`.
 
 ---
@@ -622,6 +634,7 @@ If anything fails or you decline, it reverts its changes. Pushing the tag is wha
 | Job | What it checks |
 |---|---|
 | `version` | All version numbers agree. |
+| `issues` (Ubuntu and Windows) | The issues tool's unit tests and `issues.py check`: records are valid, the generated `INDEX.md` / `what_happens.md` are up to date, and every link under `issues/` resolves. |
 | `desktop` (Ubuntu 22.04 and Windows) | Frontend build, then `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`. |
 | `ffi` | The mobile bridge: fmt, clippy, tests, an Android cross-compile, and Kotlin binding generation. |
 | `android` | Kotlin unit tests and a debug APK build. |
@@ -642,20 +655,19 @@ If anything fails or you decline, it reverts its changes. Pushing the tag is wha
 
 ## Tracking issues
 
-Developer-facing bugs are logged in [`issues/issue.md`](issues/issue.md), separately from any public issue tracker. The reasoning there is that developers are close to the obvious problems, while users report different, experience-driven ones, so the two streams are kept apart.
+Developer-facing bugs are logged in [`issues/`](issues/README.md), separately from any public issue tracker. The reasoning is that developers are close to the obvious problems, while users report different, experience-driven ones, so the two streams are kept apart. [`issues/INDEX.md`](issues/INDEX.md) lists every issue, and [`issues/what_happens.md`](issues/what_happens.md) lists situations worth trying on real devices ("when X happens, what happens?"). The full guide to the tool is [`issues/README.md`](issues/README.md); in short:
 
-The rules:
-
-- Add a row to the table at the top **before** writing up the issue; numbers are incremental (`0001`, `0002`, ...).
-- Each issue has an anchor so the table can link to it.
-- Never erase a fixed issue. Mark it `fixed` / `completed` instead, so the file doubles as history.
-- If an issue turns out to be only half-fixed, log a new row that points back to the original (as `0003` does for `0002`).
+- **One file per issue** in `issues/items/`, and one per scenario in `issues/scenarios/`. Ids are random hashes shown short, like git commits, so people reporting on different branches never collide.
+- **Use the tool, don't number by hand:** `python issues/issues.py report` opens your editor on a draft, creates the file and regenerates the index. `status`, `update` and `wh set` change an existing record.
+- **`INDEX.md` and `what_happens.md` are generated.** Never edit them by hand: CI runs `python issues/issues.py check` and fails if they are out of date or a link under `issues/` is broken.
+- Never erase a fixed issue. Mark it `fixed` instead, so the folder doubles as history.
+- If an issue turns out to be only half-fixed, report a new one that `--refers` to the original (as the issue about 0002 does).
 - Anything obvious and cheap to fix should simply be fixed right away.
 
 ## Release checklist
 
 - [ ] `main` is green in CI.
-- [ ] `issues/issue.md` reviewed: nothing blocking is open.
+- [ ] `issues/INDEX.md` reviewed: nothing blocking is open.
 - [ ] Dry run is clean: `node scripts/release.mjs <bump> --dry-run`.
 - [ ] Android keystore secrets are still present in the repository settings.
 - [ ] Run the real release (omit `--dry-run`) and confirm the commit and tag.
@@ -688,7 +700,7 @@ The rules:
 
 - [`protos/clipx.proto`](protos/clipx.proto): the protocol
 - [`tests/README.md`](tests/README.md): the emulator tool
-- [`issues/issue.md`](issues/issue.md): developer issue log
+- [`issues/README.md`](issues/README.md): the issue log and its tool; [`issues/INDEX.md`](issues/INDEX.md): all issues
 - [`scripts/release.mjs`](scripts/release.mjs) and [`scripts/sync-version.mjs`](scripts/sync-version.mjs): release tooling
 - [`.github/workflows/`](.github/workflows): CI and release pipelines
 

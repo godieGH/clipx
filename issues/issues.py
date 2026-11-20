@@ -1,30 +1,33 @@
 #!/usr/bin/env python3
-"""issues: one tool for everything under issues/   (python >= 3.11, stdlib only)
+"""issues: the tool behind issues/   (python >= 3.11, stdlib only)
 
-issue.md stays hand-written. This tool only appends to it, or edits a single table row,
-and leaves every other byte alone (line endings included).
+Every issue is one file in issues/items/, every "what happens?" scenario is one file in
+issues/scenarios/. Each has a random 40-hex id (like a git commit id): shown shortened,
+accepted shortened. INDEX.md and what_happens.md are generated from those files.
 
-  issues.py report                  open your editor on a temp draft, then append table row + section
-  issues.py report --comment "..." --body "..." [--weight weak] [--status report]   no editor
-  issues.py report --refers 0002 --comment "..."   referral row (links to #0002, no section)
+  issues.py report                  open your editor on a temp draft, then create the issue file
+  issues.py report --title "..." --body "..." [--comment "..."] [--weight weak] [--refers ID]
   issues.py report --resume         reopen the last draft that failed validation
-  issues.py update NNNN [--text "..."] [--status fixed]   append an **Update:** block to a section
-  issues.py status NNNN fixed [--comment "..."]            edit only that table row
-  issues.py list [--status S]       print the table
-  issues.py next                    print the next free issue number
-  issues.py check                   validate issue.md, what_happens.toml and the generated .md
+  issues.py update ID [--text "..."] [--status fixed]    append an **Update:** block
+  issues.py status ID fixed [--comment "..."] [--weight weak|medium|strong|none]
+  issues.py edit ID                 open the file (issue or scenario) in your editor
+  issues.py show ID                 print the path and the text
+  issues.py list [--status S]       print the issues
 
-  issues.py wh add ["question?"] [--area A] [--issue NNNN] [--note T]
-  issues.py wh set WH-003 tested|untested|issue [--issue NNNN]
+  issues.py wh add ["question?"] [--area A] [--issue ID] [--note T]
+  issues.py wh set ID tested|untested|issue [--issue ID]
   issues.py wh list [--status S] [--area A]
-  issues.py wh render               regenerate what_happens.md (add/set do this too)
 
-Any write command takes --dry-run (print a diff, write nothing).
+  issues.py render                  regenerate INDEX.md and what_happens.md
+  issues.py check                   validate files, generated output and every link
+
+ID = at least 5 hex characters of the id, or a legacy number (0004, WH-004) of a migrated record.
+Write commands take --dry-run (print a diff, write nothing). Full guide: issues/README.md
 Config: issues/config.toml (shared) and issues/config.local.toml (yours, gitignored).
 """
 import argparse
 import difflib
-import json
+import hashlib
 import os
 import re
 import shlex
@@ -35,9 +38,16 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
+from urllib.parse import unquote
 
 DIR = Path(os.environ.get("ISSUES_DIR") or Path(__file__).resolve().parent)
-
+FILE_LEN, SHOW_LEN, MIN_PREFIX = 12, 7, 5
+ID_RE = re.compile(r"[0-9a-f]{40}")
+TS_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+ORDER = {
+    "issue": ["id", "legacy", "title", "status", "weight", "refers", "created", "comment"],
+    "scenario": ["id", "legacy", "area", "status", "issues", "created", "question"],
+}
 DEFAULTS = {
     "report": {
         "default_status": "report",
@@ -51,7 +61,6 @@ DEFAULTS = {
         "statuses": ["untested", "tested", "issue"],
     },
 }
-
 GUI_WAIT = {
     "code": "--wait", "code-insiders": "--wait", "cursor": "--wait", "codium": "--wait",
     "windsurf": "--wait", "subl": "--wait", "zed": "--wait", "atom": "--wait", "mate": "-w",
@@ -62,14 +71,18 @@ class Fail(Exception):
     pass
 
 
-# ----------------------------------------------------------------------------- paths / config
+# ----------------------------------------------------------------------------- paths, config, io
 
-def issue_md():
-    return DIR / "issue.md"
+def items_dir():
+    return DIR / "items"
 
 
-def wh_toml():
-    return DIR / "what_happens.toml"
+def scen_dir():
+    return DIR / "scenarios"
+
+
+def index_md():
+    return DIR / "INDEX.md"
 
 
 def wh_md():
@@ -87,123 +100,386 @@ def config():
     for name in ("config.toml", "config.local.toml"):
         p = DIR / name
         if p.exists():
-            for sec, vals in tomllib.loads(p.read_text(encoding="utf-8")).items():
+            for sec, vals in tomllib.loads(read(p)).items():
                 cfg.setdefault(sec, {}).update(vals)
     return cfg
 
 
-# ----------------------------------------------------------------------------- file io (byte-safe)
-
-def split_lines(text):
-    return re.findall(r"[^\n]*\n|[^\n]+", text)
+def read(path):
+    return path.read_bytes().decode("utf-8")
 
 
-def read_lines(path):
-    return split_lines(path.read_bytes().decode("utf-8"))
-
-
-def detect_eol(lines):
-    crlf = sum(1 for l in lines if l.endswith("\r\n"))
-    return "\r\n" if lines and crlf * 2 > len(lines) else "\n"
-
-
-def ensure_nl(lines, eol):
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += eol
-
-
-def commit(path, old, new, dry):
-    if dry:
-        sys.stdout.writelines(difflib.unified_diff(old, new, f"a/{path.name}", f"b/{path.name}"))
-        print("(dry run: nothing written)")
-        return
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    if path.exists():
-        shutil.copy2(path, drafts_dir() / f"{path.name}.{stamp}.bak")
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes("".join(new).encode("utf-8"))
+    tmp.write_bytes(text.encode("utf-8"))
     os.replace(tmp, path)
 
 
-# ----------------------------------------------------------------------------- issue.md model
-
-ROW = re.compile(r"^\|\s*\[(\d{4})\]\(#(\d{4})\)\s*\|([^|]*)\|(.*)$")
-HEAD = re.compile(r"^## (\d{4})\s*$")
-
-
-def table_span(lines):
-    start = next((i for i, l in enumerate(lines) if re.match(r"^\|\s*issues\s*\|", l)), None)
-    if start is None:
-        raise Fail("issue.md: table header '| issues | status | comment |' not found")
-    end = start + 1
-    while end < len(lines) and lines[end].startswith("|"):
-        end += 1
-    return start, end
+def commit(path, old, new, dry):
+    """Write `new` to path (a backup of the old file goes to the OS temp folder), or print a diff."""
+    if dry:
+        sys.stdout.writelines(difflib.unified_diff(old.splitlines(True), new.splitlines(True),
+                                                   f"a/{path.name}", f"b/{path.name}"))
+        print("(dry run: nothing written)")
+        return
+    if path.exists():
+        shutil.copy2(path, drafts_dir() / f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
+    write(path, new)
 
 
-def rows(lines):
-    s, e = table_span(lines)
+def now_utc():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# ----------------------------------------------------------------------------- record files
+
+FM = re.compile(r"\A---\n(.*?)\n---[ \t]*(?:\n|\Z)(.*)\Z", re.S)
+
+
+def parse_record(text):
+    m = FM.match(text.replace("\r\n", "\n"))
+    if not m:
+        raise Fail("front matter not found (the file must start with a '---' block)")
+    meta = {}
+    for line in m[1].split("\n"):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        k, sep, v = line.partition(":")
+        if not sep:
+            raise Fail(f"bad front matter line: {line!r}")
+        meta[k.strip().lower()] = v.strip()
+    return meta, m[2].strip("\n")
+
+
+def dump_record(kind, meta, body):
+    order = ORDER[kind]
+    keys = [k for k in order if meta.get(k)] + sorted(k for k in meta if k not in order and meta[k])
+    head = "".join(f"{k}: {meta[k]}\n" for k in keys)
+    return f"---\n{head}---\n\n{body.strip()}\n" if body.strip() else f"---\n{head}---\n"
+
+
+def set_fields(text, updates):
+    """Edit front matter lines only. value None = leave, "" = remove the line. The body is untouched."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise Fail("front matter not found")
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+    if end is None:
+        raise Fail("front matter is not closed with '---'")
+    eol = "\r\n" if lines[0].endswith("\r\n") else "\n"
+    for key, val in updates.items():
+        if val is None:
+            continue
+        pat = re.compile(r"^" + re.escape(key) + r"\s*:", re.I)
+        idx = next((i for i in range(1, end) if pat.match(lines[i])), None)
+        if val == "":
+            if idx is not None:
+                del lines[idx]
+                end -= 1
+        elif idx is not None:
+            lines[idx] = f"{key}: {val}{eol}"
+        else:
+            lines.insert(end, f"{key}: {val}{eol}")
+            end += 1
+    return "".join(lines)
+
+
+def append_update(text, new_text, cfg):
+    if not new_text.strip():
+        raise Fail("update text is empty")
+    eol = "\r\n" if "\r\n" in text else "\n"
+    label = f"Update ({time.strftime('%Y-%m-%d')})" if cfg["report"]["update_dates"] else "Update"
+    parts = new_text.replace("\r\n", "\n").strip().split("\n")
+    parts[0] = f"**{label}:** " + parts[0]
+    return text.rstrip("\r\n") + eol + eol + eol.join(parts) + eol
+
+
+def order_key(r):
+    m = r["meta"]
+    if m.get("legacy"):
+        return (0, m["legacy"].lower(), "")
+    return (1, m.get("created", ""), m.get("id", ""))
+
+
+def load_all(kind, errs=None):
+    d = items_dir() if kind == "issue" else scen_dir()
     out = []
-    for i in range(s + 2, e):
-        m = ROW.match(lines[i])
-        if m:
-            out.append({"num": m[1], "anchor": m[2], "status": m[3].strip(),
-                        "comment": m[4].strip().rstrip("|").strip(), "i": i})
-    return out
+    for p in (sorted(d.glob("*.md")) if d.is_dir() else []):
+        try:
+            meta, body = parse_record(read(p))
+        except Fail as e:
+            if errs is None:
+                raise Fail(f"{d.name}/{p.name}: {e}")
+            errs.append(f"{d.name}/{p.name}: {e}")
+            continue
+        out.append({"path": p, "meta": meta, "body": body, "kind": kind})
+    return sorted(out, key=order_key)
 
 
-def headings(lines):
-    return {m[1]: i for i, l in enumerate(lines) if (m := HEAD.match(l))}
+def rel(r):
+    return f"{r['path'].parent.name}/{r['path'].name}"
 
 
-def status_base(status):
-    return re.split(r"[(/\s]", status, maxsplit=1)[0]
+def refs(r):
+    return [x for x in re.split(r"[,\s]+", r["meta"].get("issues", "")) if x]
 
 
-def anchor_of(lines, num):
-    for r in rows(lines):
-        if r["num"] == num:
-            return r["anchor"]
-    return num
+def short(r, pool):
+    i = r["meta"]["id"]
+    n = SHOW_LEN
+    while n < len(i) and sum(1 for o in pool if o["meta"].get("id", "").startswith(i[:n])) > 1:
+        n += 1
+    return i[:n]
 
 
-def issue_link(lines, num):
-    a = anchor_of(lines, num)
-    return f"[{num}](issue.md#{a})" if a in headings(lines) else num
+def scen_label(s, scens):
+    return s["meta"].get("legacy") or short(s, scens)
 
 
-def check_issues(lines, cfg):
+def resolve(ref, pool, kind=None):
+    """A legacy number (0004, WH-004) or at least MIN_PREFIX hex characters of the id."""
+    ref = ref.strip().lower()
+    cand = [r for r in pool if kind in (None, r["kind"])]
+    hit = [r for r in cand if r["meta"].get("legacy", "").lower() == ref]
+    if not hit and re.fullmatch(r"[0-9a-f]{%d,40}" % MIN_PREFIX, ref):
+        hit = [r for r in cand if r["meta"].get("id", "").startswith(ref)]
+    what = kind or "record"
+    if not hit:
+        raise Fail(f"no {what} matches {ref!r} (use {MIN_PREFIX}+ hex characters of its id, or its legacy number)")
+    if len(hit) > 1:
+        raise Fail(f"{ref!r} is ambiguous, it matches {', '.join(x['meta']['id'][:SHOW_LEN + 2] for x in hit)}")
+    return hit[0]
+
+
+def new_id(seed, taken):
+    while True:
+        h = hashlib.sha1(f"{seed}\n{time.time_ns()}\n{os.urandom(16).hex()}".encode("utf-8")).hexdigest()
+        if not any(t[:FILE_LEN] == h[:FILE_LEN] for t in taken):
+            return h
+
+
+def slugify(text, fallback):
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if len(s) > 48:
+        s = s[:48].rsplit("-", 1)[0] if "-" in s[:48] else s[:48]
+    return s.strip("-") or fallback
+
+
+def file_name(rid, text, fallback):
+    return f"{rid[:FILE_LEN]}-{slugify(text, fallback)}.md"
+
+
+# ----------------------------------------------------------------------------- validation
+
+def validate_records(cfg, issues, scens):
     errs = []
-    rs = rows(lines)
-    heads = headings(lines)
-    nums = [r["num"] for r in rs]
-    if nums != [f"{i:04d}" for i in range(1, len(nums) + 1)]:
-        errs.append(f"issue.md: table numbers must be 0001..{len(nums):04d} in order, got {', '.join(nums)}")
-    known = set(nums)
-    allowed = cfg["report"]["statuses"]
-    weights = cfg["report"]["weights"]
-    for r in rs:
-        n = r["num"]
-        if r["anchor"] not in known:
-            errs.append(f"{n}: table link points to #{r['anchor']}, which is not an issue in the table")
-        elif r["anchor"] not in heads:
-            errs.append(f"{n}: table link points to #{r['anchor']}, but there is no '## {r['anchor']}' section")
-        base = status_base(r["status"])
-        if base not in allowed:
-            errs.append(f"{n}: status {r['status']!r} must start with one of {', '.join(allowed)}")
-        w = re.search(r"\(([^)]*)\)", r["status"])
-        if w and weights and w[1] not in weights:
-            errs.append(f"{n}: weight {w[1]!r} is not one of {', '.join(weights)}")
-    for h in heads:
-        if h not in known:
-            errs.append(f"issue.md: '## {h}' has no row in the table")
+    seen = {}
+    for r in issues + scens:
+        m, name = r["meta"], rel(r)
+        rid = m.get("id", "")
+        if not ID_RE.fullmatch(rid):
+            errs.append(f"{name}: id must be 40 lowercase hex characters")
+            continue
+        if not r["path"].name.startswith(rid[:FILE_LEN] + "-"):
+            errs.append(f"{name}: the file name must start with the first {FILE_LEN} characters of its id ({rid[:FILE_LEN]}-)")
+        if rid[:FILE_LEN] in seen:
+            errs.append(f"{name}: id starts like {seen[rid[:FILE_LEN]]}; ids must differ within their first {FILE_LEN} characters")
+        seen[rid[:FILE_LEN]] = name
+        if not m.get("legacy") and not TS_RE.fullmatch(m.get("created", "")):
+            errs.append(f"{name}: created must look like 2026-11-19T10:22:31Z")
+    legacy = {}
+    for r in issues + scens:
+        lg = r["meta"].get("legacy", "").lower()
+        if lg:
+            if (r["kind"], lg) in legacy:
+                errs.append(f"{rel(r)}: legacy number {lg!r} is used twice")
+            legacy[(r["kind"], lg)] = True
+    issue_ids = {r["meta"].get("id") for r in issues}
+    for r in issues:
+        m, name = r["meta"], rel(r)
+        if not m.get("title"):
+            errs.append(f"{name}: title is empty")
+        if m.get("status") not in cfg["report"]["statuses"]:
+            errs.append(f"{name}: status {m.get('status')!r} must be one of {', '.join(cfg['report']['statuses'])}")
+        if m.get("weight") and m["weight"] not in cfg["report"]["weights"]:
+            errs.append(f"{name}: weight {m['weight']!r} must be one of {', '.join(cfg['report']['weights'])}")
+        if m.get("refers") and m["refers"] not in issue_ids:
+            errs.append(f"{name}: refers to {m['refers']!r}, which is not an issue id")
+        if not m.get("refers") and not r["body"].strip():
+            errs.append(f"{name}: the text below the front matter is empty")
+    for r in scens:
+        m, name = r["meta"], rel(r)
+        if not " ".join(m.get("question", "").split()):
+            errs.append(f"{name}: question is empty")
+        if m.get("area") not in cfg["wh"]["areas"]:
+            errs.append(f"{name}: area {m.get('area')!r} must be one of {', '.join(cfg['wh']['areas'])}")
+        if m.get("status") not in cfg["wh"]["statuses"]:
+            errs.append(f"{name}: status {m.get('status')!r} must be one of {', '.join(cfg['wh']['statuses'])}")
+        for i in refs(r):
+            if i not in issue_ids:
+                errs.append(f"{name}: issues lists {i!r}, which is not an issue id")
+        if m.get("status") == "issue" and not refs(r):
+            errs.append(f"{name}: status 'issue' needs at least one issue")
+    return errs
+
+
+# ----------------------------------------------------------------------------- generated files
+
+INDEX_INTRO = """\
+# Issues
+
+> GENERATED FILE: do not edit by hand. Every issue is a file in `items/`; change one, then run `python issues/issues.py render`. How to use the tool: [README.md](README.md).
+
+Developer-facing bug log, kept apart from the public GitHub issues (see [Why this exists](README.md#why-this-exists)). Fixed issues are never deleted, they are marked `fixed`.
+"""
+
+WH_INTRO = """\
+# What Happens?
+
+> GENERATED FILE: do not edit by hand. Every scenario is a file in `scenarios/`; add one with `python issues/issues.py wh add`.
+
+> This is a repo way of asking what might happen if a certain behavior, action or event in this software is done or happens. What other expected or unexpected behaviors might be triggered. It does not answer what the triggered behaviors are; it lists the questions for what can trigger them. This lets users or devs reproduce and test on their own side, without a known reference behavior, so they can shape and report unexpected behaviors.
+
+**How to use:** pick an `untested` scenario, try it on your devices, then report what you saw. If something unexpected happened, report it with `python issues/issues.py report` and link it (`wh set ID issue --issue ID`).
+"""
+
+
+def esc(s):
+    return " ".join(str(s).split()).replace("|", "\\|")
+
+
+def issue_link(r, pool):
+    return f"[{short(r, pool)}](items/{r['path'].name})"
+
+
+def render_index(cfg, issues, scens):
+    by_id = {r["meta"]["id"]: r for r in issues}
+    cover = {}
+    for s in scens:
+        for i in refs(s):
+            cover.setdefault(i, []).append(s)
+    counts = ", ".join(f"{sum(1 for r in issues if r['meta']['status'] == k)} {k}" for k in cfg["report"]["statuses"])
+    out = [INDEX_INTRO, f"**{len(issues)} issues**: {counts}", "",
+           "| id | status | issue | comment | scenarios |", "|----|--------|-------|---------|-----------|"]
+    for r in issues:
+        m = r["meta"]
+        status = m["status"] + (f"({m['weight']})" if m.get("weight") else "")
+        title = f"**{esc(m['title'])}**" + (f" (was {m['legacy']})" if m.get("legacy") else "")
+        note = esc(m.get("comment", ""))
+        if m.get("refers") in by_id:
+            note = f"↳ refers to {issue_link(by_id[m['refers']], issues)}. {note}".strip()
+        sc = ", ".join(f"[{scen_label(s, scens)}](what_happens.md#wh-{s['meta']['id'][:FILE_LEN]})"
+                       for s in cover.get(m["id"], []))
+        out.append(f"| {issue_link(r, issues)} | {status} | {title} | {note} | {sc} |")
+    return "\n".join(out) + "\n"
+
+
+def render_wh(cfg, issues, scens):
+    areas, statuses = cfg["wh"]["areas"], cfg["wh"]["statuses"]
+    by_id = {r["meta"]["id"]: r for r in issues}
+    counts = ", ".join(f"{sum(1 for s in scens if s['meta']['status'] == k)} {k}" for k in statuses)
+    out = [WH_INTRO, f"**{len(scens)} scenarios**: {counts}", ""]
+    for area in areas:
+        group = [s for s in scens if s["meta"].get("area") == area]
+        if not group:
+            continue
+        out += [f"## {area}", ""]
+        for s in group:
+            m = s["meta"]
+            anchor = "wh-" + m["id"][:FILE_LEN]
+            question = " ".join(m["question"].split())
+            out.append(f'- <a id="{anchor}"></a>**{scen_label(s, scens)}** `{m["status"]}`: {question}')
+            note = " ".join(s["body"].split())
+            if note:
+                out.append(f"  - note: {note}")
+            links = [issue_link(by_id[i], issues) for i in refs(s) if i in by_id]
+            if links:
+                out.append("  - issues: " + ", ".join(links))
+        out.append("")
+    return "\n".join(out)
+
+
+def generated(cfg, issues, scens):
+    return ((index_md(), render_index(cfg, issues, scens)), (wh_md(), render_wh(cfg, issues, scens)))
+
+
+def render_all(dry=False):
+    cfg, issues, scens = config(), load_all("issue"), load_all("scenario")
+    errs = validate_records(cfg, issues, scens)
+    if errs:
+        raise Fail("\n".join(errs))
+    for path, text in generated(cfg, issues, scens):
+        old = read(path) if path.exists() else ""
+        if old.replace("\r\n", "\n") != text:
+            commit(path, old, text, dry)
+
+
+# ----------------------------------------------------------------------------- link checker
+
+LINK = re.compile(r"(?<!!)\[[^\]\n]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+
+
+def strip_fences(text):
+    return re.sub(r"(?ms)^[ \t]*```.*?^[ \t]*```[^\n]*$", "", text.replace("\r\n", "\n"))
+
+
+def strip_code(text):
+    return re.sub(r"`[^`\n]*`", "", strip_fences(text))
+
+
+def gh_slug(heading):
+    h = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", heading)
+    h = re.sub(r"[`*]", "", h).strip().lower()
+    return re.sub(r"[^\w\- ]", "", h).replace(" ", "-")
+
+
+def anchors(path, cache):
+    if path not in cache:
+        text = strip_fences(read(path))
+        seen, out = {}, set()
+        for m in re.finditer(r"(?m)^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", text):
+            s = gh_slug(m[1])
+            n = seen.get(s, 0)
+            seen[s] = n + 1
+            out.add(s if n == 0 else f"{s}-{n}")
+        out.update(a.lower() for a in re.findall(r'<a\s+(?:id|name)="([^"]+)"', text))
+        cache[path] = out
+    return cache[path]
+
+
+def check_links():
+    """Every relative link in issues/*.md (and the links into issues/ from the root README) must
+    point at a file that exists and, when it has a #fragment, at a heading or anchor that exists."""
+    errs, cache, root = [], {}, DIR.parent
+    scan = [(p, p.parent, False) for p in sorted(DIR.rglob("*.md"))]
+    if (root / "README.md").exists():
+        scan.append((root / "README.md", root, True))
+    for p, base, only_issues in scan:
+        for m in LINK.finditer(strip_code(read(p))):
+            target = m[1]
+            if re.match(r"[a-z][a-z0-9+.\-]*:", target, re.I):
+                continue
+            path, _, frag = target.partition("#")
+            path = re.sub(r"^\./", "", path)
+            if only_issues and not path.startswith("issues/"):
+                continue
+            file = (base / unquote(path)).resolve() if path else p
+            try:
+                name = p.resolve().relative_to(root.resolve()).as_posix()
+            except ValueError:
+                name = p.name
+            if not file.exists():
+                errs.append(f"{name}: link ({target}) points to a file that does not exist")
+            elif frag and file.suffix == ".md" and file.is_file():
+                if unquote(frag).lower() not in anchors(file, cache):
+                    errs.append(f"{name}: link ({target}) points to #{frag}, but {file.name} has no such heading or anchor")
     return errs
 
 
 # ----------------------------------------------------------------------------- editor + drafts
 
 def split_command(raw, windows=None):
-    """Split an editor command. On Windows shlex keeps the quotes (posix=False), so strip them."""
     windows = (os.name == "nt") if windows is None else windows
     argv = shlex.split(raw, posix=not windows)
     if windows:
@@ -222,7 +498,7 @@ def editor_argv():
         argv = next(([c] for c in cands if shutil.which(c)), None)
         if not argv:
             raise Fail("no editor found. Set one in issues/config.local.toml ([editor] command = \"nano\"), "
-                       "or export EDITOR, or pass the text with flags (--comment/--body)")
+                       "or export EDITOR, or pass the text with flags (--title/--body)")
     exe = shutil.which(argv[0])
     if not exe:
         raise Fail(f"editor {argv[0]!r} not found on PATH")
@@ -234,15 +510,14 @@ def editor_argv():
 
 
 def open_editor(path):
-    argv = editor_argv()
-    r = subprocess.run(argv + [str(path)])
+    r = subprocess.run(editor_argv() + [str(path)])
     if r.returncode != 0:
         raise Fail(f"editor exited with code {r.returncode}; draft kept at {path}")
 
 
 def new_draft(kind, text):
     p = drafts_dir() / f"{kind}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.md"
-    p.write_text(text, encoding="utf-8", newline="\n")
+    p.write_bytes(text.encode("utf-8"))
     return p
 
 
@@ -257,30 +532,29 @@ COMMENT_LINE = re.compile(r"^\s*<!--.*-->\s*$")
 
 
 def parse_form(text, header=True):
-    lines = [l for l in text.replace("\r\n", "\n").split("\n") if not COMMENT_LINE.match(l)]
+    lines = [x for x in text.replace("\r\n", "\n").split("\n") if not COMMENT_LINE.match(x)]
     fields = {}
     if header:
-        stripped = [l.strip() for l in lines]
+        stripped = [x.strip() for x in lines]
         if "---" not in stripped:
             raise Fail("the '---' line between the fields and the text is missing")
         k = stripped.index("---")
-        for l in lines[:k]:
-            if not l.strip():
+        for x in lines[:k]:
+            if not x.strip():
                 continue
-            m = re.match(r"^(\w+)\s*:\s*(.*)$", l)
+            m = re.match(r"^(\w+)\s*:\s*(.*)$", x)
             if not m:
-                raise Fail(f"bad field line: {l!r}")
+                raise Fail(f"bad field line: {x!r}")
             fields[m[1].lower()] = m[2].strip()
         lines = lines[k + 1:]
     return fields, "\n".join(lines).strip()
 
 
-# ----------------------------------------------------------------------------- issue.md edits
-
 REPORT_TEMPLATE = """\
 <!-- New issue. Whole-line HTML comments like this one are dropped. Save and close the editor to submit. -->
-<!-- comment = one line for the table. The text below '---' becomes the '## NNNN' section. -->
-<!-- Referral to another issue: set 'refers: 0002' and leave the text empty. Close without edits to abort. -->
+<!-- title = a short name (it becomes the file name). comment = optional one line for the index. weight = weak|medium|strong, optional. -->
+<!-- refers = id of an issue this one points back to (e.g. a half-fixed one); then the text below may be short. Close without edits to abort. -->
+title: {title}
 status: {status}
 weight: {weight}
 refers: {refers}
@@ -290,235 +564,15 @@ comment: {comment}
 """
 
 UPDATE_TEMPLATE = """\
-<!-- Update for issue {num}. Whole-line HTML comments are dropped. Save and close to submit. -->
-<!-- Changing the status too? Use:  issues.py update {num} --status fixed -->
+<!-- Update for issue {ref}. Whole-line HTML comments are dropped. Save and close to submit. -->
+<!-- Changing the status too? Use:  issues.py update {ref} --status fixed -->
 
-"""
-
-
-def apply_report(lines, f, body, cfg):
-    rc = cfg["report"]
-    status = f.get("status") or rc["default_status"]
-    weight = f.get("weight", "")
-    if status_base(status) not in rc["statuses"]:
-        raise Fail(f"status {status!r} must start with one of {', '.join(rc['statuses'])}")
-    if weight and weight not in rc["weights"]:
-        raise Fail(f"weight {weight!r} must be one of {', '.join(rc['weights'])}")
-    comment = " ".join(f.get("comment", "").split()).replace("|", "\\|")
-    if not comment:
-        raise Fail("comment is empty (it is the one-line summary shown in the table)")
-    rs = rows(lines)
-    known = {r["num"]: r for r in rs}
-    heads = headings(lines)
-    refers = f.get("refers", "")
-    if refers:
-        if refers not in known:
-            raise Fail(f"refers: {refers} is not an issue in the table")
-        anchor = known[refers]["anchor"]
-        if anchor not in heads:
-            raise Fail(f"refers: {refers} has no section to point to")
-    elif not body:
-        raise Fail("the text below '---' is empty")
-    num = f"{max([int(r['num']) for r in rs] or [0]) + 1:04d}"
-    cell = status if "(" in status or not weight else f"{status}({weight})"
-    new = list(lines)
-    ensure_nl(new, detect_eol(lines))
-    eol = detect_eol(lines)
-    s, e = table_span(new)
-    if not new[e - 1].endswith("\n"):
-        new[e - 1] += eol
-    new.insert(e, f"| [{num}](#{refers and known[refers]['anchor'] or num}) | {cell} | {comment} |{eol}")
-    if not refers:
-        parts = body.replace("\r\n", "\n").split("\n")
-        if not parts[0].startswith("**"):
-            parts[0] = "**Observation:** " + parts[0]
-        new += [eol, f"## {num}{eol}"] + [p + eol for p in parts]
-    return new, num
-
-
-def set_status(lines, num, status, comment, cfg):
-    rc = cfg["report"]
-    if status_base(status) not in rc["statuses"]:
-        raise Fail(f"status {status!r} must start with one of {', '.join(rc['statuses'])}")
-    w = re.search(r"\(([^)]*)\)", status)
-    if w and rc["weights"] and w[1] not in rc["weights"]:
-        raise Fail(f"weight {w[1]!r} must be one of {', '.join(rc['weights'])}")
-    r = next((r for r in rows(lines) if r["num"] == num), None)
-    if not r:
-        raise Fail(f"issue {num} is not in the table")
-    line = lines[r["i"]]
-    m = ROW.match(line)
-    raw = m[3]
-    lead = len(raw) - len(raw.lstrip())
-    trail = len(raw) - len(raw.rstrip())
-    new3 = raw[:lead] + status + raw[len(raw) - trail:]
-    out = line[:m.start(3)] + new3 + line[m.end(3):]
-    if comment is not None:
-        tail = re.search(r"\r?\n$", out)
-        eol = tail[0] if tail else ""
-        head = out[:m.start(3) + len(new3) + 1]
-        out = head + f" {' '.join(comment.split()).replace('|', chr(92) + '|')} |" + eol
-    new = list(lines)
-    new[r["i"]] = out
-    return new
-
-
-def add_update(lines, num, text, cfg):
-    if not text:
-        raise Fail("update text is empty")
-    r = next((r for r in rows(lines) if r["num"] == num), None)
-    if not r:
-        raise Fail(f"issue {num} is not in the table")
-    if r["anchor"] != num:
-        raise Fail(f"{num} is a referral to {r['anchor']}: update {r['anchor']} instead")
-    heads = headings(lines)
-    if num not in heads:
-        raise Fail(f"issue {num} has no '## {num}' section")
-    eol = detect_eol(lines)
-    h = heads[num]
-    nxt = min([i for i in heads.values() if i > h] or [len(lines)])
-    pos = nxt
-    while pos > h + 1 and lines[pos - 1].strip() == "":
-        pos -= 1
-    label = f"Update ({time.strftime('%Y-%m-%d')})" if cfg["report"]["update_dates"] else "Update"
-    parts = text.replace("\r\n", "\n").split("\n")
-    parts[0] = f"**{label}:** " + parts[0]
-    new = list(lines)
-    if not new[pos - 1].endswith("\n"):
-        new[pos - 1] += eol
-    new[pos:pos] = [eol] + [p + eol for p in parts]
-    return new
-
-
-# ----------------------------------------------------------------------------- commands: issues
-
-def cmd_report(a):
-    cfg = config()
-    lines = read_lines(issue_md())
-    draft = None
-    form = {"status": a.status or "", "weight": a.weight or "", "refers": a.refers or "", "comment": a.comment or ""}
-    body = a.body or ""
-    if a.resume:
-        draft = latest_draft("report")
-        form, body = parse_form(draft.read_text(encoding="utf-8"))
-    elif not (a.comment and (a.body or a.refers)):
-        tpl = REPORT_TEMPLATE.format(status=form["status"] or cfg["report"]["default_status"],
-                                     weight=form["weight"], refers=form["refers"],
-                                     comment=form["comment"], body=body)
-        draft = new_draft("report", tpl)
-        open_editor(draft)
-        text = draft.read_text(encoding="utf-8")
-        if text.strip() == tpl.strip():
-            draft.unlink()
-            print("nothing to report (draft unchanged)")
-            return 0
-        form, body = parse_form(text)
-    try:
-        new, num = apply_report(lines, form, body, cfg)
-    except Fail as e:
-        if draft:
-            raise Fail(f"{e}\n  draft kept at {draft}\n  continue with: issues.py report --resume")
-        raise
-    commit(issue_md(), lines, new, a.dry_run)
-    if draft and not a.dry_run:
-        draft.unlink(missing_ok=True)
-    if not a.dry_run:
-        print(f"reported {num}")
-    return 0
-
-
-def cmd_update(a):
-    cfg = config()
-    lines = read_lines(issue_md())
-    text = a.text
-    draft = None
-    if text is None:
-        tpl = UPDATE_TEMPLATE.format(num=a.num)
-        draft = new_draft("update", tpl)
-        open_editor(draft)
-        raw = draft.read_text(encoding="utf-8")
-        if raw.strip() == tpl.strip():
-            draft.unlink()
-            print("nothing to add (draft unchanged)")
-            return 0
-        _, text = parse_form(raw, header=False)
-    try:
-        new = add_update(lines, a.num, text, cfg)
-        if a.status:
-            new = set_status(new, a.num, a.status, None, cfg)
-    except Fail as e:
-        if draft:
-            raise Fail(f"{e}\n  your text is kept at {draft}")
-        raise
-    commit(issue_md(), lines, new, a.dry_run)
-    if draft and not a.dry_run:
-        draft.unlink(missing_ok=True)
-    if not a.dry_run:
-        print(f"updated {a.num}")
-    return 0
-
-
-def cmd_status(a):
-    lines = read_lines(issue_md())
-    new = set_status(lines, a.num, a.status, a.comment, config())
-    commit(issue_md(), lines, new, a.dry_run)
-    if not a.dry_run:
-        print(f"{a.num} -> {a.status}")
-    return 0
-
-
-def cmd_list(a):
-    for r in rows(read_lines(issue_md())):
-        if a.status and status_base(r["status"]) != a.status:
-            continue
-        ref = f" (see {r['anchor']})" if r["anchor"] != r["num"] else ""
-        print(f"{r['num']}  {r['status']:<14} {r['comment'][:90]}{ref}")
-    return 0
-
-
-def cmd_next(a):
-    rs = rows(read_lines(issue_md()))
-    print(f"{max([int(r['num']) for r in rs] or [0]) + 1:04d}")
-    return 0
-
-
-def cmd_check(a):
-    cfg = config()
-    lines = read_lines(issue_md())
-    errs = check_issues(lines, cfg)
-    scenarios = load_wh()
-    errs += check_wh(scenarios, lines, cfg)
-    if wh_md().exists():
-        have = wh_md().read_bytes().decode("utf-8").replace("\r\n", "\n")
-        if have != render_wh(scenarios, lines, cfg):
-            errs.append("what_happens.md is out of date: run `issues.py wh render`")
-    if errs:
-        print("\n".join(errs), file=sys.stderr)
-        return 1
-    rs = rows(lines)
-    covered = {n for s in scenarios for n in s.get("issues", [])}
-    open_no_wh = [r["num"] for r in rs if status_base(r["status"]) == "report" and r["num"] not in covered]
-    print(f"ok: {len(rs)} issues, {len(scenarios)} scenarios")
-    if open_no_wh:
-        print("open issues with no what-happens scenario: " + ", ".join(open_no_wh))
-    return 0
-
-
-# ----------------------------------------------------------------------------- what_happens
-
-WH_INTRO = """\
-# What Happens?
-
-> GENERATED FILE: do not edit by hand. Edit `what_happens.toml` or run `python issues/issues.py wh add`, then `python issues/issues.py wh render`.
-
-> This is a repo way of asking what might happen if a certain behavior, action or event in this software is done or happens. What other expected or unexpected behaviors might be triggered. It does not answer what the triggered behaviors are; it lists the questions for what can trigger them. This lets users or devs reproduce and test on their own side, without a known reference behavior, so they can shape and report unexpected behaviors.
-
-**How to use:** pick an `untested` scenario, try it on your devices, then report what you saw. If something unexpected happened, report it with `python issues/issues.py report` and link it here (`wh set WH-00N issue --issue NNNN`).
 """
 
 WH_TEMPLATE = """\
 <!-- New 'what happens' scenario. Whole-line HTML comments are dropped. Save and close to submit. -->
 <!-- Write one question below '---', e.g. "When X happens, what happens?". A question only, never an answer. -->
+<!-- issues = ids of related issues, comma separated (optional). note = how to reproduce / hints (optional). -->
 area: {area}
 issues: {issues}
 note: {note}
@@ -527,176 +581,248 @@ note: {note}
 """
 
 
-def load_wh():
-    if not wh_toml().exists():
-        return []
-    return tomllib.loads(wh_toml().read_text(encoding="utf-8")).get("scenario", [])
+# ----------------------------------------------------------------------------- record builders
+
+def build_issue(cfg, pool, f, body):
+    rc = cfg["report"]
+    title = " ".join(f.get("title", "").split())
+    if not title:
+        raise Fail("title is empty (a short name for the issue)")
+    status = f.get("status") or rc["default_status"]
+    if status not in rc["statuses"]:
+        raise Fail(f"status {status!r} must be one of {', '.join(rc['statuses'])}")
+    weight = f.get("weight", "")
+    if weight and weight not in rc["weights"]:
+        raise Fail(f"weight {weight!r} must be one of {', '.join(rc['weights'])}")
+    refers = ""
+    if f.get("refers"):
+        refers = resolve(f["refers"], [r for r in pool if r["kind"] == "issue"], "issue")["meta"]["id"]
+    elif not body.strip():
+        raise Fail("the text below '---' is empty")
+    rid = new_id(f"{title}\n{body}", [r["meta"]["id"] for r in pool])
+    meta = {"id": rid, "title": title, "status": status, "weight": weight, "refers": refers,
+            "created": now_utc(), "comment": " ".join(f.get("comment", "").split())}
+    return {"kind": "issue", "meta": meta, "body": body.strip(),
+            "path": items_dir() / file_name(rid, title, "issue")}
 
 
-def check_wh(scenarios, lines, cfg):
-    errs, ids = [], set()
-    known = {r["num"] for r in rows(lines)}
-    areas, statuses = cfg["wh"]["areas"], cfg["wh"]["statuses"]
-    for s in scenarios:
-        sid = s.get("id", "<no id>")
-        if not re.fullmatch(r"WH-\d{3,}", sid):
-            errs.append(f"{sid}: id must look like WH-001")
-        if sid in ids:
-            errs.append(f"{sid}: duplicate id")
-        ids.add(sid)
-        if not str(s.get("question", "")).strip():
-            errs.append(f"{sid}: empty question")
-        if s.get("area") not in areas:
-            errs.append(f"{sid}: area must be one of {', '.join(areas)}")
-        if s.get("status") not in statuses:
-            errs.append(f"{sid}: status must be one of {', '.join(statuses)}")
-        refs = s.get("issues", [])
-        for n in refs:
-            if n not in known:
-                errs.append(f"{sid}: issue {n} is not in the issue.md table")
-        if s.get("status") == "issue" and not refs:
-            errs.append(f"{sid}: status 'issue' needs an issue number")
-    return errs
+def build_scenario(cfg, pool, f, question):
+    area = f.get("area", "")
+    if area not in cfg["wh"]["areas"]:
+        raise Fail(f"area {area!r} must be one of {', '.join(cfg['wh']['areas'])}")
+    question = " ".join(question.split())
+    if not question:
+        raise Fail("the question is empty")
+    issue_pool = [r for r in pool if r["kind"] == "issue"]
+    ids = [resolve(x, issue_pool, "issue")["meta"]["id"] for x in re.split(r"[,\s]+", f.get("issues", "")) if x]
+    rid = new_id(question, [r["meta"]["id"] for r in pool])
+    meta = {"id": rid, "area": area, "status": "untested", "issues": ", ".join(ids),
+            "created": now_utc(), "question": question}
+    return {"kind": "scenario", "meta": meta, "body": f.get("note", "").strip(),
+            "path": scen_dir() / file_name(rid, question, "scenario")}
 
 
-def render_wh(scenarios, lines, cfg):
-    areas, statuses = cfg["wh"]["areas"], cfg["wh"]["statuses"]
-    table = {r["num"]: r for r in rows(lines)}
-    counts = {k: sum(1 for s in scenarios if s["status"] == k) for k in statuses}
-    out = [WH_INTRO, f"**{len(scenarios)} scenarios**: " + ", ".join(f"{counts[k]} {k}" for k in statuses), ""]
-    for area in areas:
-        group = [s for s in scenarios if s["area"] == area]
-        if not group:
+def save_new(rec, dry):
+    commit(rec["path"], "", dump_record(rec["kind"], rec["meta"], rec["body"]), dry)
+
+
+# ----------------------------------------------------------------------------- commands
+
+def cmd_report(a):
+    cfg, issues, scens = config(), load_all("issue"), load_all("scenario")
+    draft = None
+    form = {"title": a.title or "", "status": a.status or "", "weight": a.weight or "",
+            "refers": a.refers or "", "comment": a.comment or ""}
+    body = a.body or ""
+    if a.resume:
+        draft = latest_draft("report")
+        form, body = parse_form(read(draft))
+    elif not (a.title and (a.body or a.refers)):
+        tpl = REPORT_TEMPLATE.format(body=body, **{**form, "status": form["status"] or cfg["report"]["default_status"]})
+        draft = new_draft("report", tpl)
+        open_editor(draft)
+        text = read(draft)
+        if text.strip() == tpl.strip():
+            draft.unlink()
+            print("nothing to report (draft unchanged)")
+            return 0
+        form, body = parse_form(text)
+    try:
+        rec = build_issue(cfg, issues + scens, form, body)
+    except Fail as e:
+        if draft:
+            raise Fail(f"{e}\n  draft kept at {draft}\n  continue with: issues.py report --resume")
+        raise
+    save_new(rec, a.dry_run)
+    if not a.dry_run:
+        if draft:
+            draft.unlink(missing_ok=True)
+        render_all()
+        print(f"reported {rec['meta']['id'][:SHOW_LEN]}  {rec['path'].relative_to(DIR.parent).as_posix()}")
+    return 0
+
+
+def cmd_update(a):
+    cfg, issues = config(), load_all("issue")
+    r = resolve(a.ref, issues, "issue")
+    text, draft = a.text, None
+    if text is None:
+        tpl = UPDATE_TEMPLATE.format(ref=a.ref)
+        draft = new_draft("update", tpl)
+        open_editor(draft)
+        raw = read(draft)
+        if raw.strip() == tpl.strip():
+            draft.unlink()
+            print("nothing to add (draft unchanged)")
+            return 0
+        _, text = parse_form(raw, header=False)
+    old = read(r["path"])
+    try:
+        new = append_update(old, text, cfg)
+        if a.status:
+            if a.status not in cfg["report"]["statuses"]:
+                raise Fail(f"status {a.status!r} must be one of {', '.join(cfg['report']['statuses'])}")
+            new = set_fields(new, {"status": a.status})
+    except Fail as e:
+        if draft:
+            raise Fail(f"{e}\n  your text is kept at {draft}")
+        raise
+    commit(r["path"], old, new, a.dry_run)
+    if not a.dry_run:
+        if draft:
+            draft.unlink(missing_ok=True)
+        render_all()
+        print(f"updated {short(r, issues)}")
+    return 0
+
+
+def cmd_status(a):
+    cfg, issues = config(), load_all("issue")
+    r = resolve(a.ref, issues, "issue")
+    rc = cfg["report"]
+    if a.status not in rc["statuses"]:
+        raise Fail(f"status {a.status!r} must be one of {', '.join(rc['statuses'])}")
+    weight = a.weight
+    if weight == "none":
+        weight = ""
+    elif weight and weight not in rc["weights"]:
+        raise Fail(f"weight {weight!r} must be one of {', '.join(rc['weights'])} (or none)")
+    comment = None if a.comment is None else " ".join(a.comment.split())
+    old = read(r["path"])
+    commit(r["path"], old, set_fields(old, {"status": a.status, "weight": weight, "comment": comment}), a.dry_run)
+    if not a.dry_run:
+        render_all()
+        print(f"{short(r, issues)} -> {a.status}")
+    return 0
+
+
+def cmd_edit(a):
+    r = resolve(a.ref, load_all("issue") + load_all("scenario"))
+    open_editor(r["path"])
+    render_all()
+    print(f"edited {rel(r)}")
+    return 0
+
+
+def cmd_show(a):
+    r = resolve(a.ref, load_all("issue") + load_all("scenario"))
+    print(r["path"])
+    print()
+    print(read(r["path"]).rstrip("\n"))
+    return 0
+
+
+def cmd_list(a):
+    issues = load_all("issue")
+    for r in issues:
+        m = r["meta"]
+        if a.status and m.get("status") != a.status:
             continue
-        out += [f"## {area}", ""]
-        for s in group:
-            out.append(f"- **{s['id']}** `{s['status']}`: {s['question']}")
-            if s.get("note"):
-                out.append(f"  - note: {s['note']}")
-            if s.get("issues"):
-                out.append("  - issues: " + ", ".join(issue_link(lines, n) for n in s["issues"]))
-        out.append("")
-    by_issue = {}
-    for s in scenarios:
-        for n in s.get("issues", []):
-            by_issue.setdefault(n, []).append(s["id"])
-    out += ["## Issue coverage", "", "| issue | status | scenarios |", "|-------|--------|-----------|"]
-    for n, r in sorted(table.items()):
-        label = issue_link(lines, n) + (f" (see {r['anchor']})" if r["anchor"] != n else "")
-        out.append(f"| {label} | {r['status']} | {', '.join(by_issue.get(n, [])) or 'none'} |")
-    out.append("")
-    return "\n".join(out)
+        print(f"{short(r, issues)}  {m.get('status', ''):<7} {m.get('legacy', ''):<5} {m.get('title', '')}")
+    return 0
 
 
-def write_wh_md(dry=False):
-    cfg = config()
-    lines = read_lines(issue_md())
-    text = render_wh(load_wh(), lines, cfg)
-    if dry:
-        return
-    wh_md().write_bytes(text.encode("utf-8"))
+def cmd_render(a):
+    render_all(a.dry_run)
+    if not a.dry_run:
+        print("generated INDEX.md and what_happens.md are up to date")
+    return 0
 
 
-def toml_str(v):
-    return json.dumps(v, ensure_ascii=False)
-
-
-def validate_wh_file(cfg):
-    errs = check_wh(load_wh(), read_lines(issue_md()), cfg)
+def cmd_check(a):
+    cfg, errs = config(), []
+    issues, scens = load_all("issue", errs), load_all("scenario", errs)
+    errs += validate_records(cfg, issues, scens)
+    if not errs:
+        for path, text in generated(cfg, issues, scens):
+            have = read(path).replace("\r\n", "\n") if path.exists() else None
+            if have != text:
+                errs.append(f"{path.name} is out of date: run `python issues/issues.py render`")
+    errs += check_links()
     if errs:
-        raise Fail("\n".join(errs))
+        print("\n".join(errs), file=sys.stderr)
+        return 1
+    print(f"ok: {len(issues)} issues, {len(scens)} scenarios, all links resolve")
+    covered = {i for s in scens for i in refs(s)}
+    todo = [short(r, issues) for r in issues if r["meta"]["status"] == "report" and r["meta"]["id"] not in covered]
+    if todo:
+        print("open issues with no what-happens scenario: " + ", ".join(todo))
+    return 0
 
 
 def cmd_wh_add(a):
-    cfg = config()
+    cfg, issues, scens = config(), load_all("issue"), load_all("scenario")
     form = {"area": a.area or "", "issues": ",".join(a.issue), "note": a.note or ""}
-    question = a.question or ""
-    draft = None
+    question, draft = a.question or "", None
     if not (a.question and a.area):
-        tpl = WH_TEMPLATE.format(area=form["area"], issues=form["issues"], note=form["note"], question=question)
+        tpl = WH_TEMPLATE.format(question=question, **form)
         draft = new_draft("wh", tpl)
         open_editor(draft)
-        text = draft.read_text(encoding="utf-8")
+        text = read(draft)
         if text.strip() == tpl.strip():
             draft.unlink()
             print("nothing to add (draft unchanged)")
             return 0
         form, question = parse_form(text)
-    issues = [n.strip() for n in form.get("issues", "").split(",") if n.strip()]
-    scenarios = load_wh()
-    nums = [int(s["id"].split("-")[1]) for s in scenarios] or [0]
-    sid = f"WH-{max(nums) + 1:03d}"
-    question = " ".join(question.split())
-    block = ["", "[[scenario]]", f"id = {toml_str(sid)}", f"area = {toml_str(form.get('area', ''))}", 'status = "untested"']
-    if issues:
-        block.append("issues = [" + ", ".join(toml_str(i) for i in issues) + "]")
-    block.append(f"question = {toml_str(question)}")
-    if form.get("note"):
-        block.append(f"note = {toml_str(form['note'])}")
-    old = wh_toml().read_bytes().decode("utf-8") if wh_toml().exists() else ""
-    new = old.rstrip("\r\n") + "\n" + "\n".join(block) + "\n"
     try:
-        tomllib.loads(new)
-        errs = check_wh(tomllib.loads(new).get("scenario", []), read_lines(issue_md()), cfg)
-        if errs:
-            raise Fail("\n".join(errs))
-    except (Fail, tomllib.TOMLDecodeError) as e:
+        rec = build_scenario(cfg, issues + scens, form, question)
+    except Fail as e:
         if draft:
             raise Fail(f"{e}\n  your text is kept at {draft}")
         raise
-    if a.dry_run:
-        commit(wh_toml(), split_lines(old), split_lines(new), True)
-        return 0
-    commit(wh_toml(), split_lines(old), split_lines(new), False)
-    write_wh_md()
-    if draft:
-        draft.unlink(missing_ok=True)
-    print(f"added {sid}")
+    save_new(rec, a.dry_run)
+    if not a.dry_run:
+        if draft:
+            draft.unlink(missing_ok=True)
+        render_all()
+        print(f"added {rec['meta']['id'][:SHOW_LEN]}  {rec['path'].relative_to(DIR.parent).as_posix()}")
     return 0
 
 
 def cmd_wh_set(a):
-    cfg = config()
-    old = wh_toml().read_bytes().decode("utf-8")
-    parts = re.split(r"(?m)^(?=\[\[scenario\]\])", old)
-    hit = False
-    for i, p in enumerate(parts):
-        if re.search(rf'(?m)^id = "{re.escape(a.id)}"\s*$', p):
-            hit = True
-            p = re.sub(r"(?m)^status = .*$", lambda _m: f"status = {toml_str(a.status)}", p)
-            if a.issue:
-                line = "issues = [" + ", ".join(toml_str(n) for n in a.issue) + "]"
-                if re.search(r"(?m)^issues = ", p):
-                    p = re.sub(r"(?m)^issues = .*$", lambda _m: line, p)
-                else:
-                    p = re.sub(r"(?m)^(status = .*)$", lambda m: m[1] + "\n" + line, p)
-            parts[i] = p
-    if not hit:
-        raise Fail(f"{a.id} not found")
-    new = "".join(parts)
-    errs = check_wh(tomllib.loads(new).get("scenario", []), read_lines(issue_md()), cfg)
-    if errs:
-        raise Fail("\n".join(errs))
-    commit(wh_toml(), split_lines(old), split_lines(new), a.dry_run)
+    issues, scens = load_all("issue"), load_all("scenario")
+    r = resolve(a.ref, scens, "scenario")
+    ids = [resolve(x, issues, "issue")["meta"]["id"] for x in a.issue]
+    if a.status == "issue" and not (ids or refs(r)):
+        raise Fail("status 'issue' needs an issue: add --issue ID")
+    upd = {"status": a.status}
+    if ids:
+        upd["issues"] = ", ".join(ids)
+    old = read(r["path"])
+    commit(r["path"], old, set_fields(old, upd), a.dry_run)
     if not a.dry_run:
-        write_wh_md()
-        print(f"{a.id} -> {a.status}")
+        render_all()
+        print(f"{scen_label(r, scens)} -> {a.status}")
     return 0
 
 
 def cmd_wh_list(a):
-    for s in load_wh():
-        if (a.status and s["status"] != a.status) or (a.area and s["area"] != a.area):
+    scens = load_all("scenario")
+    for s in scens:
+        m = s["meta"]
+        if (a.status and m.get("status") != a.status) or (a.area and m.get("area") != a.area):
             continue
-        print(f"{s['id']}  {s['status']:<9} {s['area']:<10} {s['question']}")
-    return 0
-
-
-def cmd_wh_render(a):
-    cfg = config()
-    validate_wh_file(cfg)
-    write_wh_md()
-    print(f"wrote {wh_md().name}")
+        print(f"{scen_label(s, scens):<8} {m.get('status', ''):<9} {m.get('area', ''):<10} {m.get('question', '')}")
     return 0
 
 
@@ -704,7 +830,7 @@ def cmd_wh_render(a):
 
 def build_parser():
     cfg = config()
-    areas, wstat = cfg["wh"]["areas"], cfg["wh"]["statuses"]
+    areas, wstat, weights = cfg["wh"]["areas"], cfg["wh"]["statuses"], cfg["report"]["weights"]
     ap = argparse.ArgumentParser(prog="issues.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -712,33 +838,38 @@ def build_parser():
         p.add_argument("--dry-run", action="store_true", help="print a diff, write nothing")
 
     p = sub.add_parser("report", help="add a new issue")
-    p.add_argument("--comment")
-    p.add_argument("--body")
-    p.add_argument("--status")
-    p.add_argument("--weight")
-    p.add_argument("--refers", metavar="NNNN")
+    for opt in ("--title", "--body", "--comment", "--status", "--weight", "--refers"):
+        p.add_argument(opt)
     p.add_argument("--resume", action="store_true")
     dry(p)
     p.set_defaults(fn=cmd_report)
 
-    p = sub.add_parser("update", help="append an update to an issue section")
-    p.add_argument("num")
+    p = sub.add_parser("update", help="append an update to an issue")
+    p.add_argument("ref")
     p.add_argument("--text")
     p.add_argument("--status")
     dry(p)
     p.set_defaults(fn=cmd_update)
 
-    p = sub.add_parser("status", help="change one table row")
-    p.add_argument("num")
+    p = sub.add_parser("status", help="change status / weight / comment of an issue")
+    p.add_argument("ref")
     p.add_argument("status")
     p.add_argument("--comment")
+    p.add_argument("--weight", help=f"{', '.join(weights)} or none")
     dry(p)
     p.set_defaults(fn=cmd_status)
+
+    for name, fn, help_ in (("edit", cmd_edit, "open a record in your editor"), ("show", cmd_show, "print a record")):
+        p = sub.add_parser(name, help=help_)
+        p.add_argument("ref")
+        p.set_defaults(fn=fn)
 
     p = sub.add_parser("list")
     p.add_argument("--status")
     p.set_defaults(fn=cmd_list)
-    sub.add_parser("next").set_defaults(fn=cmd_next)
+    p = sub.add_parser("render", help="regenerate INDEX.md and what_happens.md")
+    dry(p)
+    p.set_defaults(fn=cmd_render)
     sub.add_parser("check").set_defaults(fn=cmd_check)
 
     wh = sub.add_parser("wh", help="what-happens scenarios").add_subparsers(dest="wcmd", required=True)
@@ -750,7 +881,7 @@ def build_parser():
     dry(p)
     p.set_defaults(fn=cmd_wh_add)
     p = wh.add_parser("set")
-    p.add_argument("id")
+    p.add_argument("ref")
     p.add_argument("status", choices=wstat)
     p.add_argument("--issue", action="append", default=[])
     dry(p)
@@ -759,7 +890,6 @@ def build_parser():
     p.add_argument("--status", choices=wstat)
     p.add_argument("--area", choices=areas)
     p.set_defaults(fn=cmd_wh_list)
-    wh.add_parser("render").set_defaults(fn=cmd_wh_render)
     return ap
 
 

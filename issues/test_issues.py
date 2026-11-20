@@ -1,8 +1,7 @@
-"""Tests for issues.py.  Run:  python -m unittest discover -s issues -v   (from the repo root)"""
+"""Tests for issues.py:  python -m unittest discover -s issues"""
 import contextlib
-import difflib
 import io
-import os
+import re
 import shutil
 import sys
 import tempfile
@@ -10,334 +9,254 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import issues  # noqa: E402
+import issues as T  # noqa: E402
 
-FIXTURE = """# issues
-intro
-
-## The Table
-> note
-
-| issues | status | comment |
-|--------|--------|---------|
-| [0001](#0001) | fixed | first |
-| [0002](#0002) | report(weak)| second |
-| [0003](#0001) | fixed | referral to 1 |
-
-**issues** = trailing text after the table
-
-## 0001
-**Observation:** one
-
-
-## 0002
-**Observation:** two
-"""
-
-FAKE_EDITOR = """import os, sys
-t = os.environ.get("FAKE_TEXT")
-if t is not None:
-    open(sys.argv[1], "w", encoding="utf-8", newline="").write(t)
-"""
-
-
-def removed_lines(old, new):
-    d = list(difflib.unified_diff(old.splitlines(True), new.splitlines(True), n=0))
-    return [l for l in d[2:] if l.startswith("-")], [l for l in d[2:] if l.startswith("+")]
+README = "# Issues\n\n## Why this exists\n\ntext\n"
 
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="issues-test-"))
-        self.old_dir, self.old_tmpdir = issues.DIR, tempfile.tempdir
-        (self.tmp / "tmpdir").mkdir()
-        tempfile.tempdir = str(self.tmp / "tmpdir")
-        issues.DIR = self.tmp
-        self.env = {k: os.environ.get(k) for k in ("ISSUES_EDITOR", "FAKE_TEXT", "EDITOR", "VISUAL")}
-        for k in self.env:
-            os.environ.pop(k, None)
-        self.write_issue(FIXTURE)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.old = T.DIR
+        T.DIR = self.tmp / "issues"
+        T.DIR.mkdir()
+        (T.DIR / "README.md").write_text(README, encoding="utf-8", newline="\n")
+        (self.tmp / "README.md").write_text("# Root\n\n## Tracking issues\n", encoding="utf-8", newline="\n")
 
     def tearDown(self):
-        issues.DIR = self.old_dir
-        tempfile.tempdir = self.old_tmpdir
-        for k, v in self.env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+        T.DIR = self.old
         shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def write_issue(self, text):
-        (self.tmp / "issue.md").write_bytes(text.encode("utf-8"))
-
-    def read_issue(self):
-        return (self.tmp / "issue.md").read_bytes().decode("utf-8")
 
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = issues.main(list(argv))
+            code = T.main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
-    def use_fake_editor(self, text=None):
-        script = self.tmp / "fake_editor.py"
-        script.write_text(FAKE_EDITOR, encoding="utf-8")
-        os.environ["ISSUES_EDITOR"] = f'"{sys.executable}" "{script}"'
-        if text is None:
-            os.environ.pop("FAKE_TEXT", None)
-        else:
-            os.environ["FAKE_TEXT"] = text
-
-
-class ReportTests(Base):
-    def test_noninteractive_appends_row_and_section_only(self):
-        code, out, err = self.run_cli("report", "--comment", "third one", "--body", "three", "--weight", "strong")
+    def report(self, title="Tray crash", body="It crashes.", *extra):
+        code, out, err = self.run_cli("report", "--title", title, "--body", body, *extra)
         self.assertEqual(code, 0, err)
-        new = self.read_issue()
-        gone, added = removed_lines(FIXTURE, new)
-        self.assertEqual(gone, [], "nothing existing may be removed or changed")
-        self.assertIn("+| [0004](#0004) | report(strong) | third one |\n", added)
-        self.assertTrue(new.endswith("\n## 0004\n**Observation:** three\n"))
-        # row sits directly under the last table row, before the trailing text
-        lines = new.splitlines()
-        self.assertEqual(lines[lines.index("| [0003](#0001) | fixed | referral to 1 |") + 1],
-                         "| [0004](#0004) | report(strong) | third one |")
+        return re.search(r"reported (\w+)", out)[1]
 
-    def test_crlf_file_stays_crlf(self):
-        self.write_issue(FIXTURE.replace("\n", "\r\n"))
-        code, _, err = self.run_cli("report", "--comment", "c", "--body", "line1\nline2")
-        self.assertEqual(code, 0, err)
-        raw = self.read_issue()
-        self.assertEqual(raw.count("\n"), raw.count("\r\n"), "no bare LF may appear")
-        self.assertIn("| [0004](#0004) | report | c |\r\n", raw)
-        self.assertTrue(raw.endswith("**Observation:** line1\r\nline2\r\n"))
+    def only(self, d):
+        files = sorted(d.glob("*.md"))
+        self.assertEqual(len(files), 1)
+        return files[0]
 
-    def test_file_without_trailing_newline(self):
-        self.write_issue(FIXTURE.rstrip("\n"))
-        code, _, err = self.run_cli("report", "--comment", "c", "--body", "b")
+
+class Records(Base):
+    def test_front_matter_round_trip(self):
+        meta = {"id": "a" * 40, "title": "T: with colon", "status": "report", "comment": ""}
+        text = T.dump_record("issue", meta, "**Observation:** x")
+        got, body = T.parse_record(text)
+        self.assertEqual(got["title"], "T: with colon")
+        self.assertNotIn("comment", got)
+        self.assertEqual(body, "**Observation:** x")
+
+    def test_parse_tolerates_crlf_and_rejects_missing_front_matter(self):
+        meta, body = T.parse_record("---\r\nid: x\r\n---\r\n\r\nhello\r\n")
+        self.assertEqual((meta["id"], body), ("x", "hello"))
+        with self.assertRaises(T.Fail):
+            T.parse_record("no front matter")
+
+    def test_set_fields_touches_only_its_lines(self):
+        text = "---\nid: a\nstatus: report\ncomment: old\n---\n\nbody **keep**\n"
+        new = T.set_fields(text, {"status": "fixed", "weight": "weak", "comment": ""})
+        self.assertEqual(new, "---\nid: a\nstatus: fixed\nweight: weak\n---\n\nbody **keep**\n")
+
+    def test_set_fields_keeps_crlf(self):
+        new = T.set_fields("---\r\nstatus: report\r\n---\r\nbody\r\n", {"status": "fixed"})
+        self.assertEqual(new, "---\r\nstatus: fixed\r\n---\r\nbody\r\n")
+
+    def test_slug_and_file_name(self):
+        self.assertEqual(T.slugify("Hello, World!! 2", "x"), "hello-world-2")
+        self.assertEqual(T.slugify("???", "issue"), "issue")
+        self.assertLessEqual(len(T.slugify("word " * 30, "x")), 48)
+        self.assertTrue(T.file_name("ab" * 20, "A title", "x").startswith("abababababab-a-title"))
+
+    def test_new_id_shape_and_uniqueness(self):
+        ids = []
+        for _ in range(50):
+            ids.append(T.new_id("same seed", ids))
+        self.assertTrue(all(T.ID_RE.fullmatch(i) for i in ids))
+        self.assertEqual(len({i[:T.FILE_LEN] for i in ids}), 50)
+
+
+class Issues(Base):
+    def test_report_creates_a_file_and_index(self):
+        short = self.report("Tray crash", "It crashes.", "--weight", "weak", "--comment", "a | b")
+        f = self.only(T.items_dir())
+        meta, body = T.parse_record(T.read(f))
+        self.assertTrue(f.name.startswith(meta["id"][:12] + "-tray-crash"))
+        self.assertTrue(meta["id"].startswith(short))
+        self.assertEqual((meta["status"], meta["weight"], body), ("report", "weak", "It crashes."))
+        index = T.read(T.index_md())
+        self.assertIn(f"[{short}](items/{f.name})", index)
+        self.assertIn("report(weak)", index)
+        self.assertIn("a \\| b", index)
+
+    def test_status_update_and_prefix_resolution(self):
+        short = self.report()
+        self.assertEqual(self.run_cli("status", short[:5], "fixed", "--comment", "done")[0], 0)
+        self.assertEqual(self.run_cli("update", short, "--text", "Retested on Android")[0], 0)
+        meta, body = T.parse_record(T.read(self.only(T.items_dir())))
+        self.assertEqual((meta["status"], meta["comment"]), ("fixed", "done"))
+        self.assertIn("It crashes.\n\n**Update:** Retested on Android", body)
+        self.assertIn("| fixed |", T.read(T.index_md()))
+
+    def test_update_can_change_status(self):
+        short = self.report()
+        self.assertEqual(self.run_cli("update", short, "--text", "Fixed it", "--status", "fixed")[0], 0)
+        self.assertEqual(T.parse_record(T.read(self.only(T.items_dir())))[0]["status"], "fixed")
+
+    def test_referral_links_to_the_original(self):
+        first = self.report("Original", "Body")
+        code, _, err = self.run_cli("report", "--title", "Recheck", "--refers", first, "--body", "Still happens")
         self.assertEqual(code, 0, err)
+        self.assertIn("↳ refers to", T.read(T.index_md()))
         self.assertEqual(self.run_cli("check")[0], 0)
 
-    def test_referral_adds_row_without_section(self):
-        code, _, err = self.run_cli("report", "--refers", "0002", "--comment", "same as 2, again")
-        self.assertEqual(code, 0, err)
-        new = self.read_issue()
-        self.assertIn("| [0004](#0002) | report | same as 2, again |\n", new)
-        self.assertNotIn("## 0004", new)
-        self.assertEqual(self.run_cli("check")[0], 0)
-
-    def test_referral_of_referral_resolves_to_real_section(self):
-        self.run_cli("report", "--refers", "0003", "--comment", "x")
-        self.assertIn("| [0004](#0001) |", self.read_issue())
-
-    def test_pipe_in_comment_is_escaped(self):
-        self.run_cli("report", "--comment", "a | b", "--body", "x")
-        self.assertIn("| a \\| b |", self.read_issue())
-
-    def test_bad_weight_and_status_rejected(self):
-        self.assertEqual(self.run_cli("report", "--comment", "c", "--body", "b", "--weight", "huge")[0], 1)
-        self.assertEqual(self.run_cli("report", "--comment", "c", "--body", "b", "--status", "wip")[0], 1)
-        self.assertEqual(self.read_issue(), FIXTURE)
-
-    def test_unknown_referral_rejected(self):
-        self.assertEqual(self.run_cli("report", "--refers", "0099", "--comment", "c")[0], 1)
+    def test_bad_input_is_rejected(self):
+        self.assertEqual(self.run_cli("report", "--title", "X", "--body", "b", "--weight", "huge")[0], 1)
+        self.assertEqual(self.run_cli("report", "--title", "X", "--body", "b", "--refers", "nothere")[0], 1)
+        self.assertEqual(self.run_cli("status", "zzzzz", "fixed")[0], 1)
+        self.assertFalse(list(T.items_dir().glob("*.md")) if T.items_dir().exists() else [])
 
     def test_dry_run_writes_nothing(self):
-        code, out, _ = self.run_cli("report", "--comment", "c", "--body", "b", "--dry-run")
+        code, out, _ = self.run_cli("report", "--title", "X", "--body", "b", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("+| [0004](#0004)", out)
-        self.assertEqual(self.read_issue(), FIXTURE)
+        self.assertIn("dry run", out)
+        self.assertFalse(T.items_dir().exists())
+
+    def test_legacy_numbers_resolve(self):
+        short = self.report()
+        f = self.only(T.items_dir())
+        T.write(f, T.set_fields(T.read(f), {"legacy": "0004"}))
+        self.assertEqual(self.run_cli("status", "0004", "fixed")[0], 0)
+        self.assertEqual(T.parse_record(T.read(f))[0]["status"], "fixed")
+        self.assertTrue(T.read(T.index_md()).count("(was 0004)"))
+        self.assertTrue(short)
+
+    def test_ambiguous_and_short_refs(self):
+        a = {"kind": "issue", "meta": {"id": "abcde" + "0" * 35}}
+        b = {"kind": "issue", "meta": {"id": "abcde" + "1" * 35}}
+        with self.assertRaises(T.Fail):
+            T.resolve("abcde", [a, b], "issue")
+        with self.assertRaises(T.Fail):
+            T.resolve("abcd", [a, b], "issue")  # fewer than 5 characters
+        self.assertIs(T.resolve("abcde1", [a, b], "issue"), b)
+        self.assertEqual(T.short(a, [a, b]), "abcde00")
 
 
-class EditorFlowTests(Base):
-    def test_editor_flow_appends(self):
-        self.use_fake_editor("status: report\nweight: weak\nrefers:\ncomment: from editor\n---\nbody from editor\n")
-        code, _, err = self.run_cli("report")
+class Scenarios(Base):
+    def test_add_and_set(self):
+        iss = self.report()
+        code, _, err = self.run_cli("wh", "add", "When A and B pair at once, what happens?",
+                                    "--area", "pairing", "--note", "Both press Pair")
         self.assertEqual(code, 0, err)
-        new = self.read_issue()
-        self.assertIn("| [0004](#0004) | report(weak) | from editor |", new)
-        self.assertTrue(new.endswith("**Observation:** body from editor\n"))
+        s = self.only(T.scen_dir())
+        meta, body = T.parse_record(T.read(s))
+        self.assertEqual((meta["status"], meta["area"], body), ("untested", "pairing", "Both press Pair"))
+        self.assertEqual(self.run_cli("wh", "set", meta["id"][:6], "issue")[0], 1)  # needs an issue
+        self.assertEqual(self.run_cli("wh", "set", meta["id"][:6], "issue", "--issue", iss)[0], 0)
+        wh = T.read(T.wh_md())
+        self.assertIn(f'<a id="wh-{meta["id"][:12]}"></a>', wh)
+        self.assertIn("`issue`", wh)
+        self.assertIn(f"(what_happens.md#wh-{meta['id'][:12]})", T.read(T.index_md()))
+        self.assertEqual(self.run_cli("check")[0], 0)
 
-    def test_unchanged_draft_aborts(self):
-        self.use_fake_editor(None)
-        code, out, _ = self.run_cli("report")
-        self.assertEqual(code, 0)
-        self.assertIn("nothing to report", out)
-        self.assertEqual(self.read_issue(), FIXTURE)
-
-    def test_html_comment_lines_are_dropped(self):
-        self.use_fake_editor("<!-- hi -->\nstatus: report\nweight:\nrefers:\ncomment: c\n---\n<!-- note -->\nreal body\n")
-        self.assertEqual(self.run_cli("report")[0], 0)
-        self.assertNotIn("<!--", self.read_issue()[len(FIXTURE):])
-
-    def test_failed_validation_keeps_draft_and_resume_works(self):
-        self.use_fake_editor("status: report\nweight:\nrefers:\ncomment:\n---\nbody\n")
-        code, _, err = self.run_cli("report")
-        self.assertEqual(code, 1)
-        self.assertIn("--resume", err)
-        self.assertEqual(self.read_issue(), FIXTURE)
-        draft = issues.latest_draft("report")
-        draft.write_text("status: report\nweight:\nrefers:\ncomment: fixed it\n---\nbody\n", encoding="utf-8")
-        code, _, err = self.run_cli("report", "--resume")
-        self.assertEqual(code, 0, err)
-        self.assertIn("| fixed it |", self.read_issue())
-        self.assertFalse(draft.exists())
-
-    def test_gui_editor_gets_wait_flag(self):
-        # on Windows an extensionless file is not executable: use code.cmd (found via PATHEXT)
-        fake = self.tmp / ("code.cmd" if os.name == "nt" else "code")
-        fake.write_text("#!/bin/sh\n", encoding="utf-8")
-        fake.chmod(0o755)
-        os.environ["ISSUES_EDITOR"] = str(fake)
-        self.assertEqual(issues.editor_argv(), [shutil.which(str(fake)), "--wait"])
-
-    def test_split_command_windows_strips_quotes_and_keeps_backslashes(self):
-        raw = '"C:\\Program Files\\Microsoft VS Code\\Code.exe" --wait'
-        self.assertEqual(issues.split_command(raw, windows=True),
-                         ["C:\\Program Files\\Microsoft VS Code\\Code.exe", "--wait"])
-        self.assertEqual(issues.split_command("code --wait", windows=True), ["code", "--wait"])
-        self.assertEqual(issues.split_command("'my editor' -x", windows=True), ["my editor", "-x"])
-
-    def test_split_command_posix(self):
-        self.assertEqual(issues.split_command('"/opt/my editor/ed" -w', windows=False), ["/opt/my editor/ed", "-w"])
+    def test_bad_area_and_missing_question(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.run_cli("wh", "add", "Q?", "--area", "nowhere")  # argparse rejects unknown choices
+        self.assertEqual(self.run_cli("wh", "add", " ", "--area", "ui")[0], 1)
 
 
-class StatusUpdateTests(Base):
-    def test_status_changes_only_that_row(self):
-        code, _, err = self.run_cli("status", "0002", "fixed")
-        self.assertEqual(code, 0, err)
-        gone, added = removed_lines(FIXTURE, self.read_issue())
-        self.assertEqual(gone, ["-| [0002](#0002) | report(weak)| second |\n"])
-        self.assertEqual(added, ["+| [0002](#0002) | fixed| second |\n"])
-
-    def test_status_with_comment(self):
-        self.run_cli("status", "0002", "fixed", "--comment", "done in abc123")
-        self.assertIn("| [0002](#0002) | fixed| done in abc123 |\n", self.read_issue())
-
-    def test_status_validation(self):
-        self.assertEqual(self.run_cli("status", "0002", "wip")[0], 1)
-        self.assertEqual(self.run_cli("status", "0009", "fixed")[0], 1)
-
-    def test_update_goes_inside_section_before_next_heading(self):
-        code, _, err = self.run_cli("update", "0001", "--text", "later note")
-        self.assertEqual(code, 0, err)
-        lines = self.read_issue().splitlines()
-        u, h1, h2 = lines.index("**Update:** later note"), lines.index("## 0001"), lines.index("## 0002")
-        self.assertTrue(h1 < u < h2)
-        self.assertEqual(lines[h2 - 1], "")
-        gone, _ = removed_lines(FIXTURE, self.read_issue())
-        self.assertEqual(gone, [])
-
-    def test_update_last_section_and_status_flag(self):
-        code, _, err = self.run_cli("update", "0002", "--text", "x", "--status", "fixed")
-        self.assertEqual(code, 0, err)
-        new = self.read_issue()
-        self.assertTrue(new.endswith("**Observation:** two\n\n**Update:** x\n"))
-        self.assertIn("| fixed| second |", new)
-
-    def test_update_on_referral_is_rejected(self):
-        code, _, err = self.run_cli("update", "0003", "--text", "x")
-        self.assertEqual(code, 1)
-        self.assertIn("referral to 0001", err)
-
-    def test_update_dates_config(self):
-        (self.tmp / "config.local.toml").write_text("[report]\nupdate_dates = true\n", encoding="utf-8")
-        self.run_cli("update", "0001", "--text", "dated")
-        self.assertRegex(self.read_issue(), r"\*\*Update \(\d{4}-\d{2}-\d{2}\):\*\* dated")
-
-    def test_update_via_editor(self):
-        self.use_fake_editor("<!-- c -->\n\nedited update\nsecond line\n")
-        self.assertEqual(self.run_cli("update", "0001")[0], 0)
-        self.assertIn("**Update:** edited update\nsecond line\n", self.read_issue())
-
-    def test_list_and_next(self):
-        self.assertEqual(self.run_cli("next")[1].strip(), "0004")
-        out = self.run_cli("list", "--status", "report")[1]
-        self.assertIn("0002", out)
-        self.assertNotIn("0001", out)
-
-
-class CheckTests(Base):
-    def test_fixture_is_clean(self):
+class Check(Base):
+    def test_clean_state_passes(self):
+        self.report()
         code, out, err = self.run_cli("check")
-        self.assertEqual(code, 0, err)
-        self.assertIn("3 issues", out)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("1 issues", out)
 
-    def test_missing_section(self):
-        self.write_issue(FIXTURE.replace("## 0002\n", "## 0009\n"))
+    def test_stale_generated_file_fails_until_render(self):
+        self.report()
+        T.write(T.index_md(), T.read(T.index_md()) + "hand edit\n")
+        self.assertEqual(self.run_cli("check")[0], 1)
+        self.assertEqual(self.run_cli("render")[0], 0)
+        self.assertEqual(self.run_cli("check")[0], 0)
+
+    def test_crlf_generated_file_still_matches(self):
+        self.report()
+        T.write(T.index_md(), T.read(T.index_md()).replace("\n", "\r\n"))
+        self.assertEqual(self.run_cli("check")[0], 0)
+
+    def test_invalid_records_are_reported(self):
+        self.report()
+        f = self.only(T.items_dir())
+        T.write(f, T.set_fields(T.read(f), {"status": "wip"}))
         code, _, err = self.run_cli("check")
         self.assertEqual(code, 1)
-        self.assertIn("no '## 0002' section", err)
-        self.assertIn("'## 0009' has no row", err)
+        self.assertIn("status 'wip'", err)
 
-    def test_gap_in_numbers(self):
-        self.write_issue(FIXTURE.replace("[0002](#0002)", "[0005](#0005)").replace("## 0002", "## 0005"))
-        self.assertIn("0001..0003 in order", self.run_cli("check")[2])
+    def test_file_name_must_match_id(self):
+        self.report()
+        f = self.only(T.items_dir())
+        f.rename(f.with_name("deadbeef0000-renamed.md"))
+        self.assertIn("file name must start with", self.run_cli("check")[2])
 
-    def test_bad_status_and_weight(self):
-        self.write_issue(FIXTURE.replace("report(weak)", "report(huge)").replace("| fixed | first", "| wip | first"))
+    def test_duplicate_id_prefix_is_reported(self):
+        self.report()
+        f = self.only(T.items_dir())
+        twin = T.items_dir() / (f.name[:12] + "-twin.md")
+        twin.write_bytes(f.read_bytes())
+        self.assertIn("must differ within their first", self.run_cli("check")[2])
+
+    def test_unparseable_file_is_an_error_not_a_crash(self):
+        self.report()
+        (T.items_dir() / "000000000000-junk.md").write_text("no front matter", encoding="utf-8")
+        code, _, err = self.run_cli("check")
+        self.assertEqual(code, 1)
+        self.assertIn("front matter not found", err)
+
+    def test_broken_links_are_reported(self):
+        self.report()
+        T.write(T.DIR / "README.md", README + "\n[gone](items/nope.md) [bad](#nothing) [ok](#why-this-exists)\n"
+                "[sec](../README.md#tracking-issues) [bad2](../README.md#missing)\n```\n[skipped](nowhere.md)\n```\n")
+        code, _, err = self.run_cli("check")
+        self.assertEqual(code, 1)
+        self.assertIn("items/nope.md", err)
+        self.assertIn("#nothing", err)
+        self.assertIn("#missing", err)
+        self.assertNotIn("nowhere.md", err)
+        self.assertNotIn("#why-this-exists", err)
+        self.assertNotIn("#tracking-issues", err)
+
+    def test_root_readme_links_into_issues_are_checked(self):
+        self.report()
+        (self.tmp / "README.md").write_text("[a](issues/INDEX.md) [b](issues/README.md#nope) [c](other/x.md)\n",
+                                            encoding="utf-8")
         err = self.run_cli("check")[2]
-        self.assertIn("weight 'huge'", err)
-        self.assertIn("'wip' must start with", err)
+        self.assertIn("#nope", err)
+        self.assertNotIn("other/x.md", err)
+        self.assertNotIn("INDEX.md)", err)
 
-    def test_dangling_referral(self):
-        self.write_issue(FIXTURE.replace("[0003](#0001)", "[0003](#0007)"))
-        self.assertIn("#0007", self.run_cli("check")[2])
-
-
-class WhTests(Base):
-    def test_add_set_render_and_stale_detection(self):
-        (self.tmp / "what_happens.toml").write_text("", encoding="utf-8")
-        code, _, err = self.run_cli("wh", "add", "When X happens, what happens?", "--area", "ui", "--issue", "0002", "--note", "n")
-        self.assertEqual(code, 0, err)
-        md = (self.tmp / "what_happens.md").read_text(encoding="utf-8")
-        self.assertIn("**WH-001** `untested`: When X happens, what happens?", md)
-        self.assertIn("[0002](issue.md#0002)", md)
-        self.assertIn("| [0003](issue.md#0001) (see 0001) | fixed | none |", md)
-        self.assertEqual(self.run_cli("check")[0], 0)
-        self.assertEqual(self.run_cli("wh", "set", "WH-001", "tested")[0], 0)
-        self.assertIn("`tested`", (self.tmp / "what_happens.md").read_text(encoding="utf-8"))
-        (self.tmp / "what_happens.md").write_text("hand edited\n", encoding="utf-8")
-        code, _, err = self.run_cli("check")
-        self.assertEqual(code, 1)
-        self.assertIn("out of date", err)
-        self.assertEqual(self.run_cli("wh", "render")[0], 0)
-        self.assertEqual(self.run_cli("check")[0], 0)
-
-    def test_status_issue_requires_issue_number(self):
-        (self.tmp / "what_happens.toml").write_text("", encoding="utf-8")
-        self.run_cli("wh", "add", "q?", "--area", "ui")
-        code, _, err = self.run_cli("wh", "set", "WH-001", "issue")
-        self.assertEqual(code, 1)
-        self.assertIn("needs an issue number", err)
-        self.assertEqual(self.run_cli("wh", "set", "WH-001", "issue", "--issue", "0002")[0], 0)
-
-    def test_unknown_issue_link_rejected(self):
-        (self.tmp / "what_happens.toml").write_text("", encoding="utf-8")
-        self.assertEqual(self.run_cli("wh", "add", "q?", "--area", "ui", "--issue", "0099")[0], 1)
-
-    def test_add_via_editor(self):
-        (self.tmp / "what_happens.toml").write_text("", encoding="utf-8")
-        self.use_fake_editor("area: pairing\nissues: 0001, 0002\nnote: hint\n---\nWhen A\nand B pair?\n")
-        code, _, err = self.run_cli("wh", "add")
-        self.assertEqual(code, 0, err)
-        out = self.run_cli("wh", "list", "--area", "pairing")[1]
-        self.assertIn("When A and B pair?", out)
+    def test_github_slugs(self):
+        self.assertEqual(T.gh_slug("What happens? scenarios"), "what-happens-scenarios")
+        self.assertEqual(T.gh_slug("Change status, add an update, edit"), "change-status-add-an-update-edit")
+        self.assertEqual(T.gh_slug("The `check` [tool](x.md)"), "the-check-tool")
 
 
-class RealFileTests(unittest.TestCase):
-    """The real issues/issue.md must pass the checks and survive a dry run untouched."""
+class Editor(unittest.TestCase):
+    def test_split_command_windows_quotes(self):
+        argv = T.split_command('"C:\\Program Files\\Code\\Code.exe" --wait', windows=True)
+        self.assertEqual(argv, ["C:\\Program Files\\Code\\Code.exe", "--wait"])
+        self.assertEqual(T.split_command("code --wait", windows=False), ["code", "--wait"])
 
-    def test_real_issue_md(self):
-        real = Path(__file__).resolve().parent / "issue.md"
-        if not real.exists():
-            self.skipTest("no issue.md")
-        lines = issues.split_lines(real.read_bytes().decode("utf-8"))
-        self.assertEqual(issues.check_issues(lines, issues.config()), [])
-        new, num = issues.apply_report(lines, {"comment": "probe"}, "body", issues.config())
-        self.assertEqual("".join(new[:len(lines)]).count("\n") >= "".join(lines).count("\n"), True)
-        self.assertEqual(len(num), 4)
+    def test_parse_form(self):
+        fields, body = T.parse_form("<!-- hint -->\ntitle: T\nweight:\n---\nline one\nline two\n")
+        self.assertEqual((fields["title"], fields["weight"], body), ("T", "", "line one\nline two"))
+        with self.assertRaises(T.Fail):
+            T.parse_form("title: T\nno separator")
 
 
 if __name__ == "__main__":
