@@ -114,7 +114,7 @@ async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
             {
                 if let Err(error) = client.connect_device(device.fingerprint.clone()).await {
                     eprintln!(
-                        "Clipx: could not initiate connection to {}: {}",
+                        "ClipX: could not initiate connection to {}: {}",
                         device.name, error
                     );
                 }
@@ -131,17 +131,17 @@ async fn wait_for_connected_peer(client: &mut Client) -> Result<(), String> {
 
 fn connection_timeout_message(devices: &[clipx_lib::message::types::PairedDevice]) -> String {
     if devices.is_empty() {
-        return "No paired Clipx devices were found. Open Clipx and pair a device before sending files.".into();
+        return "No paired ClipX devices were found. Open ClipX and pair a device before sending files.".into();
     }
 
     if devices
         .iter()
         .all(|device| device.connection == "unavailable")
     {
-        return "No paired Clipx devices are currently reachable. Make sure Clipx is running on the receiving device and both devices can discover each other.".into();
+        return "No paired ClipX devices are currently reachable. Make sure ClipX is running on the receiving device and both devices can discover each other.".into();
     }
 
-    "No Clipx device connected within 15 seconds. Open Clipx and connect a paired device, or enable auto-connect for that device, then try again.".into()
+    "No ClipX device connected within 15 seconds. Open ClipX and connect a paired device, or enable auto-connect for that device, then try again.".into()
 }
 
 #[cfg(windows)]
@@ -149,12 +149,12 @@ fn show_error(error: &str) {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
-    let message = format!("Clipx could not send this file.\n\n{error}");
+    let message = format!("ClipX could not send this file.\n\n{error}");
     let message: Vec<u16> = std::ffi::OsStr::new(&message)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let title: Vec<u16> = std::ffi::OsStr::new("Clipx")
+    let title: Vec<u16> = std::ffi::OsStr::new("ClipX")
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
@@ -171,7 +171,7 @@ fn show_error(error: &str) {
 
 #[cfg(not(windows))]
 fn show_error(error: &str) {
-    eprintln!("Clipx: {error}");
+    eprintln!("ClipX: {error}");
 }
 
 async fn run() -> Result<(), String> {
@@ -183,7 +183,7 @@ async fn run() -> Result<(), String> {
     };
 
     if args.next().is_some() {
-        return Err("This version of Send with Clipx supports one file at a time. Select a single file and try again.".into());
+        return Err("This version of Send with ClipX supports one file at a time. Select a single file and try again.".into());
     }
 
     let path = PathBuf::from(raw_path);

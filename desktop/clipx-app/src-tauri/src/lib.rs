@@ -139,14 +139,14 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
         let core = match webview.controller().CoreWebView2() {
             Ok(value) => value,
             Err(error) => {
-                eprintln!("Clipx: unable to access WebView2: {error}");
+                eprintln!("ClipX: unable to access WebView2: {error}");
                 return;
             }
         };
         let core11: ICoreWebView2_11 = match core.cast() {
             Ok(value) => value,
             Err(error) => {
-                eprintln!("Clipx: WebView2 context-menu API unavailable: {error}");
+                eprintln!("ClipX: WebView2 context-menu API unavailable: {error}");
                 return;
             }
         };
@@ -173,7 +173,7 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
         }));
         let mut token = 0i64;
         if let Err(error) = core11.add_ContextMenuRequested(&handler, &mut token) {
-            eprintln!("Clipx: unable to install WebView2 context-menu filter: {error}");
+            eprintln!("ClipX: unable to install WebView2 context-menu filter: {error}");
         }
     })
 }
@@ -315,7 +315,7 @@ pub fn run() {
                     }
                     "logs" => {
                         if let Err(error) = reveal_logs_folder() {
-                            eprintln!("Clipx: {error}");
+                            eprintln!("ClipX: {error}");
                         }
                     }
                     "core_restart" => {
@@ -340,7 +340,7 @@ pub fn run() {
                             al.enable()
                         };
                         if let Err(e) = res {
-                            eprintln!("Clipx: autostart toggle failed: {e}");
+                            eprintln!("ClipX: autostart toggle failed: {e}");
                         }
                         let _ =
                             autostart_item_for_event.set_checked(al.is_enabled().unwrap_or(false));
@@ -404,7 +404,7 @@ pub fn run() {
                 api.prevent_close();
 
                 if let Err(error) = window.hide() {
-                    eprintln!("Clipx: failed to hide window on close request: {error}");
+                    eprintln!("ClipX: failed to hide window on close request: {error}");
                 }
             }
         })
