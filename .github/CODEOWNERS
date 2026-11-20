@@ -1,0 +1,6 @@
+# Changes to these files automatically request a review from the owner.
+/.github/workflows/    @godieGH
+/.github/CODEOWNERS    @godieGH
+/issues/issues.py      @godieGH
+/issues/test_issues.py @godieGH
+/issues/config.toml    @godieGH
