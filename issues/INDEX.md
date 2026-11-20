@@ -4,7 +4,7 @@
 
 Developer-facing bug log, kept apart from the public GitHub issues (see [Why this exists](README.md#why-this-exists)). Fixed issues are never deleted, they are marked `fixed`.
 
-**6 issues**: 1 report, 5 fixed
+**7 issues**: 2 report, 5 fixed
 
 | id | status | issue | comment | scenarios |
 |----|--------|-------|---------|-----------|
@@ -14,3 +14,4 @@ Developer-facing bug log, kept apart from the public GitHub issues (see [Why thi
 | [45257a7](items/45257a7ff1be-trust-revocation-is-local-only.md) | report(weak) | **Trust revocation is local-only** (was 0004) | Trust revocation is local-only. A peer retaining stale trust can reject a new pairing request, preventing re-pairing until its stale trust is also removed. | [WH-002](what_happens.md#wh-56106f835d88) |
 | [a6f28d4](items/a6f28d450f5c-reconnect-from-the-disconnecting-device-can.md) | fixed | **Reconnect from the disconnecting device can stall in CONNECTING** (was 0005) | Reconnecting from the device that initiated a disconnect can stall because the device manager may reuse a stale transport connection ID. | [WH-006](what_happens.md#wh-3d0f0e622d35) |
 | [c17420e](items/c17420eb5067-android-crashes-after-pairing-completes.md) | fixed | **Android crashes after pairing completes** (was 0006) | Android crashes after pairing completes | [WH-004](what_happens.md#wh-8656491cd35e) |
+| [8f7e67b](items/8f7e67b56dcf-re-sending-an-already-received-file-creates.md) | report(medium) | **Re-sending an already received file creates duplicate copies** (was 0007) | Re-sending an already received file creates duplicate copies in internal storage. |  |

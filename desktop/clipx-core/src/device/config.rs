@@ -285,7 +285,10 @@ pub fn local_hello() -> crate::message::proto::Hello {
     crate::message::proto::Hello {
         proto_version: PROTO_VERSION,
         min_proto_version: MINI_PROTO_VERSION,
-        capabilities: get_device_capabilities().iter().map(|c| *c as i32).collect(),
+        capabilities: get_device_capabilities()
+            .iter()
+            .map(|c| *c as i32)
+            .collect(),
     }
 }
 

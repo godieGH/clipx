@@ -99,7 +99,7 @@ pub struct DeviceManager<E: Engine> {
     // persist in the trusted store because, device change +upgrade or -downgrade but
     // device trusted store and identity do not change unless one clear/erase them explicitly and
     // not just by app updates
-    effective_versions: HashMap<String, (u32, Vec<i32>)>
+    effective_versions: HashMap<String, (u32, Vec<i32>)>,
 }
 
 /// Results of a notification popup, fed back into the manager's own select
@@ -1004,7 +1004,6 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         req: proto::PeerPairRequest,
         notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
-
         // Legacy peers send no hello: let them through, gate future features by capabilities.
         if let Err(msg) = self.check_hello(&device_id, req.hello.clone()) {
             self.reject_pair_request(
