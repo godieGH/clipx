@@ -177,6 +177,17 @@ class Check(Base):
         code, out, err = self.run_cli("check")
         self.assertEqual((code, err), (0, ""))
         self.assertIn("1 issues", out)
+    
+    def test_editor_in_shared_config_is_reported(self):
+        T.write(T.DIR / "config.toml", '[editor]\ncommand = "code --wait"\n')
+        code, _, err = self.run_cli("check")
+        self.assertEqual(code, 1)
+        self.assertIn("config.local.toml", err)
+
+    def test_editor_in_local_config_is_fine(self):
+        self.report()
+        T.write(T.DIR / "config.local.toml", '[editor]\ncommand = "nano"\n')
+        self.assertEqual(self.run_cli("check")[0], 0)
 
     def test_stale_generated_file_fails_until_render(self):
         self.report()

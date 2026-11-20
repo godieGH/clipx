@@ -748,11 +748,21 @@ def cmd_render(a):
         print("generated INDEX.md and what_happens.md are up to date")
     return 0
 
+def shared_config_errors():
+    """Personal settings belong in config.local.toml, never in the committed config.toml."""
+    p = DIR / "config.toml"
+    if not p.exists():
+        return []
+    if tomllib.loads(read(p)).get("editor", {}).get("command", ""):
+        return [f"{p.name}: [editor] command is a personal setting; "
+                "leave it empty here and put it in config.local.toml"]
+    return []
 
 def cmd_check(a):
     cfg, errs = config(), []
     issues, scens = load_all("issue", errs), load_all("scenario", errs)
     errs += validate_records(cfg, issues, scens)
+    errs += shared_config_errors()
     if not errs:
         for path, text in generated(cfg, issues, scens):
             have = read(path).replace("\r\n", "\n") if path.exists() else None
