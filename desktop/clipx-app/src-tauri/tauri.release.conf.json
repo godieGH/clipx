@@ -3,21 +3,19 @@
     "beforeBuildCommand": "pnpm build && node scripts/prepare-core.mjs"
   },
   "bundle": {
-    "externalBin": [
-      "binaries/clipx-core",
-      "binaries/clipx-send"
-    ],
+    "externalBin": ["binaries/clipx-core", "binaries/clipx-send"],
     "windows": {
       "nsis": {
-        "installerHooks": "./windows/hooks.nsh"
+        "installerHooks": "./windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "./windows/images/nsis-sidebar.bmp",
+        "headerImage": "./windows/images/nsis-header.bmp"
       },
       "wix": {
-        "fragmentPaths": [
-          "./windows/fragments/explorer-context-menu.wxs"
-        ],
-        "componentRefs": [
-          "ClipXExplorerContextMenu"
-        ]
+        "bannerPath": "./windows/images/msi-banner.bmp",
+        "dialogImagePath": "./windows/images/msi-dialog.bmp",
+        "fragmentPaths": ["./windows/fragments/explorer-context-menu.wxs"],
+        "componentRefs": ["ClipXExplorerContextMenu"]
       }
     }
   }

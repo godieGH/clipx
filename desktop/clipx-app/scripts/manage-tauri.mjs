@@ -122,6 +122,7 @@ Usage: node manage-tauri.mjs [options]
 Options:
   --clean-dist    Remove the dist/ directory
   --sync-icons    Copy icon from src-tauri/icons/ to src/public/
+  --installer-images  Generate Windows installer images from the brand mark
   --cargo-clean   Run cargo clean on the Rust workspace
   --all           Run all tasks in sequence
   --help, -h      Display this help menu
@@ -147,6 +148,11 @@ async function run() {
 
     if (runAll || args.includes("--sync-icons")) {
       await syncIcons();
+    }
+
+    if (runAll || args.includes("--installer-images")) {
+      const { makeInstallerImages } = await import("./installer-images.mjs");
+      await makeInstallerImages();
     }
 
     if (args.includes("--cargo-clean")) {

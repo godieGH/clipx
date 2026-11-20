@@ -14,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "pretauri:build": "pnpm manage:tauri --sync-icons",
     "tauri:build": "tauri build",
-    "prerelease": "pnpm manage:tauri --sync-icons",
+    "prerelease": "pnpm manage:tauri --sync-icons --installer-images",
     "release": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "sharp": "^0.35.5",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vite-plugin-static-copy": "^4.1.1"
