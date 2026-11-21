@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import issues as T  # noqa: E402
@@ -169,6 +170,43 @@ class Scenarios(Base):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.run_cli("wh", "add", "Q?", "--area", "nowhere")  # argparse rejects unknown choices
         self.assertEqual(self.run_cli("wh", "add", " ", "--area", "ui")[0], 1)
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class AutoCommit(Base):
+    def git(self, *args):
+        r = subprocess.run(["git", "-C", str(self.tmp), *args],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def setUp(self):
+        super().setUp()
+        self.git("init", "-q")
+        self.git("config", "user.name", "t")  # CI machines have no git identity
+        self.git("config", "user.email", "t@t")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+
+    def test_each_write_makes_one_local_commit_of_its_own_files_only(self):
+        (self.tmp / "other.txt").write_text("x", encoding="utf-8")
+        self.git("add", "other.txt")  # staged by someone else: must not be swept in
+        rid = self.report("Tray crash")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "2")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), f"issues: report {rid} Tray crash")
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "other.txt")
+        self.assertEqual(self.git("status", "--porcelain", "--", "issues"), "")
+        self.assertEqual(self.run_cli("status", rid, "fixed")[0], 0)
+        self.assertEqual(self.git("log", "-1", "--format=%s"), f"issues: {rid} -> fixed")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "3")
+
+    def test_no_commit_when_nothing_changed_or_when_disabled(self):
+        rid = self.report("Tray crash")
+        self.run_cli("status", rid, "report")  # already 'report': files identical
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "2")
+        (T.DIR / "config.local.toml").write_text("[report]\nauto_commit = false\n", encoding="utf-8")
+        self.report("Second one")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "2")
 
 
 class Check(Base):
