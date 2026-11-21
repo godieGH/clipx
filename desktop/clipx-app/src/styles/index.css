@@ -1,0 +1,12 @@
+@import "./base.css";
+@import "./scroll.css";
+@import "./titlebar.css";
+@import "./devices.css";
+@import "./history.css";
+@import "./modals.css";
+@import "./popover.css"; /* after modals.css so --panel-bg wins */
+@import "./toast.css";
+@import "./sync.css";
+@import "./diagnostics.css";
+@import "./splash.css";
+@import "./legacy.css";

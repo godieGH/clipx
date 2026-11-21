@@ -1,0 +1,264 @@
+/* ---- modals: shared shell ---- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.identity-panel,
+.detail-panel {
+  position: relative;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 24px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.identity-panel {
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .identity-panel,
+  .detail-panel {
+    background: #2a2a2a;
+  }
+}
+
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  box-shadow: none;
+  padding: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+
+.modal-close:hover {
+  opacity: 1;
+  border-color: transparent;
+}
+
+.identity-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+  opacity: 0.8;
+}
+
+.identity-panel h2,
+.detail-panel h2 {
+  margin: 0 0 2px;
+  font-size: 1rem;
+}
+
+.identity-subtitle {
+  font-size: 0.72rem;
+  opacity: 0.6;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+/* Responsive cells: fit side by side if there's room, otherwise wrap and
+   the wrapped one stretches to fill the row — never clamps its text. */
+.identity-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.identity-cell {
+  flex: 1 1 110px;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .identity-cell {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.identity-cell label,
+.identity-field label {
+  font-size: 0.65rem;
+  opacity: 0.55;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.identity-value {
+  font-size: 0.82rem;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.identity-field {
+  text-align: left;
+  margin-bottom: 14px;
+}
+
+.identity-fingerprint {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 8px;
+  border-radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .identity-fingerprint {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* ---- device detail panel specifics ---- */
+
+.detail-head {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.detail-head .identity-glyph {
+  width: 44px;
+  height: 44px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail-head .identity-glyph {
+    background: rgba(255, 255, 255, 0.07);
+  }
+}
+
+.detail-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail-setting {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.detail-setting-title {
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.detail-setting-hint {
+  font-size: 0.68rem;
+  opacity: 0.55;
+  margin-top: 2px;
+  max-width: 220px;
+}
+
+.toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 2px;
+  box-shadow: none;
+  border: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  transition: background 0.2s ease;
+}
+
+.toggle.on {
+  background: #396cd8;
+}
+
+.toggle:hover {
+  border-color: transparent;
+}
+
+.toggle-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.toggle.on .toggle-knob {
+  transform: translateX(16px);
+}
+
+.detail-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail-actions {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.detail-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 9px 6px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  color: inherit;
+}
+
+.detail-tab-btn:hover {
+  border-color: transparent;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.detail-tab-btn.danger {
+  color: #e81123;
+}
+
+.detail-tab-btn.danger:hover {
+  background: rgba(232, 17, 35, 0.12);
+}

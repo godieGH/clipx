@@ -4,7 +4,10 @@ import {
   getCurrentWindow,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
-import "./App.css";
+// imports
+import { anchorOf } from "./components/Popover";
+import type { Anchor } from "./components/Popover";
+import "./styles/index.css"; // replaces import "./App.css";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -86,6 +89,13 @@ function App() {
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [ownIdentity, setOwnIdentity] = useState<OwnIdentity>(OWN_IDENTITY);
+  const [identityAnchor, setIdentityAnchor] = useState<Anchor | null>(null);
+  const [detailAnchor, setDetailAnchor] = useState<Anchor | null>(null);
+
+  function handleOpenDetail(fingerprint: string, anchor: Anchor | null) {
+    setDetailAnchor(anchor);
+    setDetailFingerprint(fingerprint);
+  }
 
   useEffect(() => {
     // Mica is the lightweight native backdrop for Windows 11. Other platforms
@@ -663,7 +673,7 @@ function App() {
                 <PairedRow
                   device={d}
                   onConnect={handleConnect}
-                  onOpenDetail={setDetailFingerprint}
+                  onOpenDetail={handleOpenDetail}
                 />
               )}
               emptyTitle="No paired devices"
@@ -1153,9 +1163,11 @@ function App() {
           <button
             className={`icon-button titlebar-icon ${showIdentityDisabled ? "button-disable" : ""}`}
             title="Device identity"
-            onClick={() => {
+            onClick={(e) => {
+              const anchor = anchorOf(e.currentTarget);
               getThisDeviceIdenty().finally(() => {
                 if (showIdentityDisabled) return;
+                setIdentityAnchor(anchor);
                 setShowIdentity(true);
               });
             }}
@@ -1182,6 +1194,7 @@ function App() {
       {showIdentity && (
         <DeviceIdentity
           identity={ownIdentity}
+          anchor={identityAnchor}
           onClose={() => setShowIdentity(false)}
         />
       )}
@@ -1189,6 +1202,7 @@ function App() {
       {detailDevice && (
         <DeviceDetail
           device={detailDevice}
+          anchor={detailAnchor}
           onClose={() => setDetailFingerprint(null)}
           onDisconnect={handleDisconnect}
           onForget={handleForget}

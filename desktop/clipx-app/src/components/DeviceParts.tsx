@@ -16,6 +16,8 @@ import type {
   PairedDevice,
 } from "../types";
 import { groupFingerprint } from "../utils";
+import { Popover, anchorOf } from "./Popover";
+import type { Anchor } from "./Popover";
 
 export function DeviceIcon({
   type,
@@ -68,7 +70,7 @@ export function PairedRow({
 }: {
   device: PairedDevice;
   onConnect: (fp: string) => void;
-  onOpenDetail: (fp: string) => void;
+  onOpenDetail: (fp: string, anchor: Anchor | null) => void;
 }) {
   const clickable = device.connection === "disconnected";
 
@@ -76,7 +78,12 @@ export function PairedRow({
     <div className="device-row">
       <button
         className="device-hit"
-        onClick={() => onOpenDetail(device.fingerprint)}
+        onClick={(e) =>
+          onOpenDetail(
+            device.fingerprint,
+            anchorOf(e.currentTarget.closest(".device-row")),
+          )
+        }
       >
         <div className="device-icon">
           <DeviceIcon type={device.deviceType} />
@@ -134,51 +141,6 @@ export function AvailableRow({
   );
 }
 
-export function DeviceIdentity({
-  identity,
-  onClose,
-}: {
-  identity: OwnIdentity;
-  onClose: () => void;
-}) {
-  const grouped = groupFingerprint(identity.fingerprint);
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="identity-panel" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>
-          <X size={14} />
-        </button>
-        <div className="identity-glyph">
-          <Monitor size={36} strokeWidth={1.5} />
-        </div>
-        <h2>{identity.name}</h2>
-        <div className="identity-subtitle">This device</div>
-
-        <div className="identity-grid">
-          <div className="identity-cell">
-            <label>Type</label>
-            <div className="identity-value">{identity.deviceType}</div>
-          </div>
-          <div className="identity-cell">
-            <label>IP Address</label>
-            <div className="identity-value">{identity.ipAddress}</div>
-          </div>
-          <div className="identity-cell">
-            <label>WS Port</label>
-            <div className="identity-value">{identity.wsPort}</div>
-          </div>
-        </div>
-
-        <div className="identity-field">
-          <label>Fingerprint</label>
-          <div className="identity-fingerprint">{grouped}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function Toggle({
   checked,
   onChange,
@@ -198,14 +160,70 @@ export function Toggle({
   );
 }
 
+export function DeviceIdentity({
+  identity,
+  anchor,
+  onClose,
+}: {
+  identity: OwnIdentity;
+  anchor: Anchor | null;
+  onClose: () => void;
+}) {
+  const grouped = groupFingerprint(identity.fingerprint);
+
+  return (
+    <Popover
+      variant="bubble"
+      anchor={anchor}
+      className="identity-panel"
+      onClose={onClose}
+    >
+      {(close) => (
+        <>
+          <button className="modal-close" onClick={close}>
+            <X size={14} />
+          </button>
+          <div className="identity-glyph">
+            <Monitor size={36} strokeWidth={1.5} />
+          </div>
+          <h2>{identity.name}</h2>
+          <div className="identity-subtitle">This device</div>
+
+          <div className="identity-grid">
+            <div className="identity-cell">
+              <label>Type</label>
+              <div className="identity-value">{identity.deviceType}</div>
+            </div>
+            <div className="identity-cell">
+              <label>IP Address</label>
+              <div className="identity-value">{identity.ipAddress}</div>
+            </div>
+            <div className="identity-cell">
+              <label>WS Port</label>
+              <div className="identity-value">{identity.wsPort}</div>
+            </div>
+          </div>
+
+          <div className="identity-field">
+            <label>Fingerprint</label>
+            <div className="identity-fingerprint">{grouped}</div>
+          </div>
+        </>
+      )}
+    </Popover>
+  );
+}
+
 export function DeviceDetail({
   device,
+  anchor,
   onClose,
   onDisconnect,
   onForget,
   onToggleAutoConnect,
 }: {
   device: PairedDevice;
+  anchor: Anchor | null;
   onClose: () => void;
   onDisconnect: (fp: string) => void;
   onForget: (fp: string) => void;
@@ -217,74 +235,80 @@ export function DeviceDetail({
   const deviceAvailable = device.connection !== "unavailable";
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>
-          <X size={14} />
-        </button>
-
-        <div className="detail-head">
-          <div className="identity-glyph">
-            <DeviceIcon type={device.deviceType} />
-          </div>
-          <h2>{device.name}</h2>
-          <div className="identity-subtitle">
-            <span className={`status-dot ${device.connection}`} />
-            {connectionLabel(device.connection)}
-          </div>
-        </div>
-
-        {/* If the device is unavailable there's no point showing port + addr */}
-        {deviceAvailable && (
-          <div className="identity-grid">
-            <div className="identity-cell">
-              <label>IP Address</label>
-              <div className="identity-value">{device.ipAddress}</div>
-            </div>
-            <div className="identity-cell">
-              <label>WS Port</label>
-              <div className="identity-value">{device.wsPort}</div>
-            </div>
-          </div>
-        )}
-
-        <div className="identity-field">
-          <label>Fingerprint</label>
-          <div className="identity-fingerprint">{grouped}</div>
-        </div>
-
-        <div className="detail-setting">
-          <div className="detail-setting-text">
-            <div className="detail-setting-title">Auto-connect</div>
-            <div className="detail-setting-hint">
-              Connect automatically when this device is available
-            </div>
-          </div>
-          <Toggle
-            checked={device.autoConnect}
-            onChange={(v) => onToggleAutoConnect(device.fingerprint, v)}
-          />
-        </div>
-
-        <div className="detail-actions">
-          {isConnected && (
-            <button
-              className="detail-tab-btn"
-              onClick={() => onDisconnect(device.fingerprint)}
-            >
-              <Power size={15} />
-              Disconnect
-            </button>
-          )}
-          <button
-            className="detail-tab-btn danger"
-            onClick={() => onForget(device.fingerprint)}
-          >
-            <Trash2 size={15} />
-            Forget
+    <Popover
+      variant="grow"
+      anchor={anchor}
+      className="detail-panel"
+      onClose={onClose}
+    >
+      {(close) => (
+        <>
+          <button className="modal-close" onClick={close}>
+            <X size={14} />
           </button>
-        </div>
-      </div>
-    </div>
+
+          <div className="detail-head">
+            <div className="identity-glyph">
+              <DeviceIcon type={device.deviceType} />
+            </div>
+            <h2>{device.name}</h2>
+            <div className="identity-subtitle">
+              <span className={`status-dot ${device.connection}`} />
+              {connectionLabel(device.connection)}
+            </div>
+          </div>
+
+          {deviceAvailable && (
+            <div className="identity-grid">
+              <div className="identity-cell">
+                <label>IP Address</label>
+                <div className="identity-value">{device.ipAddress}</div>
+              </div>
+              <div className="identity-cell">
+                <label>WS Port</label>
+                <div className="identity-value">{device.wsPort}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="identity-field">
+            <label>Fingerprint</label>
+            <div className="identity-fingerprint">{grouped}</div>
+          </div>
+
+          <div className="detail-setting">
+            <div className="detail-setting-text">
+              <div className="detail-setting-title">Auto-connect</div>
+              <div className="detail-setting-hint">
+                Connect automatically when this device is available
+              </div>
+            </div>
+            <Toggle
+              checked={device.autoConnect}
+              onChange={(v) => onToggleAutoConnect(device.fingerprint, v)}
+            />
+          </div>
+
+          <div className="detail-actions">
+            {isConnected && (
+              <button
+                className="detail-tab-btn"
+                onClick={() => onDisconnect(device.fingerprint)}
+              >
+                <Power size={15} />
+                Disconnect
+              </button>
+            )}
+            <button
+              className="detail-tab-btn danger"
+              onClick={() => onForget(device.fingerprint)}
+            >
+              <Trash2 size={15} />
+              Forget
+            </button>
+          </div>
+        </>
+      )}
+    </Popover>
   );
 }

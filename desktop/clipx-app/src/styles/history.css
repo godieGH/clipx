@@ -1,0 +1,100 @@
+/* ---- clipboard history screen ---- */
+
+.history-screen {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
+
+.history-content {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.history-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.history-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.history-count {
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(57, 108, 216, 0.15);
+  color: #396cd8;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.clip-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.clip-top { display: flex; align-items: flex-start; gap: 8px; }
+.clip-text { flex: 1; min-width: 0; }
+
+.clip-content {
+  font-size: 0.82rem;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clip-meta {
+  font-size: 0.68rem;
+  opacity: 0.55;
+  margin-top: 2px;
+}
+
+.clip-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ---- empty state ---- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 28px 10px;
+  opacity: 0.6;
+  gap: 4px;
+}
+
+.empty-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-top: 6px;
+}
+
+.empty-hint {
+  font-size: 0.7rem;
+  opacity: 0.75;
+  max-width: 200px;
+}

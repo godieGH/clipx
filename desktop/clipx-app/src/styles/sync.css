@@ -1,0 +1,649 @@
+/* ---- sync workspace --------------------------------------------------- */
+/*
+ * Send intentionally uses the same visual language as Devices/History:
+ * neutral surfaces, compact typography, subtle row backgrounds, and the
+ * existing ClipX blue only for actions/active states.
+ */
+.sync-screen {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sync-shell {
+  height: auto;
+  min-height: 100%;
+}
+
+.sync-scroll {
+  height: 100%;
+  min-height: 0;
+}
+
+.sync-scroll .scroll-fade-viewport {
+  height: 100%;
+  padding: 0 2px 12px;
+  overflow-y: auto;
+}
+
+.sync-page-header {
+  margin-bottom: 10px;
+}
+
+.sync-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Same visual treatment as the existing .device-icon. */
+.sync-device-transfer-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.sync-device-transfer-icon svg {
+  width: 22px;
+  height: 26px;
+}
+
+.sync-heading {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.sync-description {
+  margin: 5px 0 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  opacity: 0.55;
+  max-width: 560px;
+}
+
+/* Keep connection state compact like .device-sub rather than a dashboard pill. */
+.sync-connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  white-space: nowrap;
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.sync-connection-pill.online,
+.sync-connection-pill.offline {
+  color: inherit;
+}
+
+.sync-connection-pill .status-dot {
+  width: 6px;
+  height: 6px;
+  margin: 0;
+}
+
+.sync-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.3em 0.7em;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: inherit;
+}
+
+.sync-refresh:hover {
+  border-color: rgba(57, 108, 216, 0.35);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.sync-refresh:active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.sync-refresh-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.sync-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: 20px;
+  align-items: start;
+  overflow: visible;
+  padding: 0;
+}
+
+.sync-primary-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sync-aside {
+  min-width: 0;
+}
+
+/* Sections are deliberately flat, matching .device-section. */
+.sync-panel,
+.sync-summary-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.sync-panel {
+  padding: 0;
+}
+
+.sync-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.sync-panel-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+  margin: 0;
+}
+
+.sync-panel-subtitle {
+  margin-top: 3px;
+  font-size: 0.6rem;
+  line-height: 1.4;
+  opacity: 0.55;
+}
+
+.sync-clipboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+
+.sync-kind,
+.sync-count-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 10px;
+}
+
+.sync-kind {
+  padding: 1px 7px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  border: 0;
+  background: rgba(57, 108, 216, 0.15);
+  color: #396cd8;
+}
+
+.sync-kind.empty {
+  background: rgba(0, 0, 0, 0.03);
+  color: inherit;
+  opacity: 0.58;
+}
+
+.sync-count-chip {
+  min-width: 24px;
+  padding: 1px 7px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(57, 108, 216, 0.15);
+  color: #396cd8;
+}
+
+/* Clipboard preview follows the same row treatment used by History/Devices. */
+.sync-clipboard-preview,
+.sync-clipboard-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+}
+
+.sync-clipboard-empty {
+  text-align: left;
+  cursor: pointer;
+}
+
+.sync-clipboard-preview {
+  border: 1px solid transparent;
+}
+
+.sync-preview-icon,
+.sync-empty-glyph,
+.sync-file-icon,
+.sync-drop-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+}
+
+.sync-preview-icon {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.05);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sync-preview-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-top: 0;
+}
+
+.sync-preview-text {
+  font-size: 0.82rem;
+  line-height: 1.35;
+  font-weight: 500;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 44px;
+  overflow: hidden;
+}
+
+.sync-preview-meta {
+  margin-top: 2px;
+  font-size: 0.6rem;
+  opacity: 0.55;
+}
+
+.sync-empty-glyph {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 16px;
+  opacity: 0.6;
+}
+
+.sync-empty-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.sync-empty-copy {
+  margin-top: 2px;
+  font-size: 0.6rem;
+  opacity: 0.6;
+}
+
+.sync-selection-remove {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  opacity: 0.45;
+  font-size: 17px;
+}
+
+.sync-selection-remove:hover {
+  border-color: transparent;
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* The drop zone remains visually distinct because it is an affordance, not a card. */
+.sync-dropzone {
+  position: relative;
+  width: 100%;
+  min-height: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 10px;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sync-dropzone:hover,
+.sync-dropzone.dragging,
+.sync-screen--dragging .sync-dropzone {
+  border-color: rgba(57, 108, 216, 0.55);
+  background: rgba(57, 108, 216, 0.05);
+}
+
+.sync-dropzone input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.sync-drop-icon {
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.05);
+  color: inherit;
+  font-size: 17px;
+}
+
+.sync-drop-title {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sync-drop-copy {
+  font-size: 0.6rem;
+  opacity: 0.55;
+}
+
+.sync-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Same as .device-row/.clip-row. */
+.sync-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+  transition: background 0.15s ease;
+}
+
+.sync-file-row:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.sync-file-icon {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.sync-file-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.sync-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.sync-file-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6rem;
+  opacity: 0.6;
+}
+
+.sync-file-remove {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 17px;
+  opacity: 0.45;
+}
+
+.sync-file-remove:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+  border-color: transparent;
+}
+
+/* Summary is a flat section rather than a floating dashboard card. */
+.sync-summary-panel {
+  position: sticky;
+  top: 0;
+  padding: 0;
+}
+
+.sync-summary-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.sync-summary-number {
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: normal;
+}
+
+.sync-summary-caption {
+  margin-top: 2px;
+  font-size: 0.6rem;
+  opacity: 0.55;
+}
+
+.sync-summary-breakdown {
+  margin-top: 10px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.sync-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.7rem;
+}
+
+.sync-breakdown-row strong {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.sync-breakdown-empty {
+  font-size: 0.6rem;
+  line-height: 1.4;
+  opacity: 0.55;
+  padding: 2px 0;
+}
+
+.sync-summary-destination {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 10px 0;
+}
+
+.sync-summary-destination .status-dot {
+  margin-top: 4px;
+}
+
+.sync-summary-destination > div > div {
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.sync-summary-destination small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.6rem;
+  line-height: 1.4;
+  opacity: 0.55;
+}
+
+/* Same primary action language as .device-action. */
+.sync-send-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.45em 0.8em;
+  border: 0;
+  border-radius: 4px;
+  background: #396cd8;
+  color: white;
+  box-shadow: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sync-send-button:hover {
+  border-color: transparent;
+  background: #2f5bc0;
+}
+
+.sync-send-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sync-send-arrow {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.sync-summary-note {
+  margin-top: 7px;
+  font-size: 0.6rem;
+  line-height: 1.4;
+  opacity: 0.5;
+}
+
+@media (max-width: 760px) {
+  .sync-layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .sync-aside {
+    order: -1;
+  }
+
+  .sync-summary-panel {
+    position: static;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .sync-device-transfer-icon,
+  .sync-preview-icon,
+  .sync-empty-glyph,
+  .sync-drop-icon,
+  .sync-file-icon {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sync-refresh {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .sync-refresh:hover,
+  .sync-selection-remove:hover,
+  .sync-file-remove:hover {
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sync-kind,
+  .sync-count-chip {
+    background: rgba(57, 108, 216, 0.18);
+    color: #7fa8f5;
+  }
+
+  .sync-clipboard-preview,
+  .sync-clipboard-empty,
+  .sync-file-row {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .sync-file-row:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sync-dropzone {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .sync-dropzone:hover,
+  .sync-dropzone.dragging,
+  .sync-screen--dragging .sync-dropzone {
+    background: rgba(57, 108, 216, 0.10);
+    border-color: rgba(105, 153, 238, 0.65);
+  }
+
+  .sync-summary-breakdown {
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+}
