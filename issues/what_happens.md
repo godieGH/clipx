@@ -6,7 +6,7 @@
 
 **How to use:** pick an `untested` scenario, try it on your devices, then report what you saw. If something unexpected happened, report it with `python issues/issues.py report` and link it (`wh set ID issue --issue ID`).
 
-**16 scenarios**: 16 untested, 0 tested, 0 issue
+**20 scenarios**: 20 untested, 0 tested, 0 issue
 
 ## pairing
 
@@ -34,6 +34,14 @@
 - <a id="wh-dcf30e3795af"></a>**WH-007** `untested`: When A forgets B in the middle of a file transfer, what happens to the transfer on both sides?
 - <a id="wh-9c0f85c3bad8"></a>**WH-008** `untested`: When a file offer expires while its download is already running, what happens?
 - <a id="wh-c45d0b9c5625"></a>**WH-009** `untested`: When a download stalls and a new clipboard item arrives meanwhile, is the clipboard item delivered and does the download recover?
+- <a id="wh-8f4a15f27f9c"></a>**8f4a15f** `untested`: When the same file is selected twice before sending, what happens?
+  - issues: [000e68a](items/000e68a78a58-repeatedly-selecting-same-file-creates-a.md)
+- <a id="wh-95f8ffb98cdf"></a>**95f8ffb** `untested`: When the same file is sent twice from desktop, what happens?
+  - issues: [000e68a](items/000e68a78a58-repeatedly-selecting-same-file-creates-a.md)
+- <a id="wh-b577b3001558"></a>**b577b30** `untested`: When two files with different names but identical content are selected, what happens?
+  - issues: [000e68a](items/000e68a78a58-repeatedly-selecting-same-file-creates-a.md)
+- <a id="wh-3df4eaffabb7"></a>**3df4eaf** `untested`: When a file that was already received is sent again to the same device, what happens?
+  - issues: [8f7e67b](items/8f7e67b56dcf-re-sending-an-already-received-file-creates.md)
 
 ## discovery
 
