@@ -20,6 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.core.net.toUri
 
 /**
  * View model that exposes Clipx core state to the Android Compose UI.
@@ -285,26 +286,68 @@ class ClipxCoreViewModel(
 
     fun clearSyncClipboardItem() { systemClipboardItem = null }
 
-    fun enqueueFiles(context: Context, uris: List<android.net.Uri>) {
+    fun enqueueFiles(context: Context, uris: List<Uri>) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val added = uris.mapNotNull { uri ->
-                runCatching {
-                    var name = "clipx-file"
-                    var size = 0L
-                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                        if (cursor.moveToFirst()) {
-                            if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
-                            if (sizeIndex >= 0) size = cursor.getLong(sizeIndex).coerceAtLeast(0L)
-                        }
-                    }
-                    val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                    OutgoingFile(uri, name, mime, size)
-                }.getOrNull()
+            val known = pendingFiles.toMutableList()
+            val accepted = mutableListOf<OutgoingFile>()
+            var skipped = 0
+            for (uri in uris) {
+                val f = readOutgoingFile(context, uri) ?: continue
+                if (isDuplicate(context, f, known)) { skipped++; continue }
+                known += f
+                accepted += f
             }
-            withContext(kotlinx.coroutines.Dispatchers.Main) { pendingFiles = pendingFiles + added }
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                pendingFiles = pendingFiles + accepted.filter { a -> pendingFiles.none { it.uri == a.uri } }
+                if (skipped > 0) emitMessage("$skipped duplicate file${if (skipped == 1) "" else "s"} skipped")
+            }
         }
+    }
+
+    private fun readOutgoingFile(context: Context, uri: Uri): OutgoingFile? = runCatching {
+        var name = "clipx-file"
+        var size = 0L
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
+                if (sizeIndex >= 0) size = cursor.getLong(sizeIndex).coerceAtLeast(0L)
+            }
+        }
+        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+        OutgoingFile(uri, name, mime, size)
+    }.getOrNull()
+
+    private fun isDuplicate(context: Context, f: OutgoingFile, existing: List<OutgoingFile>): Boolean {
+        if (existing.any { it.uri == f.uri }) return true
+        return existing
+            .filter { it.size == f.size || it.size == 0L || f.size == 0L }
+            .any { sameContent(context, it.uri, f.uri) }
+    }
+
+    private fun sameContent(context: Context, a: Uri, b: Uri): Boolean = try {
+        context.contentResolver.openInputStream(a)!!.use { ia ->
+            context.contentResolver.openInputStream(b)!!.use { ib ->
+                val ba = ByteArray(256 * 1024)
+                val bb = ByteArray(256 * 1024)
+                var same = true
+                while (same) {
+                    val na = ia.readFully(ba)
+                    val nb = ib.readFully(bb)
+                    if (na != nb) {
+                        same = false
+                    } else {
+                        for (i in 0 until na) if (ba[i] != bb[i]) { same = false; break }
+                        if (na == 0) break
+                    }
+                }
+                same
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("ClipxDedup", "compare failed", e)
+        false
     }
 
     fun enqueueSharedText(text: String) {
@@ -411,7 +454,7 @@ class ClipxCoreViewModel(
     private fun isLocalFileAvailable(path: String): Boolean {
         if (path.isBlank()) return false
         return runCatching {
-            val uri = Uri.parse(path)
+            val uri = path.toUri()
             when (uri.scheme?.lowercase()) {
                 "content" -> application.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
                 "file", null -> java.io.File(uri.path ?: path).isFile
@@ -551,4 +594,14 @@ private fun readImage(context: Context, uri: android.net.Uri): Triple<Int, Int, 
     val result = Triple(bitmap.width, bitmap.height, rgba)
     bitmap.recycle()
     return result
+}
+
+private fun java.io.InputStream.readFully(buf: ByteArray): Int {
+    var n = 0
+    while (n < buf.size) {
+        val k = read(buf, n, buf.size - n)
+        if (k < 0) break
+        n += k
+    }
+    return n
 }

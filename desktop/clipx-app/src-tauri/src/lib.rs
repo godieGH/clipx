@@ -392,6 +392,7 @@ pub fn run() {
             send_file,
             pick_files,
             get_dropped_files,
+            files_identical,
             send_file_path,
             download_clipboard_file,
             reveal_file_location,
@@ -636,6 +637,47 @@ fn get_dropped_files(paths: Vec<String>) -> Vec<PickedFile> {
             })
         })
         .collect()
+}
+
+fn read_full(r: &mut fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        let k = r.read(&mut buf[n..])?;
+        if k == 0 {
+            break;
+        }
+        n += k;
+    }
+    Ok(n)
+}
+
+fn files_equal(a: &Path, b: &Path) -> std::io::Result<bool> {
+    let mut fa = fs::File::open(a)?;
+    let mut fb = fs::File::open(b)?;
+    if fa.metadata()?.len() != fb.metadata()?.len() {
+        return Ok(false);
+    }
+    let mut ba = vec![0u8; 256 * 1024];
+    let mut bb = vec![0u8; 256 * 1024];
+    loop {
+        let na = read_full(&mut fa, &mut ba)?;
+        let nb = read_full(&mut fb, &mut bb)?;
+        if na != nb || ba[..na] != bb[..nb] {
+            return Ok(false);
+        }
+        if na == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+#[tauri::command]
+async fn files_identical(a: String, b: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        files_equal(Path::new(&a), Path::new(&b)).unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[tauri::command]

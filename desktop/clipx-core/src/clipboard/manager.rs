@@ -10,7 +10,8 @@ use std::{
     collections::{VecDeque, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
-    path::PathBuf,
+    io::Read,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -522,7 +523,15 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         }
         let file_id = uuid::Uuid::new_v4().to_string();
         let destination = self.files_dir.join(&file_id);
-        fs::copy(&source, &destination).map_err(|e| e.to_string())?;
+        // Identical bytes already staged and live: share the blob instead of copying again.
+        let linked = self
+            .find_identical_offer(&source, meta.len())
+            .is_some_and(|existing| {
+                fs::hard_link(self.files_dir.join(existing), &destination).is_ok()
+            });
+        if !linked {
+            fs::copy(&source, &destination).map_err(|e| e.to_string())?;
+        }
         let expires_at_ms = now_ms() + FILE_TTL_MS;
         let manifest = FileOfferManifest {
             name: name.clone(),
@@ -1135,6 +1144,35 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             start_offset: offset,
         });
     }
+
+    /// A live staged offer with the same bytes as `source`. Size is the cheap
+    /// filter; bytes are compared only when a same-size candidate exists.
+    /// Names are ignored.
+    fn find_identical_offer(&self, source: &Path, size: u64) -> Option<String> {
+        let now = now_ms();
+        for entry in fs::read_dir(&self.files_dir).ok()?.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("meta") {
+                continue;
+            }
+            let Some(file_id) = p.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(m) = fs::read(&p)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<FileOfferManifest>(&b).ok())
+            else {
+                continue;
+            };
+            if m.size != size || m.expires_at_ms < now {
+                continue;
+            }
+            if files_equal(source, &self.files_dir.join(file_id)).unwrap_or(false) {
+                return Some(file_id.to_owned());
+            }
+        }
+        None
+    }
 }
 
 fn payload_hash(p: &ClipboardPayload) -> u64 {
@@ -1291,5 +1329,38 @@ fn format_size(size: u64) -> String {
         format!("{:.0} KB", size as f64 / (1 << 10) as f64)
     } else {
         format!("{size} B")
+    }
+}
+
+fn read_full(r: &mut fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        let k = r.read(&mut buf[n..])?;
+        if k == 0 {
+            break;
+        }
+        n += k;
+    }
+    Ok(n)
+}
+
+/// Streamed byte comparison; stops at the first difference.
+fn files_equal(a: &Path, b: &Path) -> std::io::Result<bool> {
+    let mut fa = fs::File::open(a)?;
+    let mut fb = fs::File::open(b)?;
+    if fa.metadata()?.len() != fb.metadata()?.len() {
+        return Ok(false);
+    }
+    let mut ba = vec![0u8; 256 * 1024];
+    let mut bb = vec![0u8; 256 * 1024];
+    loop {
+        let na = read_full(&mut fa, &mut ba)?;
+        let nb = read_full(&mut fb, &mut bb)?;
+        if na != nb || ba[..na] != bb[..nb] {
+            return Ok(false);
+        }
+        if na == 0 {
+            return Ok(true);
+        }
     }
 }
