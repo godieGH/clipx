@@ -267,6 +267,14 @@ button {
   justify-content: center;
 }
 
+.titlebar-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: currentColor;
+  opacity: 0.15;
+}
+
 .titlebar-icon:hover {
   border: none;
   background: rgba(0, 0, 0, 0.07);
