@@ -4,7 +4,7 @@
 
 Developer-facing bug log, kept apart from the public GitHub issues (see [Why this exists](README.md#why-this-exists)). Fixed issues are never deleted, they are marked `fixed`.
 
-**8 issues**: 2 report, 6 fixed
+**9 issues**: 3 report, 6 fixed
 
 | id | status | issue | comment | scenarios |
 |----|--------|-------|---------|-----------|
@@ -16,3 +16,4 @@ Developer-facing bug log, kept apart from the public GitHub issues (see [Why thi
 | [c17420e](items/c17420eb5067-android-crashes-after-pairing-completes.md) | fixed | **Android crashes after pairing completes** (was 0006) | Android crashes after pairing completes | [WH-004](what_happens.md#wh-8656491cd35e) |
 | [8f7e67b](items/8f7e67b56dcf-re-sending-an-already-received-file-creates.md) | report(medium) | **Re-sending an already received file creates duplicate copies** (was 0007) | Re-sending an already received file creates duplicate copies in internal storage. | [3df4eaf](what_happens.md#wh-3df4eaffabb7) |
 | [000e68a](items/000e68a78a58-repeatedly-selecting-same-file-creates-a.md) | fixed(medium) | **Repeatedly selecting same file creates a duplicate staged copies** | Selecting the same unchanged file multiple times creates unnecessary duplicate copies in the sender staging. | [8f4a15f](what_happens.md#wh-8f4a15f27f9c), [95f8ffb](what_happens.md#wh-95f8ffb98cdf), [b577b30](what_happens.md#wh-b577b3001558) |
+| [efc0376](items/efc03763e723-staging-a-large-file-blocks-the-clipboard.md) | report(medium) | **Staging a large file blocks the clipboard manager and is copied twice on Android** |  | [b014583](what_happens.md#wh-b014583ece2c), [b796efc](what_happens.md#wh-b796efcda52d) |

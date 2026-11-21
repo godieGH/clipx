@@ -425,7 +425,7 @@ class ClipxCoreViewModel(
             context.contentResolver.openInputStream(uri)?.use { input ->
                 staged.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
             } ?: error("Unable to read $name")
-            service.sendFilePath(name, mimeType, staged.absolutePath)
+            service.sendTempFilePath(name, mimeType, staged.absolutePath)
         } finally {
             staged.delete()
         }

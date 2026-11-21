@@ -6,7 +6,7 @@
 
 **How to use:** pick an `untested` scenario, try it on your devices, then report what you saw. If something unexpected happened, report it with `python issues/issues.py report` and link it (`wh set ID issue --issue ID`).
 
-**20 scenarios**: 20 untested, 0 tested, 0 issue
+**22 scenarios**: 22 untested, 0 tested, 0 issue
 
 ## pairing
 
@@ -42,6 +42,10 @@
   - issues: [000e68a](items/000e68a78a58-repeatedly-selecting-same-file-creates-a.md)
 - <a id="wh-3df4eaffabb7"></a>**3df4eaf** `untested`: When a file that was already received is sent again to the same device, what happens?
   - issues: [8f7e67b](items/8f7e67b56dcf-re-sending-an-already-received-file-creates.md)
+- <a id="wh-b014583ece2c"></a>**b014583** `untested`: When a multi-GB file is sent, what happens to history and incoming items while it is staged?
+  - issues: [efc0376](items/efc03763e723-staging-a-large-file-blocks-the-clipboard.md)
+- <a id="wh-b796efcda52d"></a>**b796efc** `untested`: When a large file is sent from Android, how long before it is offered, and is there any feedback?
+  - issues: [efc0376](items/efc03763e723-staging-a-large-file-blocks-the-clipboard.md)
 
 ## discovery
 

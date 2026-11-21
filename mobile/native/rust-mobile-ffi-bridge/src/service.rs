@@ -303,34 +303,28 @@ impl BridgeService {
     }
 
     /// Send a file by staging/copying its path in the core instead of loading the file into a byte array.
+    /// The file at `path` is left untouched.
     pub async fn send_file_path(
         &self,
         name: String,
         mime_type: String,
         path: String,
     ) -> Result<(), BridgeError> {
-        self.require_connected_device().await?;
-        let tx = self
-            .inner
-            .lock()
+        self.send_file_path_inner(name, mime_type, path, false)
             .await
-            .clipboard_cmd_tx
-            .clone()
-            .ok_or_else(|| "core clipboard manager is stopped".to_string())?;
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        tx.send(
-            clipx_core::clipboard::manager::ClipboardCommand::SendFilePath {
-                name,
-                mime_type,
-                path: std::path::PathBuf::from(path),
-                reply_to: reply_tx,
-            },
-        )
-        .map_err(|_| BridgeError::from("core clipboard manager is stopped"))?;
-        reply_rx
-            .await
-            .map_err(|_| BridgeError::from("core clipboard manager is stopped"))?
-            .map_err(BridgeError::from)
+    }
+
+    /// Like `send_file_path`, but `path` is a private temporary file that the
+    /// caller no longer needs, so the core may move it into staging instead of
+    /// copying it again. The file may be gone afterwards; callers can still
+    /// delete it unconditionally. Never pass a file the user owns.
+    pub async fn send_temp_file_path(
+        &self,
+        name: String,
+        mime_type: String,
+        path: String,
+    ) -> Result<(), BridgeError> {
+        self.send_file_path_inner(name, mime_type, path, true).await
     }
 
     pub async fn download_clipboard_file(&self, id: String) -> Result<String, BridgeError> {
@@ -611,6 +605,38 @@ impl BridgeService {
 }
 
 impl BridgeService {
+    async fn send_file_path_inner(
+        &self,
+        name: String,
+        mime_type: String,
+        path: String,
+        take_ownership: bool,
+    ) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self
+            .inner
+            .lock()
+            .await
+            .clipboard_cmd_tx
+            .clone()
+            .ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(
+            clipx_core::clipboard::manager::ClipboardCommand::SendFilePath {
+                name,
+                mime_type,
+                path: std::path::PathBuf::from(path),
+                take_ownership,
+                reply_to: reply_tx,
+            },
+        )
+        .map_err(|_| BridgeError::from("core clipboard manager is stopped"))?;
+        reply_rx
+            .await
+            .map_err(|_| BridgeError::from("core clipboard manager is stopped"))?
+            .map_err(BridgeError::from)
+    }
+
     async fn device_sender(
         &self,
     ) -> Result<tokio::sync::mpsc::UnboundedSender<DeviceCommands>, String> {
