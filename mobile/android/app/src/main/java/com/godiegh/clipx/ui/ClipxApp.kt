@@ -160,7 +160,7 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                             onBack = ::openDevices,
                         )
 
-                        AppRoute.SYNC -> SyncScreen(
+                        AppRoute.SYNC -> SendScreen(
                             item = viewModel.systemClipboardItem,
                             pendingFiles = viewModel.pendingFiles,
                             connectedDeviceCount = viewModel.connectedDeviceCount(),

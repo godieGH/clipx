@@ -1,6 +1,5 @@
 package com.godiegh.clipx.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,23 +19,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneIphone
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.DividerDefaults
@@ -99,29 +95,18 @@ fun DevicesScreen(
             elevated = elevated,
             rightContent = {
                 IconButton(onClick = onOpenSync) {
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier.size(23.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.PhoneIphone,
-                            contentDescription = "Send to device",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(21.dp),
-                        )
-                        Icon(
-                            Icons.Filled.Sync,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(9.dp).align(Alignment.Center),
-                        )
-                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(21.dp),
+                    )
                 }
                 IconButton(onClick = onOpenDiagnostics) {
-                    Icon(Icons.Filled.BugReport, contentDescription = "Help and diagnostics", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                    Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Help and diagnostics", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
                 }
                 IconButton(onClick = onOpenThisDevice) {
-                    Icon(Icons.Filled.Fingerprint, contentDescription = "This device", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                    Icon(Icons.Filled.PhoneIphone, contentDescription = "Device identity", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
                 }
             },
         )
@@ -323,7 +308,7 @@ fun ThisDeviceScreen(identity: com.godiegh.clipx.ThisDeviceInfo?, onBack: () -> 
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("This Device", onBack, elevated = elevated)
+        ScreenHeader("Device Identity", onBack, elevated = elevated)
         LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
             Row(
@@ -414,7 +399,7 @@ fun CantSeeDeviceScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun SyncScreen(
+fun SendScreen(
     item: SystemClipboardItem?,
     pendingFiles: List<OutgoingFile>,
     connectedDeviceCount: Int,
@@ -502,7 +487,7 @@ fun SyncScreen(
                 item {
                     GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.InsertDriveFile, contentDescription = null, tint = palette.mutedText, modifier = Modifier.size(20.dp))
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = palette.mutedText, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))
                             Text("No files selected", style = MaterialTheme.typography.bodyMedium, color = palette.mutedText)
                         }
@@ -513,7 +498,7 @@ fun SyncScreen(
                     val file = pendingFiles[index]
                     GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
                             Spacer(Modifier.width(11.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
@@ -572,7 +557,8 @@ fun SyncScreen(
                     enabled = canSend && !sendingFiles,
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    if (sendingFiles) { androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp) } else { Icon(Icons.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    if (sendingFiles) { androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp) } else { Icon(
+                        Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp)) }
                     Spacer(Modifier.width(7.dp))
                     Text(if (sendingFiles) "Preparing…" else "Send")
                 }
@@ -592,31 +578,29 @@ fun DiagnosticsScreen(
     val clipboardManager = LocalClipboardManager.current
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
-    LaunchedEffect(Unit) { while (true) { onRefresh(); delay(1_000) } }
+    LaunchedEffect(Unit) { while (true) { onRefresh(); delay(1_000.milliseconds) } }
     LaunchedEffect(logs.lastOrNull()) { if (logs.isNotEmpty()) listState.animateScrollToItem(logs.lastIndex) }
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("Help & diagnostics", onBack, elevated = elevated)
+        ScreenHeader(
+            "Help & diagnostics",
+            onBack,
+            elevated = elevated,
+            rightContent = {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh diagnostics", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) }, enabled = logs.isNotEmpty()) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy diagnostic logs", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = onClear, enabled = logs.isNotEmpty()) {
+                    Icon(Icons.Filled.DeleteForever, contentDescription = "Clear diagnostic logs", tint = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+        )
         GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp)) {
             Text("Live diagnostic logs", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(5.dp))
             Text("This in-memory feed keeps up to 250 recent ClipX core/bridge events while the app process is running. It is not the full Android system log. Review entries before sharing them.", style = MaterialTheme.typography.bodySmall, color = palette.mutedText)
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) }, enabled = logs.isNotEmpty()) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Copy logs")
-                }
-                TextButton(onClick = onClear, enabled = logs.isNotEmpty()) {
-                    Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Clear")
-                }
-            }
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp)) {
             if (logs.isEmpty()) item {
