@@ -20,6 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.core.net.toUri
 
 /**
  * View model that exposes Clipx core state to the Android Compose UI.
@@ -411,7 +412,7 @@ class ClipxCoreViewModel(
     private fun isLocalFileAvailable(path: String): Boolean {
         if (path.isBlank()) return false
         return runCatching {
-            val uri = Uri.parse(path)
+            val uri = path.toUri()
             when (uri.scheme?.lowercase()) {
                 "content" -> application.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
                 "file", null -> java.io.File(uri.path ?: path).isFile
@@ -551,4 +552,14 @@ private fun readImage(context: Context, uri: android.net.Uri): Triple<Int, Int, 
     val result = Triple(bitmap.width, bitmap.height, rgba)
     bitmap.recycle()
     return result
+}
+
+private fun java.io.InputStream.readFully(buf: ByteArray): Int {
+    var n = 0
+    while (n < buf.size) {
+        val k = read(buf, n, buf.size - n)
+        if (k < 0) break
+        n += k
+    }
+    return n
 }
