@@ -54,6 +54,7 @@ DEFAULTS = {
         "statuses": ["report", "fixed"],
         "weights": ["weak", "medium", "strong"],
         "update_dates": False,
+        "auto_commit": True,
     },
     "editor": {"command": ""},
     "wh": {
@@ -131,6 +132,39 @@ def commit(path, old, new, dry):
 def now_utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+def git_commit(paths, message, cfg):
+    """Commit `paths` plus the two generated files, on the current branch, locally.
+
+    Local only: no fetch, no pull, no push, and no remote is contacted or read. Only these
+    paths are committed (`git commit -- paths`), so anything else staged stays staged.
+    Not inside a git work tree = silent skip. git missing or failing = a warning; the files
+    are already written, so the command itself still succeeds.
+    """
+    if not cfg["report"]["auto_commit"]:
+        return
+    git = shutil.which("git")
+    if not git:
+        print("warning: git not found, nothing committed", file=sys.stderr)
+        return
+
+    def run(*args):
+        return subprocess.run([git, "-C", str(DIR), *args], capture_output=True, text=True)
+
+    if run("rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
+        return
+    targets = [str(p) for p in [*paths, index_md(), wh_md()] if p.exists()]
+    staged = run("add", "--", *targets).returncode == 0
+    if staged and run("diff", "--cached", "--quiet", "--", *targets).returncode == 0:
+        return  # nothing changed in these paths
+    r = run("commit", "-m", message, "--", *targets)
+    if r.returncode != 0:
+        print(f"warning: git commit failed, files left uncommitted: {(r.stderr or r.stdout).strip()}",
+              file=sys.stderr)
+
+
+def subject(text, limit=60):
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 # ----------------------------------------------------------------------------- record files
 
@@ -658,6 +692,7 @@ def cmd_report(a):
         if draft:
             draft.unlink(missing_ok=True)
         render_all()
+        git_commit([rec["path"]], f"issues: report {rec['meta']['id'][:SHOW_LEN]} {subject(rec['meta']['title'])}", cfg)
         print(f"reported {rec['meta']['id'][:SHOW_LEN]}  {rec['path'].relative_to(DIR.parent).as_posix()}")
     return 0
 
@@ -692,6 +727,7 @@ def cmd_update(a):
         if draft:
             draft.unlink(missing_ok=True)
         render_all()
+        git_commit([r["path"]], f"issues: update {short(r, issues)}" + (f" -> {a.status}" if a.status else ""), cfg)
         print(f"updated {short(r, issues)}")
     return 0
 
@@ -712,6 +748,7 @@ def cmd_status(a):
     commit(r["path"], old, set_fields(old, {"status": a.status, "weight": weight, "comment": comment}), a.dry_run)
     if not a.dry_run:
         render_all()
+        git_commit([r["path"]], f"issues: {short(r, issues)} -> {a.status}", cfg)
         print(f"{short(r, issues)} -> {a.status}")
     return 0
 
@@ -720,6 +757,7 @@ def cmd_edit(a):
     r = resolve(a.ref, load_all("issue") + load_all("scenario"))
     open_editor(r["path"])
     render_all()
+    git_commit([r["path"]], f"issues: edit {rel(r)}", config())
     print(f"edited {rel(r)}")
     return 0
 
@@ -805,6 +843,7 @@ def cmd_wh_add(a):
         if draft:
             draft.unlink(missing_ok=True)
         render_all()
+        git_commit([rec["path"]], f"issues: wh add {rec['meta']['id'][:SHOW_LEN]} {subject(rec['meta']['question'])}", cfg)
         print(f"added {rec['meta']['id'][:SHOW_LEN]}  {rec['path'].relative_to(DIR.parent).as_posix()}")
     return 0
 
@@ -822,6 +861,7 @@ def cmd_wh_set(a):
     commit(r["path"], old, set_fields(old, upd), a.dry_run)
     if not a.dry_run:
         render_all()
+        git_commit([r["path"]], f"issues: wh set {scen_label(r, scens)} -> {a.status}", config())
         print(f"{scen_label(r, scens)} -> {a.status}")
     return 0
 

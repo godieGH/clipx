@@ -9,6 +9,9 @@ statuses = ["report", "fixed"]
 weights = ["weak", "medium", "strong"]
 # true: updates are written as "**Update (YYYY-MM-DD):**" instead of "**Update:**"
 update_dates = false
+# true: every write command (report, update, status, edit, wh add, wh set) also makes a local
+# git commit of the files it changed plus INDEX.md and what_happens.md. Never fetches or pushes.
+auto_commit = true
 
 [editor]
 # Empty = auto-detect: $ISSUES_EDITOR, then $VISUAL, then $EDITOR, then the first found of
