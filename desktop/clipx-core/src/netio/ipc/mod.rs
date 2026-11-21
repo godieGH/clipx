@@ -622,6 +622,7 @@ impl IpcService {
                             name: req.name,
                             mime_type: req.mime_type,
                             path: std::path::PathBuf::from(req.path),
+                            take_ownership: false,
                             reply_to: reply_tx,
                         })
                         .map_err(|_| anyhow::anyhow!("clipboard manager stopped"))?;

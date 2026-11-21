@@ -63,7 +63,7 @@ class AndroidClipboardPlatform(
                 context.contentResolver.openInputStream(uri)?.use { input -> staged.outputStream().use { output -> input.copyTo(output, 256 * 1024) } }
                     ?: throw IllegalStateException("Unable to read clipboard file")
                 try {
-                    bridgeService.sendFilePath(item.fileName ?: "clipboard-file", item.fileMimeType ?: "application/octet-stream", staged.absolutePath)
+                    bridgeService.sendTempFilePath(item.fileName ?: "clipboard-file", item.fileMimeType ?: "application/octet-stream", staged.absolutePath)
                 } finally {
                     staged.delete()
                 }

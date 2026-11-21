@@ -98,6 +98,19 @@ pub enum ClipboardOutbound {
     },
 }
 
+/// Result of the slow half of staging a local file, sent back to the manager
+/// by the background task that did the disk work.
+struct StagedFile {
+    file_id: String,
+    name: String,
+    mime_type: String,
+    /// `<file_id>.part`: the staged bytes, not yet visible as an offer.
+    part: PathBuf,
+    /// Size of the staged bytes, or why staging failed (nothing is left behind).
+    result: Result<u64, String>,
+    reply_to: Option<oneshot::Sender<Result<(), String>>>,
+}
+
 #[allow(unused)]
 struct IncomingResolved {
     payload: IncomingPayload,
@@ -160,6 +173,11 @@ pub enum ClipboardCommand {
         name: String,
         mime_type: String,
         path: PathBuf,
+        /// The caller hands the file over: it is a private temporary copy (for
+        /// example Android's cache file), so the core may move it into staging
+        /// instead of copying it a second time. Never set this for a file the
+        /// user owns.
+        take_ownership: bool,
         reply_to: oneshot::Sender<Result<(), String>>,
     },
     PeerFileDownloadRequest {
@@ -189,9 +207,14 @@ pub struct ClipboardManager<E: Engine, S: ClipboardSink> {
     outbound_tx: mpsc::UnboundedSender<ClipboardOutbound>,
     resolved_tx: mpsc::UnboundedSender<IncomingResolved>,
     resolved_rx: mpsc::UnboundedReceiver<IncomingResolved>,
+    staged_tx: mpsc::UnboundedSender<StagedFile>,
+    staged_rx: mpsc::UnboundedReceiver<StagedFile>,
     events_tx: broadcast::Sender<CoreEvent>,
     files_dir: PathBuf,
     active_downloads: std::collections::HashSet<String>,
+    /// Ids whose `<id>.part` file is being written by a background task. The
+    /// cleanup sweep must not touch those.
+    staging_in_flight: std::collections::HashSet<String>,
 }
 
 impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E, S> {
@@ -207,6 +230,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         let _ = fs::create_dir_all(&files_dir);
         let store = ClipboardStore::load(history_path, max_history);
         let (resolved_tx, resolved_rx) = mpsc::unbounded_channel();
+        let (staged_tx, staged_rx) = mpsc::unbounded_channel();
         Self {
             store,
             notification,
@@ -215,9 +239,12 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             outbound_tx,
             resolved_tx,
             resolved_rx,
+            staged_tx,
+            staged_rx,
             events_tx,
             files_dir,
             active_downloads: std::collections::HashSet::new(),
+            staging_in_flight: std::collections::HashSet::new(),
         }
     }
 
@@ -296,6 +323,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 Some(payload) = watcher_rx.recv() => self.on_local_change(payload),
                 Some(cmd) = command_rx.recv() => self.handle_command(cmd),
                 Some(resolved) = self.resolved_rx.recv() => self.on_incoming_resolved(resolved),
+                Some(staged) = self.staged_rx.recv() => self.on_file_staged(staged),
                 _ = cleanup_interval.tick() => self.cleanup_expired_files(),
             }
         }
@@ -368,12 +396,12 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 name,
                 mime_type,
                 path,
+                take_ownership,
                 reply_to,
             } => {
-                let result = self
-                    .store_file_offer_from_path(path, name, mime_type)
-                    .map(|_| ());
-                let _ = reply_to.send(result);
+                // Replies once the file is staged and offered; the manager keeps
+                // serving other commands in the meantime.
+                self.begin_file_offer(path, name, mime_type, take_ownership, Some(reply_to));
             }
             ClipboardCommand::PeerFileDownloadRequest {
                 device_id,
@@ -460,7 +488,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                             .unwrap_or("clipboard-file")
                             .to_string();
                         let mime_type = mime_from_name(&name);
-                        let _ = self.store_file_offer_from_path(path_buf, name, mime_type);
+                        self.begin_file_offer(path_buf, name, mime_type, false, None);
                     }
                 }
             }
@@ -469,7 +497,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 name,
                 mime_type,
             } => {
-                let _ = self.store_file_offer_from_path(path, name, mime_type);
+                self.begin_file_offer(path, name, mime_type, false, None);
             }
             ClipboardPayload::FileBytes {
                 name,
@@ -511,47 +539,101 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         }
     }
 
-    fn store_file_offer_from_path(
+    /// Stage a local file for peers without blocking the manager.
+    ///
+    /// The slow disk work (looking for an identical staged offer, then link,
+    /// move or copy) runs on a blocking thread and writes `<id>.part`. The
+    /// result comes back through `staged_rx`, and `on_file_staged` does the quick
+    /// bookkeeping (final name, manifest, announcing the offer) on the manager.
+    fn begin_file_offer(
         &mut self,
         source: PathBuf,
         name: String,
         mime_type: String,
-    ) -> Result<String, String> {
-        let meta = fs::metadata(&source).map_err(|e| e.to_string())?;
-        if !meta.is_file() {
-            return Err("selected path is not a file".into());
-        }
+        take_ownership: bool,
+        reply_to: Option<oneshot::Sender<Result<(), String>>>,
+    ) {
         let file_id = uuid::Uuid::new_v4().to_string();
-        let destination = self.files_dir.join(&file_id);
-        // Identical bytes already staged and live: share the blob instead of copying again.
-        let linked = self
-            .find_identical_offer(&source, meta.len())
-            .is_some_and(|existing| {
-                fs::hard_link(self.files_dir.join(existing), &destination).is_ok()
+        self.staging_in_flight.insert(file_id.clone());
+        let files_dir = self.files_dir.clone();
+        let staged_tx = self.staged_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let part = files_dir.join(format!("{file_id}.part"));
+            let result = prepare_staged_blob(&files_dir, &source, &part, take_ownership);
+            let _ = staged_tx.send(StagedFile {
+                file_id,
+                name,
+                mime_type,
+                part,
+                result,
+                reply_to,
             });
-        if !linked {
-            fs::copy(&source, &destination).map_err(|e| e.to_string())?;
+        });
+    }
+
+    fn on_file_staged(&mut self, staged: StagedFile) {
+        let StagedFile {
+            file_id,
+            name,
+            mime_type,
+            part,
+            result,
+            reply_to,
+        } = staged;
+        self.staging_in_flight.remove(&file_id);
+        let outcome =
+            result.and_then(|size| self.finish_file_offer(file_id, name, mime_type, part, size));
+        match reply_to {
+            Some(reply_to) => {
+                let _ = reply_to.send(outcome.map(|_| ()));
+            }
+            None => {
+                if let Err(error) = outcome {
+                    tracing::warn!("could not stage clipboard file: {error}");
+                }
+            }
+        }
+    }
+
+    fn finish_file_offer(
+        &mut self,
+        file_id: String,
+        name: String,
+        mime_type: String,
+        part: PathBuf,
+        size: u64,
+    ) -> Result<String, String> {
+        let destination = self.files_dir.join(&file_id);
+        if let Err(error) = fs::rename(&part, &destination) {
+            let _ = fs::remove_file(&part);
+            return Err(error.to_string());
         }
         let expires_at_ms = now_ms() + FILE_TTL_MS;
         let manifest = FileOfferManifest {
             name: name.clone(),
             mime_type: mime_type.clone(),
-            size: meta.len(),
+            size,
             expires_at_ms,
         };
         let manifest_path = self.files_dir.join(format!("{file_id}.meta"));
-        fs::write(
-            &manifest_path,
-            serde_json::to_vec(&manifest).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
+        let manifest_bytes = match serde_json::to_vec(&manifest) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = fs::remove_file(&destination);
+                return Err(error.to_string());
+            }
+        };
+        if let Err(error) = fs::write(&manifest_path, manifest_bytes) {
+            let _ = fs::remove_file(&destination);
+            return Err(error.to_string());
+        }
         if self
             .outbound_tx
             .send(ClipboardOutbound::FileOffer {
                 file_id: file_id.clone(),
                 name,
                 mime_type,
-                size: meta.len(),
+                size,
                 expires_at_ms,
             })
             .is_err()
@@ -1037,60 +1119,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
 
     fn cleanup_expired_files(&self) {
-        let Ok(entries) = fs::read_dir(&self.files_dir) else {
-            return;
-        };
-        let mut manifests = std::collections::HashSet::new();
-        let now = now_ms();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("meta") {
-                continue;
-            }
-            let file_id = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default()
-                .to_string();
-            let Ok(bytes) = fs::read(&path) else {
-                continue;
-            };
-            let Ok(manifest) = serde_json::from_slice::<FileOfferManifest>(&bytes) else {
-                continue;
-            };
-            manifests.insert(file_id.clone());
-            if manifest.expires_at_ms < now {
-                let _ = fs::remove_file(self.files_dir.join(&file_id));
-                let _ = fs::remove_file(path);
-            }
-        }
-        // A crash can leave a staged data file without its manifest. The offer
-        // TTL is at most 24h, so an orphan older than that cannot represent a
-        // live offer and is safe to remove.
-        let cutoff = std::time::SystemTime::now()
-            .checked_sub(Duration::from_millis(FILE_TTL_MS))
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        if let Ok(entries) = fs::read_dir(&self.files_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("meta") {
-                    continue;
-                }
-                let id = path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default();
-                if manifests.contains(id) {
-                    continue;
-                }
-                if fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .is_ok_and(|modified| modified < cutoff)
-                {
-                    let _ = fs::remove_file(path);
-                }
-            }
-        }
+        cleanup_staging_dir(&self.files_dir, &self.staging_in_flight);
     }
 
     fn send_file_for_peer(
@@ -1144,34 +1173,164 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             start_offset: offset,
         });
     }
+}
 
-    /// A live staged offer with the same bytes as `source`. Size is the cheap
-    /// filter; bytes are compared only when a same-size candidate exists.
-    /// Names are ignored.
-    fn find_identical_offer(&self, source: &Path, size: u64) -> Option<String> {
-        let now = now_ms();
-        for entry in fs::read_dir(&self.files_dir).ok()?.flatten() {
-            let p = entry.path();
-            if p.extension().and_then(|e| e.to_str()) != Some("meta") {
+/// A live staged offer with the same bytes as `source`. Size is the cheap
+/// filter; bytes are compared only when a same-size candidate exists.
+/// Names are ignored.
+fn find_identical_offer(files_dir: &Path, source: &Path, size: u64) -> Option<String> {
+    let now = now_ms();
+    for entry in fs::read_dir(files_dir).ok()?.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("meta") {
+            continue;
+        }
+        let Some(file_id) = p.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(m) = fs::read(&p)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<FileOfferManifest>(&b).ok())
+        else {
+            continue;
+        };
+        if m.size != size || m.expires_at_ms < now {
+            continue;
+        }
+        if files_equal(source, &files_dir.join(file_id)).unwrap_or(false) {
+            return Some(file_id.to_owned());
+        }
+    }
+    None
+}
+
+/// How a staged blob was produced.
+#[derive(Debug, PartialEq, Eq)]
+enum StageHow {
+    Linked,
+    Moved,
+    Copied,
+}
+
+/// Put the bytes of `source` at `destination`, as cheaply as is safe:
+///
+/// 1. an identical live staged blob exists -> hard link to it (source untouched)
+/// 2. the caller owns the source           -> move it (instant on the same volume)
+/// 3. otherwise                            -> full copy
+///
+/// Each step falls back to the next, so the worst case is a plain copy.
+fn stage_blob(
+    files_dir: &Path,
+    source: &Path,
+    destination: &Path,
+    size: u64,
+    take_ownership: bool,
+) -> Result<StageHow, String> {
+    let linked = find_identical_offer(files_dir, source, size)
+        .is_some_and(|existing| fs::hard_link(files_dir.join(existing), destination).is_ok());
+    if linked {
+        return Ok(StageHow::Linked);
+    }
+    if take_ownership && fs::rename(source, destination).is_ok() {
+        return Ok(StageHow::Moved);
+    }
+    fs::copy(source, destination).map_err(|e| e.to_string())?;
+    Ok(StageHow::Copied)
+}
+
+/// Slow half of staging a local file; safe to run off the manager thread.
+/// Leaves the staged bytes at `part` and returns their size. On failure nothing
+/// is left behind.
+fn prepare_staged_blob(
+    files_dir: &Path,
+    source: &Path,
+    part: &Path,
+    take_ownership: bool,
+) -> Result<u64, String> {
+    let meta = fs::metadata(source).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("selected path is not a file".into());
+    }
+    stage_blob(files_dir, source, part, meta.len(), take_ownership).inspect_err(|_| {
+        let _ = fs::remove_file(part);
+    })?;
+    // Report what was actually staged, in case the source changed while copying.
+    fs::metadata(part).map(|m| m.len()).map_err(|error| {
+        let _ = fs::remove_file(part);
+        error.to_string()
+    })
+}
+
+/// Remove expired offers and orphans from the staging directory.
+///
+/// `<id>.part` files belong to a staging task that is still running when `id` is
+/// in `in_flight`; those are left alone. Any other `.part` file is a leftover
+/// from a crash or a stopped app and is removed.
+fn cleanup_staging_dir(files_dir: &Path, in_flight: &std::collections::HashSet<String>) {
+    let Ok(entries) = fs::read_dir(files_dir) else {
+        return;
+    };
+    let mut manifests = std::collections::HashSet::new();
+    let now = now_ms();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("meta") {
+            continue;
+        }
+        let file_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_slice::<FileOfferManifest>(&bytes) else {
+            continue;
+        };
+        manifests.insert(file_id.clone());
+        if manifest.expires_at_ms < now {
+            let _ = fs::remove_file(files_dir.join(&file_id));
+            let _ = fs::remove_file(path);
+        }
+    }
+    // A crash can leave a staged data file without its manifest. The offer
+    // TTL is at most 24h, so an orphan older than that cannot represent a
+    // live offer and is safe to remove.
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(Duration::from_millis(FILE_TTL_MS))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    if let Ok(entries) = fs::read_dir(files_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str());
+            if ext == Some("meta") {
                 continue;
             }
-            let Some(file_id) = p.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let Some(m) = fs::read(&p)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<FileOfferManifest>(&b).ok())
-            else {
-                continue;
-            };
-            if m.size != size || m.expires_at_ms < now {
+            if ext == Some("part") {
+                let id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default();
+                if !in_flight.contains(id) {
+                    let _ = fs::remove_file(&path);
+                }
                 continue;
             }
-            if files_equal(source, &self.files_dir.join(file_id)).unwrap_or(false) {
-                return Some(file_id.to_owned());
+            let id = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if manifests.contains(id) {
+                continue;
+            }
+            if fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .is_ok_and(|modified| modified < cutoff)
+            {
+                let _ = fs::remove_file(path);
             }
         }
-        None
     }
 }
 
@@ -1362,5 +1521,135 @@ fn files_equal(a: &Path, b: &Path) -> std::io::Result<bool> {
         if na == 0 {
             return Ok(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("clipx-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_manifest(files_dir: &Path, id: &str, size: u64, expires_at_ms: u64) {
+        let manifest = FileOfferManifest {
+            name: "x".into(),
+            mime_type: "application/octet-stream".into(),
+            size,
+            expires_at_ms,
+        };
+        fs::write(
+            files_dir.join(format!("{id}.meta")),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn copies_and_keeps_the_source_when_not_owned() {
+        let dir = temp_dir();
+        let src = dir.join("src.bin");
+        fs::write(&src, b"hello").unwrap();
+        let dst = dir.join("dst");
+        let how = stage_blob(&dir, &src, &dst, 5, false).unwrap();
+        assert_eq!(how, StageHow::Copied);
+        assert_eq!(fs::read(&dst).unwrap(), b"hello");
+        assert!(src.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn moves_the_source_when_owned() {
+        let dir = temp_dir();
+        let src = dir.join("src.bin");
+        fs::write(&src, b"hello").unwrap();
+        let dst = dir.join("dst");
+        let how = stage_blob(&dir, &src, &dst, 5, true).unwrap();
+        assert_eq!(how, StageHow::Moved);
+        assert_eq!(fs::read(&dst).unwrap(), b"hello");
+        assert!(!src.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn identical_live_blob_is_linked_and_owned_source_is_left_alone() {
+        let dir = temp_dir();
+        fs::write(dir.join("first"), b"same bytes").unwrap();
+        write_manifest(&dir, "first", 10, now_ms() + 60_000);
+        let src = dir.join("src.bin");
+        fs::write(&src, b"same bytes").unwrap();
+        let dst = dir.join("second");
+        let how = stage_blob(&dir, &src, &dst, 10, true).unwrap();
+        assert_eq!(how, StageHow::Linked);
+        assert_eq!(fs::read(&dst).unwrap(), b"same bytes");
+        assert!(src.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn expired_or_different_blobs_are_not_reused() {
+        let dir = temp_dir();
+        fs::write(dir.join("old"), b"same bytes").unwrap();
+        write_manifest(&dir, "old", 10, now_ms().saturating_sub(1));
+        fs::write(dir.join("other"), b"other byte").unwrap();
+        write_manifest(&dir, "other", 10, now_ms() + 60_000);
+        let src = dir.join("src.bin");
+        fs::write(&src, b"same bytes").unwrap();
+        assert_eq!(find_identical_offer(&dir, &src, 10), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prepare_leaves_a_part_file_and_reports_the_staged_size() {
+        let dir = temp_dir();
+        let src = dir.join("src.bin");
+        fs::write(&src, b"hello world").unwrap();
+        let part = dir.join("abc.part");
+        let size = prepare_staged_blob(&dir, &src, &part, false).unwrap();
+        assert_eq!(size, 11);
+        assert_eq!(fs::read(&part).unwrap(), b"hello world");
+        assert!(src.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prepare_rejects_directories_and_missing_files_without_leftovers() {
+        let dir = temp_dir();
+        let part = dir.join("abc.part");
+        assert!(prepare_staged_blob(&dir, &dir, &part, false).is_err());
+        assert!(prepare_staged_blob(&dir, &dir.join("nope"), &part, false).is_err());
+        assert!(!part.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sweep_keeps_in_flight_part_files_and_removes_orphans() {
+        let dir = temp_dir();
+        fs::write(dir.join("busy.part"), b"half").unwrap();
+        fs::write(dir.join("orphan.part"), b"half").unwrap();
+        let mut in_flight = std::collections::HashSet::new();
+        in_flight.insert("busy".to_string());
+        cleanup_staging_dir(&dir, &in_flight);
+        assert!(dir.join("busy.part").exists());
+        assert!(!dir.join("orphan.part").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sweep_removes_expired_offers_and_keeps_live_ones() {
+        let dir = temp_dir();
+        fs::write(dir.join("old"), b"x").unwrap();
+        write_manifest(&dir, "old", 1, now_ms().saturating_sub(1));
+        fs::write(dir.join("live"), b"x").unwrap();
+        write_manifest(&dir, "live", 1, now_ms() + 60_000);
+        cleanup_staging_dir(&dir, &std::collections::HashSet::new());
+        assert!(!dir.join("old").exists());
+        assert!(!dir.join("old.meta").exists());
+        assert!(dir.join("live").exists());
+        assert!(dir.join("live.meta").exists());
+        let _ = fs::remove_dir_all(dir);
     }
 }
