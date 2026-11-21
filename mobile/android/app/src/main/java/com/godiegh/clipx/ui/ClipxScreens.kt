@@ -423,7 +423,7 @@ fun SendScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         AppTopBar(
-            title = "Sync",
+            title = "Send",
             onBack = onBack,
             elevated = elevated,
         )
@@ -448,6 +448,18 @@ fun SendScreen(
                         )
                     }
                 }
+                /**
+                 * TODO: Later we'll add a way to auto-sync when activity is not visible. aware of what we know about android limitations.
+                 * I think of making the activity or another an overlay on top of other apps but at user consent.
+                 * User explicitly enables auto sync with this toggle, which already does it,
+                 * to mean auto send clipboards as the activity is visible in some ways.
+                 * And in the tile; just clicking below the tile just at the name(tile title) opens a more options screen(if we can make android give it,
+                 * like it does to some tiles. eg. WI-FI one. it is a builtin but I think android can make us write our own too if that is possible or if not we can write a screen/activity
+                 * that clicking the tile opens it).
+                 * We can add an add an overlay over other app toggle to toggle the overlay app button that tricks clipx like it in
+                 * background and auto-sending but the truth is user just focused it to make it enough visible this above feature
+                 * to work on it is own
+                 * */
             }
 
             item {
