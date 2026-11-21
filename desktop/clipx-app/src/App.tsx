@@ -904,17 +904,14 @@ function ClipRow({
   return (
     <div className="clip-row">
       <div className="clip-main">
-        <div style={{ position: "relative" }}>
-          <div>
+        <div className="clip-top">
+          <div className="clip-text">
             <div className="clip-content">{item.content}</div>
             <div className="clip-meta">
               {item.sourceDevice} · {timeAgo(item.receivedAt)}
             </div>
           </div>
-          <div
-            className="clip-actions"
-            style={{ position: "absolute", right: 0, top: 10 }}
-          >
+          <div className="clip-actions">
             {item.kind === "file" && (
               <button
                 className="icon-button"

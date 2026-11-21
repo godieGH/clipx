@@ -629,7 +629,7 @@ button.device-hit:active {
   min-width: 0;
 }
 
-.clip-top { display: flex; align-items: center; gap: 8px; }
+.clip-top { display: flex; align-items: flex-start; gap: 8px; }
 .clip-text { flex: 1; min-width: 0; }
 
 .clip-content {
