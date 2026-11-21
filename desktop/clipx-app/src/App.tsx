@@ -8,7 +8,7 @@ import {
 import { anchorOf } from "./components/Popover";
 import type { Anchor } from "./components/Popover";
 import "./styles/index.css"; // replaces import "./App.css";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -72,6 +72,10 @@ function App() {
   const [currentClipboard, setCurrentClipboard] =
     useState<CurrentClipboard | null>(null);
   const [outgoingFiles, setOutgoingFiles] = useState<PickedFile[]>([]);
+  const outgoingRef = useRef<PickedFile[]>([]);
+  useEffect(() => {
+    outgoingRef.current = outgoingFiles;
+  }, [outgoingFiles]);
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<
     Record<string, TransferProgress>
@@ -213,7 +217,7 @@ function App() {
     }
   }, []);
 
-  const getThisDeviceIdenty = useCallback(async () => {
+  const getThisDeviceIdentity = useCallback(async () => {
     try {
       const result: OwnIdentity = await invoke("get_this_device_identity");
       setOwnIdentity(result);
@@ -230,7 +234,7 @@ function App() {
     // The main window stays hidden until these first requests settle, so it
     // opens already populated instead of flashing empty lists.
     const initialLoads = [
-      getThisDeviceIdenty(),
+      getThisDeviceIdentity(),
       refreshPaired(),
       refreshHistory(),
     ];
@@ -504,15 +508,39 @@ function App() {
     } catch {}
   }, []);
 
-  function addPickedFiles(files: PickedFile[]) {
-    setOutgoingFiles((prev) => {
-      const merged = [...prev];
-      for (const file of files) {
-        if (!merged.some((existing) => existing.path === file.path))
-          merged.push(file);
+  async function addPickedFiles(files: PickedFile[]) {
+    const pool = [...outgoingRef.current];
+    const accepted: PickedFile[] = [];
+    let skipped = 0;
+    for (const file of files) {
+      let dup = pool.some((e) => e.path === file.path);
+      if (!dup) {
+        // Cheap filter first: only compare bytes against same-size files.
+        for (const e of pool.filter((e) => e.size === file.size)) {
+          const same = await invoke<boolean>("files_identical", {
+            a: e.path,
+            b: file.path,
+          }).catch(() => false);
+          if (same) {
+            dup = true;
+            break;
+          }
+        }
       }
-      return merged;
-    });
+      if (dup) skipped++;
+      else {
+        pool.push(file);
+        accepted.push(file);
+      }
+    }
+    if (accepted.length) {
+      setOutgoingFiles((prev) => [
+        ...prev,
+        ...accepted.filter((f) => !prev.some((p) => p.path === f.path)),
+      ]);
+    }
+    if (skipped)
+      showToast(`${skipped} duplicate file${skipped === 1 ? "" : "s"} skipped`);
   }
 
   async function pickFiles() {
@@ -1165,7 +1193,7 @@ function App() {
             title="Device identity"
             onClick={(e) => {
               const anchor = anchorOf(e.currentTarget);
-              getThisDeviceIdenty().finally(() => {
+              getThisDeviceIdentity().finally(() => {
                 if (showIdentityDisabled) return;
                 setIdentityAnchor(anchor);
                 setShowIdentity(true);
