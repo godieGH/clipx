@@ -1,5 +1,6 @@
 package com.godiegh.clipx.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Devices
@@ -737,4 +739,59 @@ private fun connectionLabel(status: ConnectionStatus): String = when (status) {
     ConnectionStatus.CONNECTING -> "Connecting…"
     ConnectionStatus.DISCONNECTED -> "Disconnected"
     ConnectionStatus.UNAVAILABLE -> "Unavailable"
+}
+
+@Composable
+fun SendContentPreview(
+    icon: ImageVector,
+    preview: String,
+    metadata: String,
+    onClear: () -> Unit,
+) {
+    val palette = LocalClipxPalette.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(21.dp),
+        )
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = preview,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = metadata,
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.mutedText,
+            )
+        }
+
+        IconButton(onClick = onClear) {
+            Icon(
+                Icons.Filled.Clear,
+                contentDescription = "Remove content",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

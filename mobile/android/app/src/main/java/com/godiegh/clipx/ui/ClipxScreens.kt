@@ -91,7 +91,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Composable
 fun DevicesScreen(
@@ -123,10 +123,20 @@ fun DevicesScreen(
                     )
                 }
                 IconButton(onClick = onOpenDiagnostics) {
-                    Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Help and diagnostics", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.HelpOutline,
+                        contentDescription = "Help and diagnostics",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(21.dp)
+                    )
                 }
                 IconButton(onClick = onOpenThisDevice) {
-                    Icon(Icons.Filled.PhoneIphone, contentDescription = "Device identity", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(21.dp))
+                    Icon(
+                        Icons.Filled.PhoneIphone,
+                        contentDescription = "Device identity",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(21.dp)
+                    )
                 }
             },
         )
@@ -164,9 +174,18 @@ fun DevicesScreen(
                             modifier = Modifier.padding(vertical = 1.dp),
                         ) {
                             TextButton(onClick = onOpenPair) {
-                                Icon(Icons.Filled.Sensors, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                                Icon(
+                                    Icons.Filled.Sensors,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(17.dp)
+                                )
                                 Spacer(Modifier.width(4.dp))
-                                Text("Scan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    "Scan",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                             }
                         }
                     },
@@ -194,7 +213,12 @@ fun DeviceDetailsScreen(
     if (device == null) {
         Column(modifier = Modifier.fillMaxSize()) {
             ScreenHeader("Device Details", onBack)
-            Text("Device no longer exists.", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(18.dp))
+            Text(
+                "Device no longer exists.",
+                color = palette.mutedText,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(18.dp)
+            )
         }
         return
     }
@@ -204,63 +228,80 @@ fun DeviceDetailsScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader("Device Details", onBack, elevated = elevated)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DeviceAvatar(device.type, size = 64.dp)
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        device.name,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusDot(device.status)
-                        Spacer(Modifier.width(7.dp))
-                        Text(connectionLabel(device.status), color = palette.mutedText, style = MaterialTheme.typography.bodyMedium)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 20.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DeviceAvatar(device.type, size = 64.dp)
+                    Spacer(Modifier.width(13.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            device.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(device.status)
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                connectionLabel(device.status),
+                                color = palette.mutedText,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
                 }
             }
-        }
-        item {
-            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-                    InfoPair("IP Address", device.ipAddress, Modifier.weight(1f))
-                    InfoPair("Port", device.wsPort.toString(), Modifier.weight(1f))
+            item {
+                GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        InfoPair("IP Address", device.ipAddress, Modifier.weight(1f))
+                        InfoPair("Port", device.wsPort.toString(), Modifier.weight(1f))
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = palette.divider
+                    )
+                    InfoPair("Fingerprint", formatFingerprint(device.id), Modifier.fillMaxWidth())
                 }
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    thickness = DividerDefaults.Thickness,
-                    color = palette.divider
-                )
-                InfoPair("Fingerprint", formatFingerprint(device.id), Modifier.fillMaxWidth())
             }
-        }
-        item {
-            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                ToggleRow(
-                    label = "Auto-connect",
-                    description = "Connect automatically when device is available",
-                    checked = device.autoConnect,
-                    onCheckedChange = onAutoConnectChange,
-                )
-            }
-        }
-        item {
-            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                if (device.status == ConnectionStatus.CONNECTED) {
-                    DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
-                    HorizontalDivider(Modifier, DividerDefaults.Thickness, color = palette.divider)
+            item {
+                GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    ToggleRow(
+                        label = "Auto-connect",
+                        description = "Connect automatically when device is available",
+                        checked = device.autoConnect,
+                        onCheckedChange = onAutoConnectChange,
+                    )
                 }
-                DangerRow("Forget Device", Icons.Filled.DeleteForever, onForget)
             }
-        }
+            item {
+                GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    if (device.status == ConnectionStatus.CONNECTED) {
+                        DangerRow("Disconnect", Icons.Filled.WifiOff, onDisconnect)
+                        HorizontalDivider(
+                            Modifier,
+                            DividerDefaults.Thickness,
+                            color = palette.divider
+                        )
+                    }
+                    DangerRow("Forget Device", Icons.Filled.DeleteForever, onForget)
+                }
+            }
         }
     }
 }
@@ -279,44 +320,55 @@ fun PairNewDeviceScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader("Pair New Device", onBack, elevated = elevated)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            ) {
-                ScanRadar()
-                Text("Discovered Nearby Devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
-                Text(
-                    "Make sure the other device has Clipx app open and is reachable.",
-                    color = palette.mutedText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),
-                )
-            }
-        }
-        item { Spacer(Modifier.height(14.dp)) }
-        item { SectionLabel("FOUND DEVICES") }
-        items(availableDevices, key = { it.model.id }) { device ->
-            AvailableDeviceRow(
-                device = device.copy(requesting = requestId == device.model.id),
-                onPair = { onPair(device.model.id) },
-            )
-        }
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                TextButton(onClick = onCantSeeDevice) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 18.dp)
+        ) {
+            item {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                ) {
+                    ScanRadar()
                     Text(
-                        "Can’t see your device?",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge,
+                        "Discovered Nearby Devices",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 1.dp)
+                    )
+                    Text(
+                        "Make sure the other device has Clipx app open and is reachable.",
+                        color = palette.mutedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),
                     )
                 }
             }
-        }
+            item { Spacer(Modifier.height(14.dp)) }
+            item { SectionLabel("FOUND DEVICES") }
+            items(availableDevices, key = { it.model.id }) { device ->
+                AvailableDeviceRow(
+                    device = device.copy(requesting = requestId == device.model.id),
+                    onPair = { onPair(device.model.id) },
+                )
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    TextButton(onClick = onCantSeeDevice) {
+                        Text(
+                            "Can’t see your device?",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -329,51 +381,69 @@ fun ThisDeviceScreen(identity: com.godiegh.clipx.ThisDeviceInfo?, onBack: () -> 
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader("Device Identity", onBack, elevated = elevated)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
-            ) {
-                DeviceAvatar(identity?.deviceType ?: DeviceType.ANDROID, size = 66.dp)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        identity?.name ?: "This device",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "${(identity?.deviceType ?: DeviceType.ANDROID).name.lowercase().replaceFirstChar { it.uppercase() }} • ${identity?.name ?: "Unknown"}",
-                        color = palette.mutedText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                    )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 20.dp)
+        ) {
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
+                ) {
+                    DeviceAvatar(identity?.deviceType ?: DeviceType.ANDROID, size = 66.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            identity?.name ?: "This device",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${
+                                (identity?.deviceType ?: DeviceType.ANDROID).name.lowercase()
+                                    .replaceFirstChar { it.uppercase() }
+                            } • ${identity?.name ?: "Unknown"}",
+                            color = palette.mutedText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
-        }
-        item {
-            GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                InfoPair("Device Name", identity?.name ?: "Unknown", Modifier.fillMaxWidth())
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    thickness = DividerDefaults.Thickness,
-                    color = palette.divider
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                    InfoPair("IP Address", identity?.ipAddress ?: "Unknown", Modifier.weight(1f))
-                    InfoPair("Port", identity?.wsPort?.toString() ?: "Unknown", Modifier.weight(1f))
+            item {
+                GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    InfoPair("Device Name", identity?.name ?: "Unknown", Modifier.fillMaxWidth())
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = palette.divider
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        InfoPair(
+                            "IP Address",
+                            identity?.ipAddress ?: "Unknown",
+                            Modifier.weight(1f)
+                        )
+                        InfoPair(
+                            "Port",
+                            identity?.wsPort?.toString() ?: "Unknown",
+                            Modifier.weight(1f)
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = palette.divider
+                    )
+                    InfoPair("Fingerprint", formatFingerprint(identity?.fingerprint.orEmpty()))
                 }
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    thickness = DividerDefaults.Thickness,
-                    color = palette.divider
-                )
-                InfoPair("Fingerprint", formatFingerprint(identity?.fingerprint.orEmpty()))
             }
-        }
         }
     }
 }
@@ -822,10 +892,23 @@ fun SendScreen(
             item {
                 SectionLabel("AUTO-SYNC")
                 GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Sync, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Filled.Sync,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
                         Spacer(Modifier.width(12.dp))
-                        Text("Sync clipboard when Clipx opens", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Sync clipboard when Clipx opens",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                         Spacer(Modifier.width(10.dp))
                         Switch(
                             checked = autoSyncOnResume,
@@ -962,57 +1045,34 @@ fun SendScreen(
 
                             // Manually written content
                             writtenTextReady -> {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Edit,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(21.dp),
-                                    )
-
-                                    Spacer(Modifier.width(12.dp))
-
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text(
-                                            text = writtenText.orEmpty(),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 3,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-
-                                        Spacer(Modifier.height(4.dp))
-
-                                        Text(
-                                            "Written text",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = palette.mutedText,
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = onClearWrittenText,
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Clear,
-                                            contentDescription = "Remove written text",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
+                                SendContentPreview(
+                                    icon = Icons.Filled.Edit,
+                                    preview = writtenText.orEmpty(),
+                                    metadata = "Written text",
+                                    onClear = onClearWrittenText,
+                                )
                             }
 
                             // Actual system clipboard content
                             clipboardReady -> {
-                                CurrentClipboardItem(
-                                    item = item!!,
+                                val clipboardItem = item!!
+
+                                SendContentPreview(
+                                    icon = when {
+                                        clipboardItem.isImage -> Icons.Filled.Image
+                                        clipboardItem.isFile ->
+                                            Icons.AutoMirrored.Filled.InsertDriveFile
+
+                                        else -> Icons.Filled.ContentCopy
+                                    },
+                                    preview = clipboardItem.fileName
+                                        ?: clipboardItem.text
+                                        ?: if (clipboardItem.isImage) {
+                                            "Image clipboard content"
+                                        } else {
+                                            "Unsupported clipboard content"
+                                        },
+                                    metadata = "From system clipboard",
                                     onClear = onClearClipboard,
                                 )
                             }
@@ -1060,7 +1120,11 @@ fun SendScreen(
                     "FILES",
                     action = {
                         TextButton(onClick = onPickFiles) {
-                            Icon(Icons.Filled.FileOpen, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Icon(
+                                Icons.Filled.FileOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
                             Spacer(Modifier.width(4.dp))
                             Text("Add files", style = MaterialTheme.typography.labelMedium)
                         }
@@ -1071,9 +1135,18 @@ fun SendScreen(
                 item {
                     GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = palette.mutedText, modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.InsertDriveFile,
+                                contentDescription = null,
+                                tint = palette.mutedText,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Spacer(Modifier.width(10.dp))
-                            Text("No files selected", style = MaterialTheme.typography.bodyMedium, color = palette.mutedText)
+                            Text(
+                                "No files selected",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.mutedText
+                            )
                         }
                     }
                 }
@@ -1081,15 +1154,37 @@ fun SendScreen(
                 items(pendingFiles.indices.toList(), key = { it }) { index ->
                     val file = pendingFiles[index]
                     GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.InsertDriveFile,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(21.dp)
+                            )
                             Spacer(Modifier.width(11.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-                                Text("${file.mimeType}  ·  ${formatFileSize(file.size)}", color = palette.mutedText, style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    file.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "${file.mimeType}  ·  ${formatFileSize(file.size)}",
+                                    color = palette.mutedText,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                             }
                             IconButton(onClick = { onRemovePendingFile(index) }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Remove ${file.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(
+                                    Icons.Filled.Clear,
+                                    contentDescription = "Remove ${file.name}",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -1108,7 +1203,9 @@ fun SendScreen(
             border = androidx.compose.foundation.BorderStroke(1.dp, palette.cardBorder),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -1159,8 +1256,19 @@ fun SendScreen(
                     enabled = canSend && !sendingFiles,
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    if (sendingFiles) { androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp) } else { Icon(
-                        Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    if (sendingFiles) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(
+                                17.dp
+                            ), strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     Spacer(Modifier.width(7.dp))
                     Text(if (sendingFiles) "Preparing…" else "Send")
                 }
@@ -1180,7 +1288,11 @@ fun DiagnosticsScreen(
     val clipboardManager = LocalClipboardManager.current
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
-    LaunchedEffect(Unit) { while (true) { onRefresh(); delay(1_000.milliseconds) } }
+    LaunchedEffect(Unit) {
+        while (true) {
+            onRefresh(); delay(1_000.milliseconds)
+        }
+    }
     LaunchedEffect(logs.lastOrNull()) { if (logs.isNotEmpty()) listState.animateScrollToItem(logs.lastIndex) }
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader(
@@ -1189,27 +1301,68 @@ fun DiagnosticsScreen(
             elevated = elevated,
             rightContent = {
                 IconButton(onClick = onRefresh) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh diagnostics", tint = MaterialTheme.colorScheme.onSurface)
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = "Refresh diagnostics",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
-                IconButton(onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) }, enabled = logs.isNotEmpty()) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy diagnostic logs", tint = MaterialTheme.colorScheme.onSurface)
+                IconButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) },
+                    enabled = logs.isNotEmpty()
+                ) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = "Copy diagnostic logs",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
                 IconButton(onClick = onClear, enabled = logs.isNotEmpty()) {
-                    Icon(Icons.Filled.DeleteForever, contentDescription = "Clear diagnostic logs", tint = MaterialTheme.colorScheme.onSurface)
+                    Icon(
+                        Icons.Filled.DeleteForever,
+                        contentDescription = "Clear diagnostic logs",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             },
         )
         GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp)) {
-            Text("Live diagnostic logs", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                "Live diagnostic logs",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(Modifier.height(5.dp))
-            Text("This in-memory feed keeps up to 250 recent ClipX core/bridge events while the app process is running. It is not the full Android system log. Review entries before sharing them.", style = MaterialTheme.typography.bodySmall, color = palette.mutedText)
+            Text(
+                "This in-memory feed keeps up to 250 recent ClipX core/bridge events while the app process is running. It is not the full Android system log. Review entries before sharing them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.mutedText
+            )
         }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp)
+        ) {
             if (logs.isEmpty()) item {
-                Text("Waiting for ClipX events…", style = MaterialTheme.typography.bodyMedium, color = palette.mutedText, modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp))
+                Text(
+                    "Waiting for ClipX events…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.mutedText,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp)
+                )
             } else items(logs) { line ->
                 SelectionContainer {
-                    Text(line, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp))
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
                 }
             }
         }
@@ -1316,7 +1469,10 @@ fun HistoryScreen(
     var query by remember { mutableStateOf("") }
     val palette = LocalClipxPalette.current
     val filtered = items.filter {
-        query.isBlank() || it.content.contains(query, ignoreCase = true) || it.sourceDevice.contains(query, ignoreCase = true)
+        query.isBlank() || it.content.contains(
+            query,
+            ignoreCase = true
+        ) || it.sourceDevice.contains(query, ignoreCase = true)
     }
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
@@ -1325,7 +1481,11 @@ fun HistoryScreen(
         if (search) {
             TopBarSurface(elevated = elevated) {
                 IconButton(onClick = { query = ""; onSearchChange(false) }) {
-                    Icon(Icons.Filled.Clear, contentDescription = "Close search", tint = MaterialTheme.colorScheme.onSurface)
+                    Icon(
+                        Icons.Filled.Clear,
+                        contentDescription = "Close search",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
                 OutlinedTextField(
                     value = query,
@@ -1333,9 +1493,23 @@ fun HistoryScreen(
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                     shape = RoundedCornerShape(50),
-                    placeholder = { Text("Search history", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium) },
+                    placeholder = {
+                        Text(
+                            "Search history",
+                            color = palette.mutedText,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
                     trailingIcon = if (query.isNotEmpty()) {
-                        { IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear search", tint = palette.mutedText) } }
+                        {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(
+                                    Icons.Filled.Clear,
+                                    contentDescription = "Clear search",
+                                    tint = palette.mutedText
+                                )
+                            }
+                        }
                     } else null,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = MaterialTheme.colorScheme.onBackground,
@@ -1356,20 +1530,41 @@ fun HistoryScreen(
                 elevated = elevated,
                 rightContent = {
                     IconButton(onClick = { onSearchChange(true) }) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search history", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Search history",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                     TextButton(onClick = onClearAll, enabled = items.isNotEmpty()) {
-                        Text("Clear all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Clear all",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 },
             )
         }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 18.dp)
+        ) {
             item {
-                Text("${filtered.size} items", color = palette.mutedText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp))
+                Text(
+                    "${filtered.size} items",
+                    color = palette.mutedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp)
+                )
             }
             items(filtered, key = { it.id }) { item ->
-                HistoryListItem(item, transfer = fileTransfers[item.id], onCopy = { onCopyItem(item) }, onActions = { onItemActions(item) })
+                HistoryListItem(
+                    item,
+                    transfer = fileTransfers[item.id],
+                    onCopy = { onCopyItem(item) },
+                    onActions = { onItemActions(item) })
             }
         }
     }
@@ -1383,8 +1578,14 @@ private fun HistoryListItem(
     onActions: () -> Unit,
 ) {
     val palette = LocalClipxPalette.current
-    val transferActive = transfer?.state == "requesting" || transfer?.state == "receiving" || transfer?.state == "sending" || transfer?.state == "saving"
-    val transferPercent = transfer?.let { if (it.total > 0) ((it.done.toFloat() / it.total.toFloat()).coerceIn(0f, 1f)) else 0f } ?: 0f
+    val transferActive =
+        transfer?.state == "requesting" || transfer?.state == "receiving" || transfer?.state == "sending" || transfer?.state == "saving"
+    val transferPercent = transfer?.let {
+        if (it.total > 0) ((it.done.toFloat() / it.total.toFloat()).coerceIn(
+            0f,
+            1f
+        )) else 0f
+    } ?: 0f
     val downloadDisabled = item.fileDownloaded || transferActive
     var offerExpired by remember(item.id, item.fileExpiresAtMs, item.fileDownloaded) {
         mutableStateOf(item.type == ClipType.FILE && !item.fileDownloaded && item.fileExpiresAtMs > 0L && System.currentTimeMillis() >= item.fileExpiresAtMs)
@@ -1399,11 +1600,17 @@ private fun HistoryListItem(
     GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().height(76.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(76.dp),
         ) {
             HistoryTypeBadge(item.type)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f).height(54.dp), verticalArrangement = Arrangement.Center) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .height(54.dp), verticalArrangement = Arrangement.Center
+            ) {
                 Text(
                     item.preview,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1421,29 +1628,61 @@ private fun HistoryListItem(
                 )
             }
             val downloading = item.type == ClipType.FILE && transferActive
-            IconButton(onClick = onCopy, enabled = !offerExpired && !downloadDisabled, modifier = Modifier.size(40.dp)) {
+            IconButton(
+                onClick = onCopy,
+                enabled = !offerExpired && !downloadDisabled,
+                modifier = Modifier.size(40.dp)
+            ) {
                 when {
-                    item.type != ClipType.FILE -> Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
-                    downloading -> androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    item.fileDownloaded -> Icon(Icons.Filled.FileOpen, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.primary)
-                    else -> Icon(Icons.Filled.FileDownload, contentDescription = "Download file", tint = MaterialTheme.colorScheme.onSurface)
+                    item.type != ClipType.FILE -> Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    downloading -> androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(
+                            20.dp
+                        ), strokeWidth = 2.dp
+                    )
+
+                    item.fileDownloaded -> Icon(
+                        Icons.Filled.FileOpen,
+                        contentDescription = "Downloaded",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+
+                    else -> Icon(
+                        Icons.Filled.FileDownload,
+                        contentDescription = "Download file",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
             IconButton(onClick = onActions, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "Item actions",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         if (item.type == ClipType.FILE) {
             when {
                 transfer?.state == "requesting" || transfer?.state == "saving" -> {
                     androidx.compose.material3.LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 5.dp),
                     )
                 }
+
                 else -> {
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { if (item.fileDownloaded || transfer?.state == "complete") 1f else transferPercent },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 5.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 5.dp),
                     )
                 }
             }
