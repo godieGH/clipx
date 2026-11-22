@@ -38,8 +38,14 @@ impl Engine for NotificationEngine {
         _timeout: Duration,
     ) -> NotificationFuture<'a, PairDecision> {
         Box::pin(async move {
+            let prompt_kind = match &prompt {
+                Prompt::PairRequest { .. } => "pair_request",
+                Prompt::ConfirmCode { .. } => "pair_code_confirmation",
+                Prompt::IncomingClipboard { .. } => "incoming_clipboard",
+            };
             tracing::warn!(
-                "notification engine not implemented on this platform — auto-denying: {prompt:?}"
+                prompt_kind,
+                "notification engine unavailable on this platform; pairing prompt cannot be shown"
             );
             PairDecision::NoResponse
         })
@@ -51,8 +57,14 @@ impl Engine for NotificationEngine {
         _timeout: Duration,
     ) -> NotificationFuture<'a, IncomingClipboardDecision> {
         Box::pin(async move {
+            let prompt_kind = match &prompt {
+                Prompt::PairRequest { .. } => "pair_request",
+                Prompt::ConfirmCode { .. } => "pair_code_confirmation",
+                Prompt::IncomingClipboard { .. } => "incoming_clipboard",
+            };
             tracing::warn!(
-                "notification engine not implemented on this platform — auto-ignoring: {prompt:?}"
+                prompt_kind,
+                "notification engine unavailable on this platform; clipboard prompt cannot be shown"
             );
             IncomingClipboardDecision::Ignore
         })
@@ -60,7 +72,7 @@ impl Engine for NotificationEngine {
 
     fn notify_info<'a>(&'a self, title: &'a str, body: String) -> NotificationFuture<'a, ()> {
         Box::pin(async move {
-            tracing::info!("[{title}] {body}");
+            tracing::info!(title, body_bytes = body.len(), "notification requested");
         })
     }
 

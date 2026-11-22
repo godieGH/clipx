@@ -14,6 +14,12 @@ pub fn log_directory() -> PathBuf {
 }
 
 /// Keep a rolling file in debug and release builds; debug also logs to stderr.
+///
+/// `RUST_LOG` controls the maximum verbosity through `tracing_subscriber`'s
+/// `EnvFilter`. With no override the core starts at `info`. For example,
+/// `RUST_LOG=clipx_core=trace` enables every core event, while a narrower
+/// directive such as `RUST_LOG=clipx_core::netio::transport=trace,clipx_core=info`
+/// enables deep transport diagnostics without making the rest of the core noisy.
 pub fn init() -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let dir = log_directory();

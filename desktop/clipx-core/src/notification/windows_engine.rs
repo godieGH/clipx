@@ -174,10 +174,21 @@ impl NotificationEngine {
             tracing::error!(?error, "failed to show toast");
             return map_action(None);
         }
+        tracing::trace!(
+            buttons = buttons.len(),
+            timeout_ms = timeout.as_millis() as u64,
+            "Windows notification prompt displayed"
+        );
 
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(decision)) => decision,
-            Ok(Err(_)) => map_action(None),
+            Ok(Ok(decision)) => {
+                tracing::trace!("Windows notification prompt completed");
+                decision
+            }
+            Ok(Err(_)) => {
+                tracing::debug!("Windows notification prompt response channel closed");
+                map_action(None)
+            }
             Err(_) => {
                 tracing::debug!("notification prompt timed out while toast may still be visible");
                 map_action(None)
@@ -354,6 +365,14 @@ fn handle_transfer_notification(
     states: &mut HashMap<String, FileToastState>,
     mut event: TransferNotification,
 ) {
+    tracing::trace!(
+        file_id = %event.file_id,
+        direction = %event.direction,
+        state = %event.state,
+        done = event.done,
+        total = event.total,
+        "Windows transfer notification event received"
+    );
     let completion = event.completion.take();
 
     let TransferNotification {
@@ -587,7 +606,7 @@ fn handle_terminal_notification(
     notification_title: &str,
     _progress_text: &ProgressText,
 ) -> windows::core::Result<()> {
-    tracing::info!(%file_id, %state, %direction, %message, "terminal notification");
+    tracing::info!(%file_id, %state, %direction, done, total = _total, "terminal notification");
 
     let previous = states.remove(file_id);
 

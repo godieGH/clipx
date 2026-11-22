@@ -271,6 +271,14 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         message: impl Into<String>,
     ) {
         let message = message.into();
+        if matches!(
+            state,
+            "complete" | "failed" | "expired" | "cancelled" | "interrupted"
+        ) {
+            tracing::debug!(%file_id, direction, state, done, total, "clipboard file transfer state changed");
+        } else {
+            tracing::trace!(%file_id, direction, state, done, total, "clipboard file transfer progress");
+        }
         let _ = self.events_tx.send(CoreEvent::FileTransferChanged {
             entry_id: entry_id.to_string(),
             file_id: file_id.to_string(),
@@ -306,6 +314,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         shutdown_rx: watch::Receiver<bool>,
         mut command_rx: mpsc::UnboundedReceiver<ClipboardCommand>,
     ) {
+        tracing::info!("clipboard manager started");
         let (watcher_tx, mut watcher_rx) = mpsc::unbounded_channel();
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         let watcher_task = tokio::spawn(super::watcher::watch_clipboard(
@@ -329,9 +338,14 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         }
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         let _ = watcher_task.await;
+        tracing::info!("clipboard manager stopped");
     }
 
     fn handle_command(&mut self, cmd: ClipboardCommand) {
+        tracing::trace!(
+            command = clipboard_command_name(&cmd),
+            "clipboard command received"
+        );
         self.cleanup_expired_files();
         match cmd {
             ClipboardCommand::GetHistory { limit, reply_to } => {
@@ -424,6 +438,13 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         if !self.validate_clipboard_payload(&payload) {
             return;
         }
+        let (kind, bytes, items) = payload_metrics(&payload);
+        tracing::debug!(
+            kind,
+            bytes,
+            items,
+            "local clipboard payload submitted for sending"
+        );
         self.remember_hash(payload_hash(&payload));
         self.emit_local_payload(payload);
     }
@@ -432,10 +453,18 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         if !self.validate_clipboard_payload(&payload) {
             return;
         }
+        let (kind, bytes, items) = payload_metrics(&payload);
         let hash = payload_hash(&payload);
         if self.recent_hashes.contains(&hash) {
+            tracing::trace!(
+                kind,
+                bytes,
+                items,
+                "duplicate local clipboard change ignored"
+            );
             return;
         }
+        tracing::debug!(kind, bytes, items, "local clipboard change accepted");
         self.remember_hash(hash);
         self.emit_local_payload(payload);
     }
@@ -504,7 +533,9 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 mime_type,
                 data,
             } => {
-                let _ = self.store_file_offer_from_bytes(name, mime_type, data);
+                if let Err(error) = self.store_file_offer_from_bytes(name, mime_type, data) {
+                    tracing::warn!(%error, "failed to stage clipboard file bytes");
+                }
             }
             ClipboardPayload::Image {
                 width,
@@ -554,6 +585,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         reply_to: Option<oneshot::Sender<Result<(), String>>>,
     ) {
         let file_id = uuid::Uuid::new_v4().to_string();
+        tracing::trace!(%file_id, take_ownership, "starting clipboard file staging");
         self.staging_in_flight.insert(file_id.clone());
         let files_dir = self.files_dir.clone();
         let staged_tx = self.staged_tx.clone();
@@ -581,17 +613,19 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             reply_to,
         } = staged;
         self.staging_in_flight.remove(&file_id);
+        let staged_file_id = file_id.clone();
         let outcome =
             result.and_then(|size| self.finish_file_offer(file_id, name, mime_type, part, size));
-        match reply_to {
-            Some(reply_to) => {
-                let _ = reply_to.send(outcome.map(|_| ()));
+        match &outcome {
+            Ok(offered_file_id) => {
+                tracing::debug!(file_id = %offered_file_id, "clipboard file staged and offered")
             }
-            None => {
-                if let Err(error) = outcome {
-                    tracing::warn!("could not stage clipboard file: {error}");
-                }
+            Err(error) => {
+                tracing::warn!(file_id = %staged_file_id, %error, "clipboard file staging failed")
             }
+        }
+        if let Some(reply_to) = reply_to {
+            let _ = reply_to.send(outcome.map(|_| ()));
         }
     }
 
@@ -691,6 +725,13 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         source_device_name: String,
         source_device_id: String,
     ) {
+        let (kind, bytes) = match &payload {
+            IncomingPayload::Text(text) => ("text", text.len()),
+            IncomingPayload::RichText { text, html } => ("rich_text", text.len() + html.len()),
+            IncomingPayload::Image { rgba, .. } => ("image", rgba.len()),
+            IncomingPayload::FileOffer { file } => ("file_offer", file.size as usize),
+        };
+        tracing::debug!(%source_device_id, kind, bytes, "incoming clipboard content received");
         match &payload {
             IncomingPayload::Text(text) if text.len() > MAX_CLIPBOARD_TEXT_BYTES => {
                 self.notify_info(
@@ -837,6 +878,11 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
 
     fn on_incoming_resolved(&mut self, resolved: IncomingResolved) {
+        tracing::debug!(
+            entry_id = %resolved.entry_id,
+            decision = ?resolved.decision,
+            "incoming clipboard prompt resolved"
+        );
         let entry_id = resolved.entry_id;
         if resolved.decision != IncomingClipboardDecision::Copy {
             return;
@@ -952,6 +998,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             .clone()
             .unwrap_or_else(|| "application/octet-stream".into());
         let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        tracing::debug!(%file_id, bytes = size, "saving completed clipboard file download");
         self.notify_transfer(
             &entry_id,
             &file_id,
@@ -981,6 +1028,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 self.release_download(&file_id);
             }
             Err(e) => {
+                tracing::warn!(%file_id, error = %e, "failed to save completed clipboard file download");
                 self.notify_transfer(&entry_id, &file_id, &name, "download", 0, size, "failed", e);
                 self.release_download(&file_id);
             }
@@ -1229,12 +1277,19 @@ fn stage_blob(
     let linked = find_identical_offer(files_dir, source, size)
         .is_some_and(|existing| fs::hard_link(files_dir.join(existing), destination).is_ok());
     if linked {
+        tracing::trace!(
+            bytes = size,
+            strategy = "hard_link",
+            "clipboard file staged"
+        );
         return Ok(StageHow::Linked);
     }
     if take_ownership && fs::rename(source, destination).is_ok() {
+        tracing::trace!(bytes = size, strategy = "move", "clipboard file staged");
         return Ok(StageHow::Moved);
     }
-    fs::copy(source, destination).map_err(|e| e.to_string())?;
+    let copied = fs::copy(source, destination).map_err(|e| e.to_string())?;
+    tracing::trace!(bytes = copied, strategy = "copy", "clipboard file staged");
     Ok(StageHow::Copied)
 }
 
@@ -1334,6 +1389,34 @@ fn cleanup_staging_dir(files_dir: &Path, in_flight: &std::collections::HashSet<S
     }
 }
 
+/// Metadata safe for logs: never includes clipboard text, image bytes, or file contents.
+fn payload_metrics(payload: &ClipboardPayload) -> (&'static str, usize, usize) {
+    match payload {
+        ClipboardPayload::Text(text) => ("text", text.len(), 1),
+        ClipboardPayload::RichText { text, html } => ("rich_text", text.len() + html.len(), 1),
+        ClipboardPayload::Image { rgba, .. } => ("image", rgba.len(), 1),
+        ClipboardPayload::Files(paths) => ("files", 0, paths.len()),
+        ClipboardPayload::FileBytes { data, .. } => ("file_bytes", data.len(), 1),
+        ClipboardPayload::FilePath { .. } => ("file_path", 0, 1),
+    }
+}
+
+fn clipboard_command_name(command: &ClipboardCommand) -> &'static str {
+    match command {
+        ClipboardCommand::GetHistory { .. } => "get_history",
+        ClipboardCommand::RemoveEntry { .. } => "remove_entry",
+        ClipboardCommand::ClearHistory { .. } => "clear_history",
+        ClipboardCommand::IncomingRemote { .. } => "incoming_remote",
+        ClipboardCommand::IncomingFilePath { .. } => "incoming_file_path",
+        ClipboardCommand::LocalChangeDetected { .. } => "local_change_detected",
+        ClipboardCommand::SendLocal { .. } => "send_local",
+        ClipboardCommand::SendFilePath { .. } => "send_file_path",
+        ClipboardCommand::PeerFileDownloadRequest { .. } => "peer_file_download_request",
+        ClipboardCommand::DownloadHistoryFile { .. } => "download_history_file",
+        ClipboardCommand::FileDownloadReleased { .. } => "file_download_released",
+        ClipboardCommand::ResumeDownload { .. } => "resume_download",
+    }
+}
 fn payload_hash(p: &ClipboardPayload) -> u64 {
     let mut h = DefaultHasher::new();
     match p {

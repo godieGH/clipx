@@ -244,7 +244,7 @@ impl Transport {
             let outbound_enqueue_us = started.elapsed().as_micros() as u64;
 
             if let Some(trace) = trace {
-                tracing::debug!(
+                tracing::trace!(
                     %device_id,
                     %connection_id,
                     message_type = trace.message_type,
@@ -273,6 +273,7 @@ impl Transport {
                 addr,
                 reply_to,
             } => {
+                tracing::debug!(%device_id, %addr, "outbound transport connection requested");
                 if self.connections.contains_key(&device_id) {
                     tracing::warn!(
                         "dial requested for {device_id} which is already registered; ignoring (state caller)"
@@ -506,6 +507,7 @@ impl Transport {
                 if let Some(r) = reply_to {
                     let _ = r.send(true);
                 }
+                tracing::debug!(%device_id, %connection_id, %addr, "transport connection registered");
                 let _ = self
                     .event_tx
                     .send(TransportEvent::Connected(ConnectedDevice {
@@ -533,6 +535,7 @@ impl Transport {
                     .is_some_and(|c| c.connection_id == connection_id)
                 {
                     self.connections.remove(&device_id);
+                    tracing::debug!(%device_id, %connection_id, "active transport connection closed");
                     let _ = self.event_tx.send(TransportEvent::Disconnected {
                         device_id,
                         connection_id,
@@ -549,6 +552,7 @@ impl Transport {
         let event_tx = self.event_tx.clone();
 
         tokio::spawn(async move {
+            let tcp_started = Instant::now();
             let stream = match tokio::time::timeout(
                 Duration::from_secs(8),
                 TcpStream::connect(addr),
@@ -573,6 +577,8 @@ impl Transport {
                     return;
                 }
             };
+            tracing::debug!(%device_id, %addr, tcp_connect_us = tcp_started.elapsed().as_micros() as u64, "outbound TCP connection established");
+            let ws_started = Instant::now();
             let ws = match client_async(format!("ws://{addr}/"), stream).await {
                 Ok((ws, _resp)) => ws,
                 Err(e) => {
@@ -584,6 +590,7 @@ impl Transport {
                     return;
                 }
             };
+            tracing::debug!(%device_id, %addr, websocket_handshake_us = ws_started.elapsed().as_micros() as u64, "outbound WebSocket handshake completed");
             let connection_id = Uuid::new_v4().to_string();
             let (outbound_tx, outbound_rx) = mpsc::channel(8);
             let _ = register_tx.send(Registration::Ok {
@@ -617,6 +624,7 @@ impl Transport {
 
         tokio::spawn(async move {
             let _permit = permit;
+            let handshake_started = Instant::now();
             let mut ws =
                 match tokio::time::timeout(Duration::from_secs(10), accept_async(stream)).await {
                     Ok(Ok(ws)) => ws,
@@ -631,6 +639,7 @@ impl Transport {
                         return;
                     }
                 };
+            tracing::trace!(%addr, websocket_handshake_us = handshake_started.elapsed().as_micros() as u64, "inbound WebSocket handshake completed");
 
             // First frame must self-identify — a fresh PairRequest (carries
             // a public key + fingerprint) or a ConnectChallenge (carries the
@@ -663,6 +672,7 @@ impl Transport {
                     return;
                 }
             };
+            tracing::debug!(%device_id, %addr, "inbound peer identified itself");
 
             let connection_id = Uuid::new_v4().to_string();
             let (outbound_tx, outbound_rx) = mpsc::channel(8);
@@ -718,6 +728,7 @@ async fn run_connection(
     event_tx: mpsc::UnboundedSender<TransportEvent>,
     register_tx: mpsc::UnboundedSender<Registration>,
 ) {
+    tracing::debug!(%device_id, %connection_id, "transport connection task started");
     let mut ping_interval = tokio::time::interval(Duration::from_secs(15));
     // ACK-path profiling: when the last FileChunk finished `ws.send`, and when
     // the last FileChunk frame arrived from the peer.
@@ -726,7 +737,11 @@ async fn run_connection(
     loop {
         tokio::select! {
             _ = ping_interval.tick() => {
-                if ws.send(WsMessage::Ping(Vec::new().into())).await.is_err() { break; }
+                tracing::trace!(%device_id, %connection_id, "sending transport ping");
+                if let Err(error) = ws.send(WsMessage::Ping(Vec::new().into())).await {
+                    tracing::debug!(%device_id, %connection_id, %error, "transport ping failed; closing connection");
+                    break;
+                }
             }
             outbound = outbound_rx.recv() => {
                 match outbound {
@@ -742,7 +757,8 @@ async fn run_connection(
 
                         // Actual WebSocket send duration (local; not remote delivery).
                         let started = Instant::now();
-                        let success = ws.send(message).await.is_ok();
+                        let send_result = ws.send(message).await;
+                        let success = send_result.is_ok();
                         let done = Instant::now();
                         let ws_send_us = done.duration_since(started).as_micros() as u64;
 
@@ -750,7 +766,7 @@ async fn run_connection(
                             Some("FileChunk") => last_big_send_done = Some(done),
                             Some("FileChunkAck") => {
                                 if let Some(rx_at) = last_big_rx.take() {
-                                    tracing::debug!(
+                                    tracing::trace!(
                                         %device_id,
                                         rx_to_ack_sent_us = done.duration_since(rx_at).as_micros() as u64,
                                         "transport ack leave profile"
@@ -761,7 +777,7 @@ async fn run_connection(
                         }
 
                         if let Some(trace) = trace {
-                            tracing::debug!(
+                            tracing::trace!(
                                 %device_id,
                                 %connection_id,
                                 message_type = trace.message_type,
@@ -776,7 +792,8 @@ async fn run_connection(
                             );
                         }
 
-                        if !success {
+                        if let Err(error) = send_result {
+                            tracing::warn!(%device_id, %connection_id, %error, "transport WebSocket send failed; closing connection");
                             break;
                         }
                     }
@@ -792,6 +809,7 @@ async fn run_connection(
                         match proto::PeerMessage::decode(bytes.as_ref()) {
                             Ok(message) => {
                                 let decode_us = started.elapsed().as_micros() as u64;
+                                tracing::trace!(%device_id, wire_bytes = bytes.len(), decode_us, "transport frame decoded");
 
                                 let profile = MessageTrace::from_message(&message).map(|trace| {
                                     InboundMessageProfile {
@@ -805,7 +823,7 @@ async fn run_connection(
                                     Some("FileChunk") => last_big_rx = Some(started),
                                     Some("FileChunkAck") => {
                                         if let Some(sent_at) = last_big_send_done.take() {
-                                            tracing::debug!(
+                                            tracing::trace!(
                                                 %device_id,
                                                 send_done_to_ack_us = started.duration_since(sent_at).as_micros() as u64,
                                                 "transport ack arrive profile"
@@ -833,6 +851,7 @@ async fn run_connection(
         }
     }
     let _ = ws.close(None).await;
+    tracing::debug!(%device_id, %connection_id, "transport connection task stopped");
     let _ = register_tx.send(Registration::Closed {
         device_id: device_id.clone(),
         connection_id: connection_id.clone(),

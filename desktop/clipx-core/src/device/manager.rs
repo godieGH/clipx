@@ -38,6 +38,40 @@ macro_rules! shorter {
     }};
 }
 
+fn device_command_name(command: &DeviceCommands) -> &'static str {
+    match command {
+        DeviceCommands::GetSeen { .. } => "get_seen",
+        DeviceCommands::Pair { .. } => "pair",
+        DeviceCommands::Connect { .. } => "connect",
+        DeviceCommands::Connected { .. } => "connected",
+        DeviceCommands::GetIdentity { .. } => "get_identity",
+        DeviceCommands::GetPaired { .. } => "get_paired",
+        DeviceCommands::Disconnect { .. } => "disconnect",
+        DeviceCommands::SetAutoConnect { .. } => "set_auto_connect",
+        DeviceCommands::ForgetDevice { .. } => "forget_device",
+        DeviceCommands::PendingPairings { .. } => "pending_pairings",
+        DeviceCommands::ApprovePairing { .. } => "approve_pairing",
+    }
+}
+
+fn peer_message_name(body: &Body) -> &'static str {
+    match body {
+        Body::PairRequest(_) => "pair_request",
+        Body::PairResponse(_) => "pair_response",
+        Body::PairChallenge(_) => "pair_challenge",
+        Body::PairChallengeResponse(_) => "pair_challenge_response",
+        Body::PairAck(_) => "pair_ack",
+        Body::ConnectChallenge(_) => "connect_challenge",
+        Body::ConnectChallengeResponse(_) => "connect_challenge_response",
+        Body::ConnectAck(_) => "connect_ack",
+        Body::Control(_) => "control",
+        Body::Clipboard(_) => "clipboard",
+        Body::FileDownloadRequest(_) => "file_download_request",
+        Body::FileChunk(_) => "file_chunk",
+        Body::FileChunkAck(_) => "file_chunk_ack",
+        Body::FileTransferCancel(_) => "file_transfer_cancel",
+    }
+}
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RICH_TEXT_BYTES: usize = 8 * 1024 * 1024;
@@ -307,10 +341,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         mut clipboard_out_rx: mpsc::UnboundedReceiver<ClipboardOutbound>,
         clipboard_tx: mpsc::UnboundedSender<ClipboardCommand>,
     ) {
+        tracing::info!("device manager started");
         let mut prune_interval = tokio::time::interval(Duration::from_secs(10));
         let mut incoming_cleanup_interval = tokio::time::interval(STALE_INCOMING_CLEANUP_INTERVAL);
         incoming_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         self.load_resume_candidates();
+        tracing::debug!(
+            resume_candidates = self.resume_candidates.len(),
+            "incoming transfer resume state loaded"
+        );
         let notify_tx = self.notify_tx.clone();
 
         loop {
@@ -334,7 +373,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     self.prune_expired_sessions();
                     self.check_stalled_downloads();
                 }
-                Some(cmd) = device_rx.recv() => { self.handle_device_command(cmd).await; }
+                Some(cmd) = device_rx.recv() => {
+                    let command = device_command_name(&cmd);
+                    let started = Instant::now();
+                    self.handle_device_command(cmd).await;
+                    tracing::trace!(command, elapsed_us = started.elapsed().as_micros() as u64, "device command processed");
+                }
                 Some(event) = peer_event_rx.recv() => { self.handle_transport_event(event, &notify_tx); }
                 Some(result) = self.notify_rx.recv() => { self.handle_notify_result(result); }
                 // The clipboard component decided its content changed and
@@ -530,6 +574,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 String::from(device_type),
                 announce.device_name
             );
+        } else {
+            tracing::trace!(device_id = %shorter!(&device_id), %addr, ws_port = announce.ws_port, "peer discovery announcement refreshed");
         }
 
         self.seen.upsert(SeenDevice {
@@ -578,6 +624,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             device_id.to_string(),
             PairSession::new_initiator(addr, seen.device_type),
         );
+        tracing::debug!(device_id = %shorter!(device_id), "pairing initiated");
         self.notify_pair_events(
             device_id,
             proto::pairing_event::State::Started as i32,
@@ -707,7 +754,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 let manager_dispatch_us = started.elapsed().as_micros() as u64;
 
                 if let Some(profile) = profile {
-                    tracing::debug!(
+                    tracing::trace!(
                         device_id = %device_id_for_log,
                         connection_id = %connection_id_for_log,
                         message_type = profile.trace.message_type,
@@ -902,6 +949,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         message: proto::PeerMessage,
         notify_tx: &mpsc::UnboundedSender<NotifyResult>,
     ) {
+        if let Some(body) = message.body.as_ref() {
+            tracing::trace!(
+                device_id = %shorter!(&device_id),
+                %connection_id,
+                message_kind = peer_message_name(body),
+                "peer protocol message dispatched"
+            );
+        }
         if self
             .connected
             .get(&device_id)
@@ -1805,6 +1860,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
     fn on_file_chunk(&mut self, device_id: String, chunk: proto::FileChunk) {
         let handler_start = Instant::now();
+        tracing::trace!(
+            device_id = %shorter!(&device_id),
+            file_id = %chunk.file_id,
+            seq = chunk.seq,
+            offset = chunk.offset,
+            bytes = chunk.data.len(),
+            eof = chunk.eof,
+            "file download chunk received"
+        );
 
         let Some(pending) = self.pending_downloads.get(&chunk.file_id).cloned() else {
             return;
@@ -1968,6 +2032,17 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             p.handler.record(handler_start.elapsed());
             p.bytes += chunk.data.len() as u64;
         }
+        tracing::trace!(
+            device_id = %shorter!(&device_id),
+            file_id = %chunk.file_id,
+            seq = chunk.seq,
+            offset = chunk.offset,
+            bytes = chunk.data.len(),
+            hash_us = hash_time.as_micros() as u64,
+            resume_state_us = resume_time.as_micros() as u64,
+            ack_enqueue_us = ack_time.as_micros() as u64,
+            "file download chunk processed"
+        );
         if chunk.eof {
             if new_offset != pending.total_size {
                 self.abort_download(&chunk.file_id, "File ended before all data arrived");
@@ -2036,6 +2111,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn on_file_chunk_ack(&mut self, device_id: String, ack: proto::FileChunkAck) {
+        tracing::trace!(%device_id, file_id = %ack.file_id, confirmed_offset = ack.confirmed_offset, "file upload acknowledgement received");
         if let Some(session) = self.upload_sessions.get(&(device_id, ack.file_id)) {
             let _ = session.ack_tx.send(ack.confirmed_offset);
         }
@@ -2239,6 +2315,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let Some(connection_id) = self.connected.get(&device_id).cloned() else {
             return;
         };
+        tracing::debug!(%device_id, %file_id, total_size, start_offset, "file upload session starting");
 
         // The receiver asked again while an older stream for the same file was
         // still registered (for example that task is bound to a socket that has
@@ -2387,8 +2464,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                             }
                         }
                     };
-                    profile.queue.record(t.elapsed());
+                    let queue_elapsed = t.elapsed();
+                    profile.queue.record(queue_elapsed);
                     queue_result?;
+                    tracing::trace!(
+                        %file_id, seq, offset, chunk_bytes = n,
+                        queue_us = queue_elapsed.as_micros() as u64,
+                        "file upload chunk queued"
+                    );
 
                     let t = Instant::now();
                     let ack_result: Result<(), String> = tokio::select! {
@@ -2402,8 +2485,14 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                             }
                         }
                     };
-                    profile.ack_wait.record(t.elapsed());
+                    let ack_elapsed = t.elapsed();
+                    profile.ack_wait.record(ack_elapsed);
                     ack_result?;
+                    tracing::trace!(
+                        %file_id, seq, confirmed_offset = end, chunk_bytes = n,
+                        ack_wait_us = ack_elapsed.as_micros() as u64,
+                        "file upload chunk acknowledged"
+                    );
 
                     offset = end;
                     confirmed_offset_task.store(offset, Ordering::Release);
@@ -2511,6 +2600,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn abort_download(&mut self, file_id: &str, message: impl Into<String>) {
+        let message = message.into();
+        tracing::warn!(%file_id, error = %message, "file download aborted");
         let pending = self.pending_downloads.remove(file_id);
         if let Some(p) = pending {
             if let Some(s) = self
@@ -2802,6 +2893,11 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         };
         if !should_emit {
             return;
+        }
+        if terminal {
+            tracing::debug!(%file_id, direction, state, done, total, "file transfer state changed");
+        } else {
+            tracing::trace!(%file_id, direction, state, done, total, "file transfer progress emitted");
         }
         if terminal || state == "interrupted" || state == "cancelled" {
             self.transfer_progress.remove(file_id);

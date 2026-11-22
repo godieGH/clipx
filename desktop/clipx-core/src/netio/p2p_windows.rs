@@ -103,12 +103,14 @@ fn run(
             continue;
         }
         waited = Duration::ZERO;
+        tracing::trace!("Wi-Fi Direct peer scan cycle started");
         if has_peers(&rt, &device_tx) {
+            tracing::trace!("Wi-Fi Direct peer scan skipped because a peer is already visible");
             continue;
         }
         match try_join(&own8) {
             Ok(true) => tracing::info!("joined a ClipX Wi-Fi Direct host"),
-            Ok(false) => {}
+            Ok(false) => tracing::trace!("no eligible Wi-Fi Direct host found"),
             Err(e) => tracing::debug!("Wi-Fi Direct join attempt failed: {e}"),
         }
     }

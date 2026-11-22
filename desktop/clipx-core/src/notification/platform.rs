@@ -75,6 +75,7 @@ impl<T: NotificationPrompter> PlatformNotificationEngine<T> {
             .lock()
             .unwrap()
             .insert(prompt_id.clone(), tx);
+        tracing::trace!(%prompt_id, "notification prompt registered");
         (prompt_id, rx)
     }
 
@@ -84,8 +85,13 @@ impl<T: NotificationPrompter> PlatformNotificationEngine<T> {
 }
 
 pub fn resolve_prompt(prompt_id: String, result: PromptResult) {
+    let result_kind = match &result {
+        PromptResult::Pair(_) => "pair",
+        PromptResult::Clipboard(_) => "clipboard",
+    };
     let sender = PENDING_PROMPTS.lock().unwrap().remove(&prompt_id);
     if let Some(sender) = sender {
+        tracing::trace!(%prompt_id, result_kind, "notification prompt resolved");
         let _ = sender.send(result);
     } else {
         tracing::debug!(%prompt_id, "notification prompt was already resolved or timed out");
@@ -100,6 +106,12 @@ impl<T: NotificationPrompter> NotificationEngine for PlatformNotificationEngine<
     ) -> NotificationFuture<'a, PairDecision> {
         Box::pin(async move {
             let (prompt_id, rx) = Self::register_prompt();
+            let prompt_kind = match &prompt {
+                Prompt::PairRequest { .. } => "pair_request",
+                Prompt::ConfirmCode { .. } => "pair_code_confirmation",
+                Prompt::IncomingClipboard { .. } => "incoming_clipboard",
+            };
+            tracing::debug!(%prompt_id, prompt_kind, timeout_ms = timeout.as_millis() as u64, "showing notification prompt");
 
             match prompt {
                 Prompt::PairRequest { peer_name } => {
@@ -118,10 +130,12 @@ impl<T: NotificationPrompter> NotificationEngine for PlatformNotificationEngine<
 
             let result = tokio::time::timeout(timeout, rx).await;
             Self::remove_prompt(&prompt_id);
-            match result {
+            let decision = match result {
                 Ok(Ok(PromptResult::Pair(decision))) => decision,
                 _ => PairDecision::NoResponse,
-            }
+            };
+            tracing::debug!(%prompt_id, ?decision, "pairing notification completed");
+            decision
         })
     }
 
@@ -132,6 +146,7 @@ impl<T: NotificationPrompter> NotificationEngine for PlatformNotificationEngine<
     ) -> NotificationFuture<'a, IncomingClipboardDecision> {
         Box::pin(async move {
             let (prompt_id, rx) = Self::register_prompt();
+            tracing::debug!(%prompt_id, timeout_ms = timeout.as_millis() as u64, "showing incoming clipboard prompt");
 
             match prompt {
                 Prompt::IncomingClipboard {
@@ -158,10 +173,12 @@ impl<T: NotificationPrompter> NotificationEngine for PlatformNotificationEngine<
 
             let result = tokio::time::timeout(timeout, rx).await;
             Self::remove_prompt(&prompt_id);
-            match result {
+            let decision = match result {
                 Ok(Ok(PromptResult::Clipboard(decision))) => decision,
                 _ => IncomingClipboardDecision::Ignore,
-            }
+            };
+            tracing::debug!(%prompt_id, ?decision, "clipboard notification completed");
+            decision
         })
     }
 

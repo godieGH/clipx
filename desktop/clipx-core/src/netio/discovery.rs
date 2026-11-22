@@ -101,8 +101,13 @@ async fn broadcast_presence(
                 // One packet per interface broadcast address: a single send to
                 // 255.255.255.255 leaves via one NIC only, so peers reachable
                 // only through another interface (e.g. Wi-Fi P2P) never hear us.
-                for target in broadcast_targets() {
-                    let _ = socket.send_to(&message, (target, 9999)).await;
+                let targets = broadcast_targets();
+                tracing::trace!(targets = targets.len(), bytes = message.len(), "sending discovery announcement");
+                for target in targets {
+                    match socket.send_to(&message, (target, 9999)).await {
+                        Ok(sent) => tracing::trace!(%target, bytes = sent, "discovery announcement sent"),
+                        Err(error) => tracing::debug!(%target, %error, "discovery announcement send failed"),
+                    }
                 }
             }
         }
@@ -125,7 +130,14 @@ async fn listen_for_devices(
                 if *shutdown_rx.borrow() { break; }
             }
             result = socket.recv_from(&mut buf) => {
-                let Ok((len, src_addr)) = result else { continue; };
+                let (len, src_addr) = match result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::debug!(%error, "discovery receive failed");
+                        continue;
+                    }
+                };
+                tracing::trace!(%src_addr, bytes = len, "discovery packet received");
 
                 let announce = match proto::Announce::decode(&buf[..len]) {
                     Ok(e) => e,
@@ -138,6 +150,7 @@ async fn listen_for_devices(
                 if announce.fingerprint == identity.get_this_device_fingerprint() {
                     continue;
                 }
+                tracing::trace!(%src_addr, device_type = announce.device_type, "peer announcement decoded");
                 let _ = discovered_tx.send((announce, src_addr));
             }
         }

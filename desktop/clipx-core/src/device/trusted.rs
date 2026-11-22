@@ -11,10 +11,21 @@ pub struct TrustedDeviceStore {
 impl TrustedDeviceStore {
     /// Loads from disk if the file exists, otherwise starts empty.
     pub fn load(path: PathBuf) -> Self {
-        let devices = fs::read_to_string(&path)
-            .ok()
-            .and_then(|content| serde_json::from_str(&content).ok())
-            .unwrap_or_default();
+        let devices = match fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(devices) => devices,
+                Err(error) => {
+                    tracing::warn!(%error, "trusted-device store is invalid; starting empty");
+                    HashMap::new()
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(error) => {
+                tracing::warn!(%error, "could not read trusted-device store; starting empty");
+                HashMap::new()
+            }
+        };
+        tracing::debug!(devices = devices.len(), "trusted-device store loaded");
 
         Self { devices, path }
     }
@@ -39,7 +50,9 @@ impl TrustedDeviceStore {
 
     /// Adds a device to the trusted list and persists immediately.
     pub fn trust(&mut self, device: TrustedDevice) {
-        self.devices.insert(device.id.clone(), device);
+        let device_id = device.id.clone();
+        self.devices.insert(device_id.clone(), device);
+        tracing::info!(%device_id, "device added to trusted store");
         if let Err(e) = self.save() {
             tracing::error!("failed to persist trusted devices: {e}");
         }
@@ -47,7 +60,10 @@ impl TrustedDeviceStore {
 
     /// Removes a device's trust and persists immediately.
     pub fn revoke(&mut self, device_id: &str) {
-        self.devices.remove(device_id);
+        let removed = self.devices.remove(device_id).is_some();
+        if removed {
+            tracing::info!(%device_id, "device removed from trusted store");
+        }
         if let Err(e) = self.save() {
             tracing::error!("failed to persist trusted devices: {e}");
         }
@@ -56,6 +72,7 @@ impl TrustedDeviceStore {
     pub fn set_auto_connect(&mut self, device_id: &str, auto_connect: bool) -> bool {
         if let Some(device) = self.devices.get_mut(device_id) {
             device.auto_connect = auto_connect;
+            tracing::debug!(%device_id, auto_connect, "trusted-device auto-connect setting changed");
             if let Err(e) = self.save() {
                 tracing::error!("failed to persist trusted devices: {e}");
             }

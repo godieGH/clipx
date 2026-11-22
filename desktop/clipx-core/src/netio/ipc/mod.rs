@@ -11,6 +11,7 @@ use interprocess::local_socket::{
     traits::tokio::Listener as ListenerTrait,
 };
 use prost::Message;
+use std::time::Instant;
 use tokio::sync::{broadcast, mpsc::UnboundedSender, oneshot, watch};
 use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message as WsMessage};
 use tokio_util::task::TaskTracker;
@@ -67,6 +68,7 @@ impl IpcService {
                 conn = self.listener.as_ref().unwrap().accept() => {
                     match conn {
                         Ok(stream) => {
+                        tracing::debug!("local IPC client accepted");
                         let device_tx = self.device_tx.clone();
                         let clipboard_tx = self.clipboard_tx.clone();
                         let events_tx = self.events_tx.clone();
@@ -76,11 +78,11 @@ impl IpcService {
                             if let Err(err) =
                                 IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, stop_tx, client_shutdown_rx).await
                             {
-                                tracing::error!(error = %err, "IPC client handler failed");
+                                tracing::warn!(error = %err, "IPC client handler ended with an error");
                             }
                         });
                     }
-                        Err(e) => tracing::error!("Accept error: {e:?}"),
+                        Err(e) => tracing::warn!(error = %e, "IPC accept failed"),
                     }
                 }
             }
@@ -104,6 +106,7 @@ impl IpcService {
     ) -> anyhow::Result<()> {
         let mut ws = accept_async(conn).await?;
         let mut events_rx = events_tx.subscribe();
+        tracing::debug!("IPC client session started");
 
         loop {
             tokio::select! {
@@ -122,6 +125,12 @@ impl IpcService {
                 event = events_rx.recv() => {
                     match event {
                         Ok(event) => {
+                            let event_kind = match &event {
+                                CoreEvent::DevicesChanged => "devices_changed",
+                                CoreEvent::ClipboardChanged => "clipboard_changed",
+                                CoreEvent::PairingChanged { .. } => "pairing_changed",
+                                CoreEvent::FileTransferChanged { .. } => "file_transfer_changed",
+                            };
                             let event = match event {
                                 CoreEvent::DevicesChanged => clipx::IpcEvent {
                                     event: Some(clipx::ipc_event::Event::DevicesChanged(clipx::DevicesChangedEvent {})),
@@ -152,9 +161,14 @@ impl IpcService {
                             };
                             let mut buf = Vec::new();
                             envelope.encode(&mut buf)?;
+                            let event_bytes = buf.len();
                             ws.send(WsMessage::Binary(buf.into())).await?;
+                            tracing::trace!(event = event_kind, bytes = event_bytes, "IPC event pushed to client");
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Lagged(count)) => {
+                            tracing::debug!(missed_events = count, "IPC client event receiver lagged");
+                            continue;
+                        }
                         Err(broadcast::error::RecvError::Closed) => {}
                     }
                 }
@@ -165,6 +179,7 @@ impl IpcService {
                         WsMessage::Close(_) => break,
                         WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                         WsMessage::Binary(bytes) => {
+                            tracing::trace!(bytes = bytes.len(), "IPC request frame received");
                             let ipcreq = IpcService::decode_ipc_req(bytes.to_vec())?;
                             IpcService::handle_ipc_request(&device_tx, &clipboard_tx, &stop_tx, ipcreq, &mut ws).await?;
                         }
@@ -174,6 +189,7 @@ impl IpcService {
             }
         }
 
+        tracing::debug!("IPC client session closed");
         Ok(())
     }
 
@@ -184,10 +200,36 @@ impl IpcService {
         ipcreq: clipx::IpcRequest,
         ws: &mut WebSocketStream<LocalStream>,
     ) -> anyhow::Result<()> {
+        let request_started = Instant::now();
         let req = match ipcreq.request {
             Some(req) => req,
             None => return Err(anyhow::anyhow!("Invalid Ipc request")),
         };
+        let request_kind = match &req {
+            clipx::ipc_request::Request::Seen(_) => "seen",
+            clipx::ipc_request::Request::Trusted(_) => "trusted",
+            clipx::ipc_request::Request::Identity(_) => "identity",
+            clipx::ipc_request::Request::Pair(_) => "pair",
+            clipx::ipc_request::Request::PairPending(_) => "pair_pending",
+            clipx::ipc_request::Request::PairApprove(_) => "pair_approve",
+            clipx::ipc_request::Request::Connect(_) => "connect",
+            clipx::ipc_request::Request::Connected(_) => "connected",
+            clipx::ipc_request::Request::GetPaired(_) => "get_paired",
+            clipx::ipc_request::Request::Disconnect(_) => "disconnect",
+            clipx::ipc_request::Request::SetAutoConnect(_) => "set_auto_connect",
+            clipx::ipc_request::Request::ForgetDevice(_) => "forget_device",
+            clipx::ipc_request::Request::ClipboardHistory(_) => "clipboard_history",
+            clipx::ipc_request::Request::ClipboardRemove(_) => "clipboard_remove",
+            clipx::ipc_request::Request::ClipboardClear(_) => "clipboard_clear",
+            clipx::ipc_request::Request::SendText(_) => "send_text",
+            clipx::ipc_request::Request::SendRichText(_) => "send_rich_text",
+            clipx::ipc_request::Request::SendImage(_) => "send_image",
+            clipx::ipc_request::Request::SendFile(_) => "send_file",
+            clipx::ipc_request::Request::SendFilePath(_) => "send_file_path",
+            clipx::ipc_request::Request::DownloadClipboardFile(_) => "download_clipboard_file",
+            clipx::ipc_request::Request::Shutdown(_) => "shutdown",
+        };
+        tracing::trace!(request = request_kind, "IPC request dispatch started");
 
         let response = match req {
             clipx::ipc_request::Request::Seen(clipx::SeenRequest { mode }) => {
@@ -681,7 +723,14 @@ impl IpcService {
 
         let mut buf = Vec::new();
         envelope.encode(&mut buf)?;
+        let response_bytes = buf.len();
         ws.send(WsMessage::Binary(buf.into())).await?;
+        tracing::trace!(
+            request = request_kind,
+            response_bytes,
+            elapsed_us = request_started.elapsed().as_micros() as u64,
+            "IPC response sent"
+        );
         Ok(())
     }
 }
@@ -692,6 +741,16 @@ impl IpcService {
     }
 
     fn decode_ipc_req(bytes: Vec<u8>) -> anyhow::Result<clipx::IpcRequest> {
-        Ok(clipx::IpcRequest::decode(bytes.as_slice())?)
+        let wire_bytes = bytes.len();
+        match clipx::IpcRequest::decode(bytes.as_slice()) {
+            Ok(request) => {
+                tracing::trace!(wire_bytes, "IPC request protobuf decoded");
+                Ok(request)
+            }
+            Err(error) => {
+                tracing::warn!(wire_bytes, %error, "invalid IPC request protobuf");
+                Err(error.into())
+            }
+        }
     }
 }

@@ -15,16 +15,26 @@ impl DeviceIdentity {
     /// Loads the persisted private key if one exists, otherwise generates
     /// a new keypair and persists the private key immediately.
     pub fn load_or_create(path: PathBuf) -> Self {
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(key_bytes) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                return Self {
-                    signing_key: SigningKey::from_bytes(&key_bytes),
-                };
+        match fs::read(&path) {
+            Ok(bytes) => {
+                if let Ok(key_bytes) = <[u8; 32]>::try_from(bytes.as_slice()) {
+                    tracing::debug!("loaded persisted device identity");
+                    return Self {
+                        signing_key: SigningKey::from_bytes(&key_bytes),
+                    };
+                }
+                tracing::warn!("identity key file was malformed, regenerating");
             }
-            tracing::warn!("identity key file at {path:?} was malformed, regenerating");
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::trace!("no persisted device identity found; generating a new key");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not read device identity; generating a new key")
+            }
         }
 
         let signing_key = SigningKey::generate(&mut OsRng);
+        tracing::info!("generated a new device identity");
         if let Err(e) = fs::write(&path, signing_key.to_bytes()) {
             tracing::error!("failed to persist identity key: {e}");
         }
@@ -64,6 +74,12 @@ impl DeviceIdentity {
 /// Returns false (never panics) on any malformed input — this handles
 /// untrusted network bytes, so it must never crash the caller.
 pub fn verify(public_key_bytes: &[u8], message: &[u8], signature_bytes: &[u8]) -> bool {
+    tracing::trace!(
+        public_key_bytes = public_key_bytes.len(),
+        message_bytes = message.len(),
+        signature_bytes = signature_bytes.len(),
+        "verifying peer signature"
+    );
     let Ok(pk_array) = <[u8; 32]>::try_from(public_key_bytes) else {
         return false;
     };

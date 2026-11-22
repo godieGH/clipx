@@ -89,6 +89,7 @@ impl CoreService {
         let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx) =
             spawn_core_tasks(clipboard_sink, notification_engine.clone(), None);
         self.tasks = tasks;
+        tracing::debug!(tasks = self.tasks.len(), "core task graph spawned");
         self.shutdown_tx = Some(shutdown_tx.clone());
 
         let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
@@ -125,12 +126,16 @@ impl CoreService {
     /// and waits for them to wrap it up, clean or release resources for a graceful shutdown
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     async fn shutdown(&mut self) {
+        tracing::info!(tasks = self.tasks.len(), "core service shutdown started");
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(true);
         }
 
-        for task in self.tasks.drain(..) {
-            let _ = task.await;
+        for (task_index, task) in self.tasks.drain(..).enumerate() {
+            match task.await {
+                Ok(()) => tracing::trace!(task_index, "core task stopped cleanly"),
+                Err(error) => tracing::warn!(task_index, %error, "core task did not stop cleanly"),
+            }
         }
 
         self.finish_stop();
@@ -158,6 +163,7 @@ where
     N: crate::notification::platform::NotificationEngine + Clone + Send + Sync + 'static,
 {
     let mut tasks = Vec::<JoinHandle<()>>::new();
+    tracing::debug!("constructing core task graph");
     let identity = Arc::new(DeviceIdentity::load_or_create(
         device::config::identity_key_path(),
     ));
@@ -179,6 +185,7 @@ where
         peer_event_tx,
     )
     .expect("websocket listener failed bind");
+    tracing::trace!("spawning transport task");
     tasks.push(tokio::spawn(async move {
         transport.run().await;
     }));
@@ -192,6 +199,7 @@ where
         clipboard_out_tx,
         core_events_tx.clone(),
     );
+    tracing::trace!("spawning clipboard manager task");
     let shutdown_for_clipboard = shutdown_rx.clone();
     tasks.push(tokio::spawn(async move {
         clipboard_manager
@@ -204,7 +212,10 @@ where
     // a shared network namespace) must not take the whole core down. Without
     // discovery the core still starts; IPC and the transport stay up.
     match netio::discovery::spawn(shutdown_for_discovery, identity.clone(), discovered_tx) {
-        Ok(discovery_tasks) => tasks.extend(discovery_tasks),
+        Ok(discovery_tasks) => {
+            tracing::debug!(tasks = discovery_tasks.len(), "UDP discovery tasks started");
+            tasks.extend(discovery_tasks)
+        }
         Err(error) => tracing::warn!(
             %error,
             "UDP discovery unavailable (port 9999 in use?); running without auto-discovery"
@@ -226,6 +237,7 @@ where
         clipboard_cmd_tx.clone(),
         core_events_tx.clone(),
     );
+    tracing::trace!("spawning device manager task");
     let shutdown_for_device_manager = shutdown_rx.clone();
     let clipboard_cmd_tx_for_device_manager = clipboard_cmd_tx.clone();
     tasks.push(tokio::spawn(async move {
@@ -267,7 +279,10 @@ where
                                     events.on_file_transfer(entry_id, file_id, file_name, direction, done, total, state, message);
                                 }
                             },
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Lagged(count)) => {
+                                tracing::debug!(missed_events = count, "platform event listener lagged");
+                                continue;
+                            }
                             Err(broadcast::error::RecvError::Closed) => break,
                         }
                     }

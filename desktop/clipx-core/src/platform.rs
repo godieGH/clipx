@@ -50,16 +50,25 @@ impl Default for ArboardClipboardSink {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 impl ClipboardSink for ArboardClipboardSink {
     fn write_text(&self, content: String) {
+        tracing::trace!(bytes = content.len(), "applying text to system clipboard");
         match arboard::Clipboard::new() {
             Ok(mut clipboard) => {
                 if let Err(error) = clipboard.set_text(content) {
                     tracing::warn!(%error, "failed to apply remote clipboard text");
+                } else {
+                    tracing::trace!("text applied to system clipboard");
                 }
             }
             Err(error) => tracing::warn!(%error, "failed to open clipboard to apply remote text"),
         }
     }
     fn write_image(&self, width: u32, height: u32, rgba: Vec<u8>) {
+        tracing::trace!(
+            width,
+            height,
+            bytes = rgba.len(),
+            "applying image to system clipboard"
+        );
         let image = arboard::ImageData {
             width: width as usize,
             height: height as usize,
@@ -69,12 +78,18 @@ impl ClipboardSink for ArboardClipboardSink {
             Ok(mut clipboard) => {
                 if let Err(error) = clipboard.set_image(image) {
                     tracing::warn!(%error, "failed to apply remote clipboard image");
+                } else {
+                    tracing::trace!(width, height, "image applied to system clipboard");
                 }
             }
             Err(error) => tracing::warn!(%error, "failed to open clipboard to apply remote image"),
         }
     }
     fn save_file(&self, name: &str, _mime_type: &str, data: &[u8]) -> Result<String, String> {
+        tracing::trace!(
+            bytes = data.len(),
+            "saving received file to downloads directory"
+        );
         let base = dirs_fallback();
         std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
         let mut path = base.join(safe_name(name));
@@ -99,6 +114,10 @@ impl ClipboardSink for ArboardClipboardSink {
             n += 1;
         }
         std::fs::write(&path, data).map_err(|e| e.to_string())?;
+        tracing::debug!(
+            bytes = data.len(),
+            "received file saved to downloads directory"
+        );
         Ok(path.to_string_lossy().into_owned())
     }
 
@@ -108,6 +127,7 @@ impl ClipboardSink for ArboardClipboardSink {
         _mime_type: &str,
         source: &std::path::Path,
     ) -> Result<String, String> {
+        tracing::trace!("copying staged received file to downloads directory");
         let base = dirs_fallback();
         std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
         let safe = safe_name(name);
@@ -132,7 +152,11 @@ impl ClipboardSink for ArboardClipboardSink {
             path = base.join(filename);
             n += 1;
         }
-        std::fs::copy(source, &path).map_err(|e| e.to_string())?;
+        let copied = std::fs::copy(source, &path).map_err(|e| e.to_string())?;
+        tracing::debug!(
+            bytes = copied,
+            "staged received file saved to downloads directory"
+        );
         Ok(path.to_string_lossy().into_owned())
     }
 }

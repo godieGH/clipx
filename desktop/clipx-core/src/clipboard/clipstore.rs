@@ -50,10 +50,26 @@ pub struct ClipboardStore {
 
 impl ClipboardStore {
     pub fn load(path: PathBuf, max_capacity: usize) -> Self {
-        let history = fs::read_to_string(&path)
-            .ok()
-            .and_then(|data| serde_json::from_str(&data).ok())
-            .unwrap_or_default();
+        let history: VecDeque<ClipItem> = match fs::read_to_string(&path) {
+            Ok(data) => match serde_json::from_str::<VecDeque<ClipItem>>(&data) {
+                Ok(history) => {
+                    tracing::debug!(entries = history.len(), "clipboard history loaded");
+                    history
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "clipboard history is invalid; starting empty");
+                    VecDeque::new()
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::trace!("clipboard history does not exist yet");
+                VecDeque::new()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not read clipboard history; starting empty");
+                VecDeque::new()
+            }
+        };
         Self {
             path,
             history,
@@ -67,13 +83,17 @@ impl ClipboardStore {
             .front()
             .is_some_and(|top| same_clip(top, &item))
         {
+            tracing::trace!(entry_id = %item.id, "duplicate clipboard history head ignored");
             return false;
         }
+        let entry_id = item.id.clone();
+        let kind = item.kind.clone();
         self.history.push_front(item);
         while self.history.len() > self.max_capacity {
             self.history.pop_back();
         }
         self.persist();
+        tracing::trace!(%entry_id, ?kind, entries = self.history.len(), "clipboard history entry added");
         true
     }
 
@@ -81,8 +101,10 @@ impl ClipboardStore {
         let Some(pos) = self.history.iter().position(|v| v.id == item.id) else {
             return false;
         };
+        let id = item.id.clone();
         self.history[pos] = item;
         self.persist();
+        tracing::trace!(%id, "clipboard history entry updated");
         true
     }
 
@@ -92,19 +114,24 @@ impl ClipboardStore {
         let removed = self.history.len() != before;
         if removed {
             self.persist();
+            tracing::trace!(%id, "clipboard history entry removed");
         }
         removed
     }
 
     pub fn clear(&mut self) {
+        let entries = self.history.len();
         self.history.clear();
         self.persist();
+        tracing::debug!(entries, "clipboard history cleared");
     }
 
     pub(super) fn persist(&self) {
         if let Ok(json) = serde_json::to_string_pretty(&self.history) {
             if let Err(e) = fs::write(&self.path, json) {
-                tracing::error!("failed to persist clipboard history: {e}");
+                tracing::error!(error = %e, "failed to persist clipboard history");
+            } else {
+                tracing::trace!(entries = self.history.len(), "clipboard history persisted");
             }
         } else {
             tracing::error!("failed to serialize clipboard history");

@@ -10,11 +10,15 @@ ClipX keeps the clipboards of your own devices in sync over your local network. 
 
 ## Table of contents
 
-- [What is ClipX?](#what-is-clipx)
-- [Which part of this README is for me?](#which-part-of-this-readme-is-for-me)
-- [Supported platforms](#supported-platforms)
-- **Using ClipX** (regular users)
+- [ClipX](#clipx)
+  - [Table of contents](#table-of-contents)
+  - [What is ClipX?](#what-is-clipx)
+  - [Which part of this README is for me?](#which-part-of-this-readme-is-for-me)
+  - [Supported platforms](#supported-platforms)
+- [Using ClipX](#using-clipx)
   - [Installing](#installing)
+    - [About the unsigned warning](#about-the-unsigned-warning)
+    - [Verify your download (recommended)](#verify-your-download-recommended)
   - [Pairing two devices](#pairing-two-devices)
   - [Everyday use](#everyday-use)
   - [Send with ClipX (Windows right-click menu)](#send-with-clipx-windows-right-click-menu)
@@ -22,7 +26,7 @@ ClipX keeps the clipboards of your own devices in sync over your local network. 
   - [Privacy and security](#privacy-and-security)
   - [Troubleshooting](#troubleshooting)
   - [Where ClipX keeps things](#where-clipx-keeps-things)
-- **Developer guide**
+- [Developer guide](#developer-guide)
   - [Architecture at a glance](#architecture-at-a-glance)
   - [Repository layout](#repository-layout)
   - [Prerequisites](#prerequisites)
@@ -35,16 +39,16 @@ ClipX keeps the clipboards of your own devices in sync over your local network. 
   - [Platform-specific code](#platform-specific-code)
   - [Known limitations](#known-limitations)
   - [Contributing](#contributing)
-- **Maintainer guide**
+- [Maintainer guide](#maintainer-guide)
   - [Versioning](#versioning)
   - [Making a release](#making-a-release)
   - [What CI does](#what-ci-does)
   - [Signing and secrets](#signing-and-secrets)
   - [Tracking issues](#tracking-issues)
   - [Release checklist](#release-checklist)
-- [Glossary](#glossary)
-- [References](#references)
-- [License](#license)
+  - [Glossary](#glossary)
+  - [References](#references)
+  - [License](#license)
 
 ---
 
@@ -311,6 +315,7 @@ clipx/
 ├── desktop/                 Cargo workspace for everything desktop
 │   ├── Cargo.toml           workspace: clipx-app/src-tauri, clipx-core, clipx
 │   ├── clipx-core/          the engine (service.rs is the entry point)
+│   │   ├── OBSERVABILITY.md log levels, `RUST_LOG` examples, what is never logged
 │   │   └── src/{clipboard,device,netio,notification}/
 │   ├── clipx/               CLI + IPC client library (clipx-send for the Windows context menu)
 │   └── clipx-app/           Tauri + React app
@@ -380,7 +385,7 @@ cd desktop
 cargo run -p clipx-core
 ```
 
-**Verbose logs.** The core logs at `info` by default. Use the standard `RUST_LOG` variable, for example `RUST_LOG=debug`. Logs are also written to a rolling daily file (see [Where ClipX keeps things](#where-clipx-keeps-things)). In **release** builds the core prints nothing to the terminal, so read the log file or *Help & diagnostics* instead.
+**Verbose logs.** The core logs at `info` by default. Use the standard `RUST_LOG` variable, for example `RUST_LOG=debug`. Logs are also written to a rolling daily file (see [Where ClipX keeps things](#where-clipx-keeps-things)). In **release** builds the core prints nothing to the terminal, so read the log file or *Help & diagnostics* instead. What each level means, per-module `RUST_LOG` examples (such as transport-only `trace`), and what is never logged are in [`desktop/clipx-core/OBSERVABILITY.md`](desktop/clipx-core/OBSERVABILITY.md).
 
 **Fixed ports.** The core binds UDP **9999** (discovery) and prefers TCP **8080** (falls back to a random free port; discovery has no fallback). Only one real core can run per machine. If you see `Address already in use`, an earlier core is probably still running: `pkill clipx-core` (Linux/macOS) or end it in Task Manager (Windows). The tray app doesn't always stop a core it spawned if the app crashes.
 
@@ -700,6 +705,7 @@ Developer-facing bugs are logged in [`issues/`](issues/README.md), separately fr
 
 - [`protos/clipx.proto`](protos/clipx.proto): the protocol
 - [`tests/README.md`](tests/README.md): the emulator tool
+- [`desktop/clipx-core/OBSERVABILITY.md`](desktop/clipx-core/OBSERVABILITY.md): core log levels and `RUST_LOG` usage
 - [`issues/README.md`](issues/README.md): the issue log and its tool; [`issues/INDEX.md`](issues/INDEX.md): all issues
 - [`scripts/release.mjs`](scripts/release.mjs) and [`scripts/sync-version.mjs`](scripts/sync-version.mjs): release tooling
 - [`.github/workflows/`](.github/workflows): CI and release pipelines

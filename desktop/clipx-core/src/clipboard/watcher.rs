@@ -21,6 +21,7 @@ pub async fn watch_clipboard(
             return;
         }
     };
+    tracing::info!("clipboard watcher started");
 
     let mut last = String::new();
     loop {
@@ -43,6 +44,10 @@ pub async fn watch_clipboard(
             let marker = format!("file:{}", paths.join("|"));
             if marker != last {
                 last = marker;
+                tracing::debug!(
+                    files = paths.len(),
+                    "clipboard file selection change detected"
+                );
                 let _ = tx.send(ClipboardPayload::Files(paths));
             }
             continue;
@@ -62,6 +67,12 @@ pub async fn watch_clipboard(
                 );
                 if marker != last {
                     last = marker;
+                    tracing::debug!(
+                        width = image.width,
+                        height = image.height,
+                        bytes = image.bytes.len(),
+                        "clipboard image change detected"
+                    );
                     let _ = tx.send(ClipboardPayload::Image {
                         width: image.width as u32,
                         height: image.height as u32,
@@ -71,7 +82,7 @@ pub async fn watch_clipboard(
                 }
             }
             Err(arboard::Error::ContentNotAvailable) => {}
-            Err(e) => tracing::debug!("clipboard image read error: {}", e),
+            Err(error) => tracing::debug!(%error, "clipboard image read failed"),
         }
 
         if let Ok(html) = clipboard.get().html()
@@ -84,6 +95,11 @@ pub async fn watch_clipboard(
             let marker = format!("rich:{:x}", hasher.finish());
             if marker != last {
                 last = marker;
+                tracing::debug!(
+                    text_bytes = text.len(),
+                    html_bytes = html.len(),
+                    "clipboard rich-text change detected"
+                );
                 let _ = tx.send(ClipboardPayload::RichText { text, html });
             }
             continue;
@@ -99,16 +115,19 @@ pub async fn watch_clipboard(
                 if let Some(paths) = parse_file_uris(&current)
                     && !paths.is_empty()
                 {
+                    tracing::debug!(files = paths.len(), "clipboard file URI change detected");
                     let _ = tx.send(ClipboardPayload::Files(paths));
                     continue;
                 }
+                tracing::debug!(bytes = current.len(), "clipboard text change detected");
                 let _ = tx.send(ClipboardPayload::Text(current));
             }
             Ok(_) => {}
             Err(arboard::Error::ContentNotAvailable) => {}
-            Err(e) => tracing::debug!("clipboard read error: {e}"),
+            Err(error) => tracing::debug!(%error, "clipboard text read failed"),
         }
     }
+    tracing::info!("clipboard watcher stopped");
 }
 
 fn parse_file_uris(text: &str) -> Option<Vec<String>> {
