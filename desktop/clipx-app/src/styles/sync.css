@@ -348,7 +348,9 @@
   box-shadow: none;
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .sync-dropzone:hover,
@@ -639,11 +641,157 @@
   .sync-dropzone:hover,
   .sync-dropzone.dragging,
   .sync-screen--dragging .sync-dropzone {
-    background: rgba(57, 108, 216, 0.10);
+    background: rgba(57, 108, 216, 0.1);
     border-color: rgba(105, 153, 238, 0.65);
   }
 
   .sync-summary-breakdown {
-    border-color: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.1);
   }
+
+  .sync-message-editor {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: inherit;
+  }
+
+  .sync-message-editor:focus {
+    border-color: rgba(105, 153, 238, 0.7);
+  }
+
+  .sync-editor-cancel {
+    background: transparent;
+    color: inherit;
+    box-shadow: none;
+  }
+
+  .sync-editor-save {
+    background: #396cd8;
+    color: white;
+    box-shadow: none;
+  }
+}
+
+/* Compact icon-only actions in the content header. */
+.sync-icon-action {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+
+  padding: 0;
+  margin: 0;
+
+  border: 1px solid transparent;
+  border-radius: 8px;
+
+  background: transparent;
+  color: inherit;
+
+  box-shadow: none;
+  font-size: inherit;
+  line-height: 1;
+
+  cursor: pointer;
+  opacity: 0.8;
+
+  transition:
+    background 150ms ease,
+    opacity 150ms ease;
+}
+
+.sync-icon-action svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  stroke: currentColor;
+}
+
+.sync-icon-action:hover {
+  opacity: 1;
+  border-color: transparent;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.sync-icon-action:active {
+  border-color: transparent;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.sync-icon-action:focus-visible {
+  outline: 2px solid #396cd8;
+  outline-offset: 2px;
+}
+
+.sync-icon-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sync-message-editor-wrap {
+  width: 100%;
+}
+
+.sync-message-editor {
+  display: block;
+  width: 100%;
+  min-height: 125px;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.025);
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.sync-message-editor:focus {
+  border-color: rgba(57, 108, 216, 0.65);
+}
+
+.sync-message-editor::placeholder {
+  opacity: 0.45;
+}
+
+.sync-message-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sync-editor-cancel,
+.sync-editor-save {
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sync-editor-cancel {
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  background: transparent;
+  color: inherit;
+}
+
+.sync-editor-save {
+  border: 0;
+  background: #396cd8;
+  color: white;
+}
+
+.sync-editor-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

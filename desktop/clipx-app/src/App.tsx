@@ -22,7 +22,7 @@ import {
   History,
   Image as ImageIcon,
   MonitorSmartphone,
-  Radar,
+  PencilLine,
   RefreshCw,
   Send,
   Trash2,
@@ -45,7 +45,6 @@ import { OWN_IDENTITY, PAIRING_STATE } from "./types";
 import type {
   AvailableDevice,
   ClipItem,
-  CurrentClipboard,
   DeviceType,
   DiagnosticSnapshot,
   OwnIdentity,
@@ -54,6 +53,7 @@ import type {
   PickedFile,
   Screen,
   TransferProgress,
+  SendContent,
 } from "./types";
 import { formatDataSize, visibleDiagnosticLogs } from "./utils";
 
@@ -68,8 +68,10 @@ function App() {
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(
     null,
   );
-  const [currentClipboard, setCurrentClipboard] =
-    useState<CurrentClipboard | null>(null);
+  const [sendContent, setSendContent] = useState<SendContent | null>(null);
+
+  const [editingText, setEditingText] = useState(false);
+  const [textDraft, setTextDraft] = useState("");
   const [outgoingFiles, setOutgoingFiles] = useState<PickedFile[]>([]);
   const outgoingRef = useRef<PickedFile[]>([]);
   useEffect(() => {
@@ -442,60 +444,149 @@ function App() {
     );
   }
 
+  function openTextEditor() {
+    const existingText =
+      sendContent?.source === "written"
+        ? sendContent.text
+        : sendContent?.source === "clipboard" &&
+            sendContent.clipboard.kind !== "image"
+          ? sendContent.clipboard.text
+          : "";
+
+    setTextDraft(existingText);
+    setEditingText(true);
+  }
+
+  function saveWrittenText() {
+    if (!textDraft.trim()) {
+      showToast("Enter some text before saving");
+      return;
+    }
+
+    setSendContent({
+      source: "written",
+      text: textDraft,
+    });
+
+    setEditingText(false);
+  }
+
   const connectedCount = paired.filter(
     (d) => d.connection === "connected",
   ).length;
 
   const refreshCurrentClipboard = useCallback(async () => {
-    try {
-      if (navigator.clipboard?.read) {
-        const items = await navigator.clipboard.read();
+    const clipboard = navigator.clipboard;
+
+    if (!clipboard) {
+      showToast("Clipboard access is unavailable", {
+        variant: "error",
+      });
+      return;
+    }
+
+    // First try the richer clipboard API.
+    if (typeof clipboard.read === "function") {
+      try {
+        const items = await clipboard.read();
         const item = items[0];
+
         if (item) {
+          // Rich text
           if (item.types.includes("text/html")) {
             const html = await (await item.getType("text/html")).text();
+
             const text = item.types.includes("text/plain")
               ? await (await item.getType("text/plain")).text()
               : html.replace(/<[^>]*>/g, "");
-            setCurrentClipboard({ kind: "rich_text", text, html });
+
+            setSendContent({
+              source: "clipboard",
+              clipboard: {
+                kind: "rich_text",
+                text,
+                html,
+              },
+            });
+
             return;
           }
+
+          // Image
           const imageType = item.types.find((type) =>
             type.startsWith("image/"),
           );
+
           if (imageType) {
             const blob = await item.getType(imageType);
             const bitmap = await createImageBitmap(blob);
-            const canvas = document.createElement("canvas");
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              ctx.drawImage(bitmap, 0, 0);
-              const pixels = ctx.getImageData(
-                0,
-                0,
-                bitmap.width,
-                bitmap.height,
-              ).data;
-              setCurrentClipboard({
-                kind: "image",
-                text: `Image ${bitmap.width}×${bitmap.height}`,
-                width: bitmap.width,
-                height: bitmap.height,
-                rgba: Array.from(pixels),
-              });
+
+            try {
+              const canvas = document.createElement("canvas");
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+
+              const ctx = canvas.getContext("2d");
+
+              if (ctx) {
+                ctx.drawImage(bitmap, 0, 0);
+
+                const pixels = ctx.getImageData(
+                  0,
+                  0,
+                  bitmap.width,
+                  bitmap.height,
+                ).data;
+
+                setSendContent({
+                  source: "clipboard",
+                  clipboard: {
+                    kind: "image",
+                    text: `Image ${bitmap.width}×${bitmap.height}`,
+                    width: bitmap.width,
+                    height: bitmap.height,
+                    rgba: Array.from(pixels),
+                  },
+                });
+
+                return;
+              }
+            } finally {
               bitmap.close();
-              return;
             }
-            bitmap.close();
           }
         }
+      } catch (error) {
+        // Rich clipboard access failed.
+        // Continue and try the simpler text API below.
+        console.debug(
+          "ClipX: rich clipboard read failed; trying readText().",
+          error,
+        );
       }
-      const text = await navigator.clipboard?.readText();
-      if (typeof text === "string")
-        setCurrentClipboard(text ? { kind: "text", text } : null);
-    } catch {}
+    }
+
+    // Fallback: plain text clipboard access.
+    try {
+      const text = await clipboard.readText();
+
+      if (!text) {
+        showToast("The system clipboard is empty");
+        return;
+      }
+
+      setSendContent({
+        source: "clipboard",
+        clipboard: {
+          kind: "text",
+          text,
+        },
+      });
+    } catch (error) {
+      showToast(`Could not read clipboard: ${String(error)}`, {
+        variant: "error",
+      });
+    }
   }, []);
 
   async function addPickedFiles(files: PickedFile[]) {
@@ -547,32 +638,49 @@ function App() {
       showToast("No connected devices", { variant: "error" });
       return;
     }
-    const hasClipboard = !!currentClipboard;
-    if (!hasClipboard && outgoingFiles.length === 0) {
+
+    const hasContent = !!sendContent;
+
+    if (!hasContent && outgoingFiles.length === 0) {
       showToast("Nothing ready to send", { variant: "error" });
       return;
     }
+
     setSendingReadyItems(true);
+
     try {
-      if (currentClipboard) {
-        if (currentClipboard.kind === "rich_text")
-          await invoke("send_rich_text", {
-            text: currentClipboard.text,
-            html: currentClipboard.html || currentClipboard.text,
+      if (sendContent) {
+        if (sendContent.source === "written") {
+          await invoke("send_text", {
+            content: sendContent.text,
           });
-        else if (
-          currentClipboard.kind === "image" &&
-          currentClipboard.rgba &&
-          currentClipboard.width &&
-          currentClipboard.height
-        )
-          await invoke("send_image", {
-            width: currentClipboard.width,
-            height: currentClipboard.height,
-            rgba: currentClipboard.rgba,
-          });
-        else await invoke("send_text", { content: currentClipboard.text });
+        } else {
+          const item = sendContent.clipboard;
+
+          if (item.kind === "rich_text") {
+            await invoke("send_rich_text", {
+              text: item.text,
+              html: item.html || item.text,
+            });
+          } else if (
+            item.kind === "image" &&
+            item.rgba &&
+            item.width &&
+            item.height
+          ) {
+            await invoke("send_image", {
+              width: item.width,
+              height: item.height,
+              rgba: item.rgba,
+            });
+          } else {
+            await invoke("send_text", {
+              content: item.text,
+            });
+          }
+        }
       }
+
       for (const file of outgoingFiles) {
         await invoke("send_file_path", {
           name: file.name,
@@ -580,16 +688,18 @@ function App() {
           path: file.path,
         });
       }
+
       setOutgoingFiles([]);
+
       showToast(
-        `${(hasClipboard ? 1 : 0) + outgoingFiles.length} item(s) offered`,
+        `${(hasContent ? 1 : 0) + outgoingFiles.length} item(s) offered`,
       );
     } catch (e) {
       showToast(`${e}`, { variant: "error" });
     } finally {
       setSendingReadyItems(false);
     }
-  }, [connectedCount, currentClipboard, outgoingFiles]);
+  }, [connectedCount, sendContent, outgoingFiles]);
 
   async function handleDownloadHistoryFile(id: string) {
     try {
@@ -728,13 +838,17 @@ function App() {
   }
 
   function renderSyncScreen() {
-    const readyCount = (currentClipboard ? 1 : 0) + outgoingFiles.length;
-    const clipboardKindLabel =
-      currentClipboard?.kind === "image"
-        ? "Image"
-        : currentClipboard?.kind === "rich_text"
-          ? "Rich text"
-          : "Text";
+    const readyCount = (sendContent ? 1 : 0) + outgoingFiles.length;
+
+    const contentKindLabel = !sendContent
+      ? null
+      : sendContent.source === "written"
+        ? "Written text"
+        : sendContent.clipboard.kind === "image"
+          ? "Image"
+          : sendContent.clipboard.kind === "rich_text"
+            ? "Rich text"
+            : "Text";
 
     return (
       <section
@@ -774,60 +888,120 @@ function App() {
               <div className="sync-primary-column">
                 <section className="sync-panel clipboard-panel">
                   <div className="sync-panel-header sync-clipboard-header">
-                    <div className="sync-panel-title">Clipboard</div>
+                    <div className="sync-panel-title">Content to send</div>
+
                     <div className="sync-clipboard-actions">
-                      {currentClipboard && (
+                      {contentKindLabel && (
                         <span className="sync-kind ready">
-                          {clipboardKindLabel}
+                          {contentKindLabel}
                         </span>
                       )}
+
                       <button
-                        className="sync-refresh sync-refresh--compact"
+                        className="sync-icon-action"
                         onClick={refreshCurrentClipboard}
-                        title="Refresh clipboard"
+                        title="Paste from system clipboard"
+                        aria-label="Paste from system clipboard"
+                        disabled={editingText || sendingReadyItems}
                       >
-                        <RefreshCw size={13} className="sync-refresh-icon" />
-                        <span>Refresh</span>
+                        <ClipboardPaste size={16} />
+                      </button>
+
+                      <button
+                        className="sync-icon-action"
+                        onClick={openTextEditor}
+                        title="Write your own text"
+                        aria-label="Write your own text"
+                        disabled={editingText || sendingReadyItems}
+                      >
+                        <PencilLine size={16} />
                       </button>
                     </div>
                   </div>
-                  {currentClipboard ? (
+
+                  {editingText ? (
+                    <div className="sync-message-editor-wrap">
+                      <textarea
+                        className="sync-message-editor"
+                        value={textDraft}
+                        onChange={(e) => setTextDraft(e.target.value)}
+                        placeholder="Write a message or paste text here..."
+                        rows={5}
+                        autoFocus
+                        aria-label="Message to send"
+                      />
+
+                      <div className="sync-message-editor-footer">
+                        <button
+                          className="sync-editor-cancel"
+                          onClick={() => setEditingText(false)}
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          className="sync-editor-save"
+                          onClick={saveWrittenText}
+                          disabled={!textDraft.trim()}
+                        >
+                          Save text
+                        </button>
+                      </div>
+                    </div>
+                  ) : sendContent ? (
                     <div className="sync-clipboard-preview">
                       <div className="sync-preview-icon">
-                        {currentClipboard.kind === "image" ? (
+                        {sendContent.source === "written" ? (
+                          <Type size={16} />
+                        ) : sendContent.clipboard.kind === "image" ? (
                           <ImageIcon size={16} />
-                        ) : currentClipboard.kind === "rich_text" ? (
+                        ) : sendContent.clipboard.kind === "rich_text" ? (
                           <FileText size={16} />
                         ) : (
                           <Type size={16} />
                         )}
                       </div>
+
                       <div className="sync-preview-copy">
                         <div className="sync-preview-text">
-                          {currentClipboard.text || "Clipboard content"}
+                          {sendContent.source === "written"
+                            ? sendContent.text
+                            : sendContent.clipboard.text}
+                        </div>
+
+                        <div className="sync-preview-meta">
+                          {sendContent.source === "written"
+                            ? "Written text"
+                            : "From system clipboard"}
                         </div>
                       </div>
+
                       <button
                         className="sync-selection-remove"
-                        title="Don't send clipboard"
-                        onClick={() => setCurrentClipboard(null)}
+                        title="Remove content"
+                        aria-label="Remove content from send queue"
+                        onClick={() => setSendContent(null)}
                       >
                         <X size={14} />
                       </button>
                     </div>
                   ) : (
                     <button
+                      type="button"
                       className="sync-clipboard-empty"
                       onClick={refreshCurrentClipboard}
-                      title="Read clipboard"
+                      title="Paste from system clipboard"
                     >
                       <div className="sync-empty-glyph">
                         <ClipboardPaste size={20} />
                       </div>
+
                       <div>
-                        <div className="sync-empty-title">Add clipboard</div>
+                        <div className="sync-empty-title">Nothing selected</div>
+
                         <div className="sync-empty-copy">
-                          Tap to read what is currently copied.
+                          Paste something from your clipboard or write your own
+                          message.
                         </div>
                       </div>
                     </button>
@@ -910,9 +1084,13 @@ function App() {
                   </div>
 
                   <div className="sync-summary-breakdown">
-                    {currentClipboard && (
+                    {sendContent && (
                       <div className="sync-breakdown-row">
-                        <span>Clipboard</span>
+                        <span>
+                          {sendContent.source === "written"
+                            ? "Written text"
+                            : "Clipboard"}
+                        </span>
                         <strong>1</strong>
                       </div>
                     )}
@@ -922,7 +1100,7 @@ function App() {
                         <strong>{outgoingFiles.length}</strong>
                       </div>
                     )}
-                    {!currentClipboard && outgoingFiles.length === 0 && (
+                    {!sendContent && outgoingFiles.length === 0 && (
                       <div className="sync-breakdown-empty">
                         Add something to the queue to enable sending.
                       </div>

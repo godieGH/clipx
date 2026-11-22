@@ -29,14 +29,7 @@ import com.godiegh.clipx.AndroidClipboardPlatform
 import com.godiegh.clipx.ui.theme.ClipxLiveBackground
 
 private enum class AppRoute {
-    DEVICES,
-    HISTORY,
-    PAIR_NEW,
-    THIS_DEVICE,
-    DEVICE_DETAILS,
-    SYNC,
-    CANT_SEE_DEVICE,
-    DIAGNOSTICS,
+    DEVICES, HISTORY, PAIR_NEW, THIS_DEVICE, DEVICE_DETAILS, SYNC, CANT_SEE_DEVICE, DIAGNOSTICS,
 }
 
 enum class RootTab { DEVICES, HISTORY }
@@ -52,9 +45,10 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
     val context = LocalContext.current
     val application = context.applicationContext as ClipxApplication
     val clipxSheetController = application.sheetController
-    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) viewModel.enqueueFiles(context, uris)
-    }
+    val pickFiles =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty()) viewModel.enqueueFiles(context, uris)
+        }
 
     fun openDevices() {
         viewModel.stopActiveScan()
@@ -108,100 +102,128 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                         label = "clipx-route",
                     ) { currentRoute ->
                         when (currentRoute) {
-                        AppRoute.DEVICES -> DevicesScreen(
-                            pairedDevices = viewModel.pairedDevices,
-                            availableDevices = viewModel.availableDevices.map {
-                                AvailableDeviceUi(it, viewModel.requestingPairId == it.id)
-                            },
-                            onOpenPair = { route = AppRoute.PAIR_NEW },
-                            onOpenThisDevice = { route = AppRoute.THIS_DEVICE },
-                            onOpenDiagnostics = { route = AppRoute.DIAGNOSTICS },
-                            onOpenSync = {
-                                viewModel.clearSyncClipboardItem()
-                                route = AppRoute.SYNC
-                            },
-                            onOpenDetails = { id ->
-                                detailDeviceId = id
-                                route = AppRoute.DEVICE_DETAILS
-                            },
-                            onPair = viewModel::pair,
-                            onConnect = viewModel::connect,
-                        )
+                            AppRoute.DEVICES -> DevicesScreen(
+                                pairedDevices = viewModel.pairedDevices,
+                                availableDevices = viewModel.availableDevices.map {
+                                    AvailableDeviceUi(it, viewModel.requestingPairId == it.id)
+                                },
+                                onOpenPair = { route = AppRoute.PAIR_NEW },
+                                onOpenThisDevice = { route = AppRoute.THIS_DEVICE },
+                                onOpenDiagnostics = { route = AppRoute.DIAGNOSTICS },
+                                onOpenSync = {
+                                    viewModel.clearSyncClipboardItem()
+                                    route = AppRoute.SYNC
+                                },
+                                onOpenDetails = { id ->
+                                    detailDeviceId = id
+                                    route = AppRoute.DEVICE_DETAILS
+                                },
+                                onPair = viewModel::pair,
+                                onConnect = viewModel::connect,
+                            )
 
-                        AppRoute.DEVICE_DETAILS -> {
-                            val device = viewModel.pairedDevices.firstOrNull { it.id == detailDeviceId }
-                            DeviceDetailsScreen(
-                                device = device,
+                            AppRoute.DEVICE_DETAILS -> {
+                                val device =
+                                    viewModel.pairedDevices.firstOrNull { it.id == detailDeviceId }
+                                DeviceDetailsScreen(
+                                    device = device,
+                                    onBack = ::openDevices,
+                                    onAutoConnectChange = { checked ->
+                                        detailDeviceId?.let {
+                                            viewModel.setAutoConnect(
+                                                it, checked
+                                            )
+                                        }
+                                    },
+                                    onDisconnect = {
+                                        detailDeviceId?.let { viewModel.disconnect(it) }
+                                    },
+                                    onForget = {
+                                        forgetDeviceId = detailDeviceId
+                                    },
+                                )
+                            }
+
+                            AppRoute.PAIR_NEW -> PairNewDeviceScreen(
+                                availableDevices = viewModel.availableDevices.map {
+                                    AvailableDeviceUi(it, viewModel.requestingPairId == it.id)
+                                },
                                 onBack = ::openDevices,
-                                onAutoConnectChange = { checked ->
-                                    detailDeviceId?.let { viewModel.setAutoConnect(it, checked) }
+                                requestId = viewModel.requestingPairId,
+                                onPair = viewModel::pair,
+                                onCantSeeDevice = { route = AppRoute.CANT_SEE_DEVICE },
+                            )
+
+                            AppRoute.THIS_DEVICE -> ThisDeviceScreen(
+                                identity = viewModel.identity,
+                                onBack = ::openDevices,
+                            )
+
+                            AppRoute.SYNC -> SendScreen(
+                                item = viewModel.systemClipboardItem,
+                                writtenText = viewModel.writtenText,
+                                pendingFiles = viewModel.pendingFiles,
+                                connectedDeviceCount = viewModel.connectedDeviceCount(),
+                                autoSyncOnResume = viewModel.autoSyncOnResume,
+                                onAutoSyncChange = { enabled ->
+                                    viewModel.setAutoSyncOnResume(context, enabled)
                                 },
-                                onDisconnect = {
-                                    detailDeviceId?.let { viewModel.disconnect(it) }
+                                onRefresh = {
+                                    viewModel.refreshSystemClipboard(context)
                                 },
-                                onForget = {
-                                    forgetDeviceId = detailDeviceId
+                                onSaveWrittenText = viewModel::saveWrittenText,
+                                onClearWrittenText = viewModel::clearWrittenText,
+                                onSendText = viewModel::sendWrittenText,
+                                onPickFiles = {
+                                    pickFiles.launch(arrayOf("*/*"))
+                                },
+                                onRemovePendingFile = viewModel::removePendingFile,
+                                onSend = { item ->
+                                    viewModel.sendSelectedClipboardItem(item, context)
+                                },
+                                onSendFiles = {
+                                    viewModel.sendPendingFiles(context)
+                                },
+                                sendingFiles = viewModel.sendingFiles,
+                                onBack = ::openDevices,
+                                onClearClipboard = {
+                                    viewModel.clearSyncClipboardItem()
                                 },
                             )
-                        }
 
-                        AppRoute.PAIR_NEW -> PairNewDeviceScreen(
-                            availableDevices = viewModel.availableDevices.map {
-                                AvailableDeviceUi(it, viewModel.requestingPairId == it.id)
-                            },
-                            onBack = ::openDevices,
-                            requestId = viewModel.requestingPairId,
-                            onPair = viewModel::pair,
-                            onCantSeeDevice = { route = AppRoute.CANT_SEE_DEVICE },
-                        )
+                            AppRoute.CANT_SEE_DEVICE -> CantSeeDeviceScreen(onBack = {
+                                route = AppRoute.PAIR_NEW
+                            })
 
-                        AppRoute.THIS_DEVICE -> ThisDeviceScreen(
-                            identity = viewModel.identity,
-                            onBack = ::openDevices,
-                        )
+                            AppRoute.DIAGNOSTICS -> DiagnosticsScreen(
+                                logs = viewModel.diagnosticLogs,
+                                onBack = ::openDevices,
+                                onRefresh = viewModel::refreshDiagnosticLogs,
+                                onClear = viewModel::clearDiagnosticLogs,
+                            )
 
-                        AppRoute.SYNC -> SendScreen(
-                            item = viewModel.systemClipboardItem,
-                            pendingFiles = viewModel.pendingFiles,
-                            connectedDeviceCount = viewModel.connectedDeviceCount(),
-                            autoSyncOnResume = viewModel.autoSyncOnResume,
-                            onAutoSyncChange = { enabled -> viewModel.setAutoSyncOnResume(context, enabled) },
-                            onRefresh = { viewModel.refreshSystemClipboard(context) },
-                            onPickFiles = { pickFiles.launch(arrayOf("*/*")) },
-                            onRemovePendingFile = viewModel::removePendingFile,
-                            onSend = { item -> viewModel.sendSelectedClipboardItem(item, context) },
-                            onSendFiles = { viewModel.sendPendingFiles(context) },
-                            sendingFiles = viewModel.sendingFiles,
-                            onBack = ::openDevices,
-                            onClearClipboard = {
-                                viewModel.clearSyncClipboardItem()
-                            },
-                        )
-
-                        AppRoute.CANT_SEE_DEVICE -> CantSeeDeviceScreen(onBack = { route = AppRoute.PAIR_NEW })
-
-                        AppRoute.DIAGNOSTICS -> DiagnosticsScreen(
-                            logs = viewModel.diagnosticLogs,
-                            onBack = ::openDevices,
-                            onRefresh = viewModel::refreshDiagnosticLogs,
-                            onClear = viewModel::clearDiagnosticLogs,
-                        )
-                        AppRoute.HISTORY -> HistoryScreen(
-                            items = viewModel.historyItems,
-                            fileTransfers = viewModel.fileTransfers,
-                            search = searchHistory,
-                            onSearchChange = { searchHistory = it },
-                            onBack = ::openHistory,
-                            onClearAll = viewModel::clearHistory,
-                            onItemActions = { selectedHistory = it },
-                            onCopyItem = { item ->
-                                if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(item)
-                                else {
-                                    AndroidClipboardPlatform.copyWithoutSync(context, item.content)
-                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                        )
+                            AppRoute.HISTORY -> HistoryScreen(
+                                items = viewModel.historyItems,
+                                fileTransfers = viewModel.fileTransfers,
+                                search = searchHistory,
+                                onSearchChange = { searchHistory = it },
+                                onBack = ::openHistory,
+                                onClearAll = viewModel::clearHistory,
+                                onItemActions = { selectedHistory = it },
+                                onCopyItem = { item ->
+                                    if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(
+                                        item
+                                    )
+                                    else {
+                                        AndroidClipboardPlatform.copyWithoutSync(
+                                            context, item.content
+                                        )
+                                        Toast.makeText(
+                                            context, "Copied to clipboard", Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -215,7 +237,8 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                         if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(item)
                         else {
                             AndroidClipboardPlatform.copyWithoutSync(context, item.content)
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT)
+                                .show()
                         }
                         selectedHistory = null
                     },

@@ -89,6 +89,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.saveable.rememberSaveable
 
 @Composable
 fun DevicesScreen(
@@ -765,11 +768,15 @@ private fun ExperimentalWifiDirectCard(
 @Composable
 fun SendScreen(
     item: SystemClipboardItem?,
+    writtenText: String?,
     pendingFiles: List<OutgoingFile>,
     connectedDeviceCount: Int,
     autoSyncOnResume: Boolean,
     onAutoSyncChange: (Boolean) -> Unit,
     onRefresh: () -> Unit,
+    onSaveWrittenText: (String) -> Unit,
+    onClearWrittenText: () -> Unit,
+    onSendText: (String) -> Unit,
     onPickFiles: () -> Unit,
     onRemovePendingFile: (Int) -> Unit,
     onSend: (SystemClipboardItem?) -> Unit,
@@ -779,10 +786,25 @@ fun SendScreen(
     onClearClipboard: () -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+    val elevated by remember {
+        derivedStateOf { listState.canScrollBackward }
+    }
+
+    var editingText by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var textDraft by rememberSaveable {
+        mutableStateOf("")
+    }
+
     val clipboardReady = item?.canSend == true
-    val readyCount = (if (clipboardReady) 1 else 0) + pendingFiles.size
-    val canSend = connectedDeviceCount > 0 && readyCount > 0
+    val writtenTextReady = writtenText != null
+    val contentReady = clipboardReady || writtenTextReady
+
+    val readyCount = (if (contentReady) 1 else 0) + pendingFiles.size
+    val canSend = connectedDeviceCount > 0 && readyCount > 0 && !editingText
+
     val palette = LocalClipxPalette.current
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -827,22 +849,208 @@ fun SendScreen(
             }
 
             item {
-                GlassCard(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Clipboard", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                        IconButton(onClick = onRefresh) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh clipboard", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                    if (item == null) {
-                        Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onRefresh).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = palette.mutedText, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text("Add clipboard", style = MaterialTheme.typography.bodyMedium, color = palette.mutedText)
+                GlassCard(
+                    modifier = Modifier.padding(
+                        horizontal = 18.dp,
+                        vertical = 4.dp,
+                    )
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+
+                        // Header and content actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Content to send",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+
+                            if (contentReady) {
+                                Text(
+                                    when {
+                                        writtenTextReady -> "Written text"
+                                        item?.isImage == true -> "Image"
+                                        item?.isFile == true -> "File"
+                                        item?.isRichText == true -> "Rich text"
+                                        else -> "Text"
+                                    },
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onRefresh,
+                                enabled = !editingText,
+                            ) {
+                                Icon(
+                                    Icons.Filled.ContentPaste,
+                                    contentDescription = "Paste from system clipboard",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    textDraft = writtenText
+                                        ?: item?.let {
+                                            if (it.isText) it.text.orEmpty() else ""
+                                        }
+                                                ?: ""
+
+                                    editingText = true
+                                },
+                                enabled = !editingText,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Edit,
+                                    contentDescription = "Write your own text",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                    } else {
-                        CurrentClipboardItem(
-                            item = item,
-                            onClear = onClearClipboard,
-                        )
+
+                        when {
+                            // Text editor
+                            editingText -> {
+                                OutlinedTextField(
+                                    value = textDraft,
+                                    onValueChange = { textDraft = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = {
+                                        Text("Write a message or paste text here...")
+                                    },
+                                    label = { Text("Message") },
+                                    minLines = 4,
+                                    maxLines = 8,
+                                    shape = RoundedCornerShape(12.dp),
+                                )
+
+                                Spacer(Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            editingText = false
+                                        },
+                                    ) {
+                                        Text("Cancel")
+                                    }
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    Button(
+                                        onClick = {
+                                            onSaveWrittenText(textDraft)
+                                            editingText = false
+                                        },
+                                        enabled = textDraft.isNotBlank(),
+                                        shape = RoundedCornerShape(10.dp),
+                                    ) {
+                                        Text("Save text")
+                                    }
+                                }
+                            }
+
+                            // Manually written content
+                            writtenTextReady -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Edit,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(21.dp),
+                                    )
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(
+                                            text = writtenText.orEmpty(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+
+                                        Spacer(Modifier.height(4.dp))
+
+                                        Text(
+                                            "Written text",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = palette.mutedText,
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = onClearWrittenText,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Clear,
+                                            contentDescription = "Remove written text",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Actual system clipboard content
+                            clipboardReady -> {
+                                CurrentClipboardItem(
+                                    item = item!!,
+                                    onClear = onClearClipboard,
+                                )
+                            }
+
+                            // Nothing selected
+                            else -> {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = onRefresh)
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.ContentPaste,
+                                        contentDescription = null,
+                                        tint = palette.mutedText,
+                                        modifier = Modifier.size(21.dp),
+                                    )
+
+                                    Spacer(Modifier.width(10.dp))
+
+                                    Column {
+                                        Text(
+                                            "Nothing selected",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
+
+                                        Text(
+                                            "Paste from your clipboard or write your own message.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = palette.mutedText,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -915,10 +1123,22 @@ fun SendScreen(
                     )
                     Text(
                         when {
-                            pendingFiles.isNotEmpty() && clipboardReady -> "${pendingFiles.size} file${if (pendingFiles.size == 1) "" else "s"} + clipboard"
-                            pendingFiles.isNotEmpty() -> "${pendingFiles.size} selected file${if (pendingFiles.size == 1) "" else "s"}"
-                            clipboardReady -> "Current clipboard selected"
-                            else -> "Choose content above"
+                            pendingFiles.isNotEmpty() && contentReady ->
+                                "${pendingFiles.size} file${if (pendingFiles.size == 1) "" else "s"} + ${
+                                    if (writtenTextReady) "written text" else "clipboard"
+                                }"
+
+                            pendingFiles.isNotEmpty() ->
+                                "${pendingFiles.size} selected file${if (pendingFiles.size == 1) "" else "s"}"
+
+                            writtenTextReady ->
+                                "Written text selected"
+
+                            clipboardReady ->
+                                "Current clipboard selected"
+
+                            else ->
+                                "Choose content above"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.mutedText,
@@ -927,8 +1147,14 @@ fun SendScreen(
                 Spacer(Modifier.width(12.dp))
                 Button(
                     onClick = {
-                        if (clipboardReady) onSend(item)
-                        if (pendingFiles.isNotEmpty()) onSendFiles()
+                        when {
+                            writtenTextReady -> onSendText(writtenText.orEmpty())
+                            clipboardReady -> onSend(item)
+                        }
+
+                        if (pendingFiles.isNotEmpty()) {
+                            onSendFiles()
+                        }
                     },
                     enabled = canSend && !sendingFiles,
                     shape = RoundedCornerShape(12.dp),

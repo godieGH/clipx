@@ -16,6 +16,16 @@ export type CurrentClipboard = {
   rgba?: number[];
 };
 
+export type SendContent =
+  | {
+      source: "clipboard";
+      clipboard: CurrentClipboard;
+    }
+  | {
+      source: "written";
+      text: string;
+    };
+
 export interface PairedDevice {
   fingerprint: string;
   name: string;

@@ -39,6 +39,10 @@ class ClipxCoreViewModel(
         private set
     var systemClipboardItem by androidx.compose.runtime.mutableStateOf<SystemClipboardItem?>(null)
         private set
+
+    var writtenText by androidx.compose.runtime.mutableStateOf<String?>(null)
+        private set
+
     var autoSyncOnResume by androidx.compose.runtime.mutableStateOf(
         AndroidClipboardPlatform.isAutoSyncOnResumeEnabled(application)
     )
@@ -284,10 +288,35 @@ class ClipxCoreViewModel(
     }
 
     fun refreshSystemClipboard(context: Context) {
-        systemClipboardItem = AndroidClipboardPlatform.readPrimaryClipboard(context).firstOrNull { it.canSend }
+        val item = AndroidClipboardPlatform
+            .readPrimaryClipboard(context)
+            .firstOrNull { it.canSend }
+
+        if (item == null) {
+            emitMessage("No sendable content in the system clipboard")
+            return
+        }
+
+        // Selecting clipboard content replaces manually written content.
+        systemClipboardItem = item
+        writtenText = null
     }
 
-    fun clearSyncClipboardItem() { systemClipboardItem = null }
+    fun saveWrittenText(text: String) {
+        if (text.isBlank()) return
+
+        writtenText = text
+        systemClipboardItem = null
+    }
+
+    fun clearWrittenText() {
+        writtenText = null
+    }
+
+    fun clearSyncClipboardItem() {
+        systemClipboardItem = null
+        writtenText = null
+    }
 
     fun enqueueFiles(context: Context, uris: List<Uri>) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -355,7 +384,7 @@ class ClipxCoreViewModel(
 
     fun enqueueSharedText(text: String) {
         if (text.isBlank()) return
-
+        writtenText = null
         systemClipboardItem = SystemClipboardItem(
             -1,
             text,
@@ -397,6 +426,33 @@ class ClipxCoreViewModel(
                 AndroidClipboardPlatform.setLastSyncedMarker(context, AndroidClipboardPlatform.markerFor(item))
                 withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage("Clipboard sent"); onDone() }
             }.onFailure { withContext(kotlinx.coroutines.Dispatchers.Main) { emitMessage(it.message ?: "Could not send clipboard") } }
+        }
+    }
+
+    fun sendWrittenText(text: String) {
+        if (text.isBlank()) {
+            emitMessage("Enter some text before sending")
+            return
+        }
+
+        if (connectedDeviceCount() == 0) {
+            emitMessage("No connected devices")
+            return
+        }
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val service = bridge ?: error("Clipx core is not ready")
+                service.sendClipboard(text)
+            }.onSuccess {
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    emitMessage("Text sent")
+                }
+            }.onFailure {
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    emitMessage(it.message ?: "Could not send text")
+                }
+            }
         }
     }
 
