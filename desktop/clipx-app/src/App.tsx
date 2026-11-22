@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
+  Bell,
   CircleHelp,
   ClipboardPaste,
   Copy,
@@ -25,6 +26,7 @@ import {
   PencilLine,
   RefreshCw,
   Send,
+  Settings,
   Trash2,
   Type,
   Upload,
@@ -1308,6 +1310,27 @@ function App() {
       <header className="title-bar" data-tauri-drag-region>
         <div className="app-logo">
           <img src="/clipx-icon.png" alt="clipx logo" />
+          <span className="titlebar-divider" />
+          <div className="title-right-controls">
+            <button
+              className="icon-button titlebar-icon"
+              title="settings"
+              onClick={() => {
+                showToast("This feature is not implemented yet.");
+              }}
+            >
+              <Settings size={15} />
+            </button>
+            <button
+              className="icon-button titlebar-icon"
+              title="notifications"
+              onClick={() => {
+                showToast("This feature is not implemented yet.");
+              }}
+            >
+              <Bell size={15} />
+            </button>
+          </div>
         </div>
         <div className="window-controls">
           <button
