@@ -72,20 +72,23 @@ class ClipxCoreViewModel(
 
     init {
         viewModelScope.launch {
+            application.coreEvents.collect(::handleEvent)
+        }
+        viewModelScope.launch {
             bridge = application.awaitBridgeService()
             refreshAll()
             refreshAvailable()
-            delay(2_500.milliseconds)
             refreshAvailable()
         }
-        viewModelScope.launch {
-            application.coreEvents.collect(::handleEvent)
-        }
+
     }
 
     private suspend fun handleEvent(event: CoreUiEvent) {
         when (event) {
-            CoreUiEvent.DevicesChanged -> refreshPaired()
+            CoreUiEvent.DevicesChanged -> {
+                refreshPaired()
+                refreshAvailable()
+            }
             CoreUiEvent.ClipboardChanged -> refreshHistory()
             is CoreUiEvent.PairingChanged -> {
                 refreshPaired()

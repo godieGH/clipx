@@ -20,7 +20,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     fs::{self, File, OpenOptions},
     io::{Seek, SeekFrom, Write},
     path::PathBuf,
@@ -326,27 +326,11 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     }
                 }
                 Some((announce, addr)) = discovered_rx.recv() => { self.handle_announce(announce, addr.ip()); }
-                _ = prune_interval.tick() => {
-                    // Availability (Unavailable <-> Disconnected) is derived
-                    // from `seen` at read time in build_paired_devices, so a
-                    // trusted device quietly timing out here needs its own
-                    // ping — nothing else would ever announce it.
-                    let trusted_seen_before: HashSet<String> = self
-                        .trusted
-                        .list()
-                        .filter(|d| self.seen.get(&d.id).is_some())
-                        .map(|d| d.id.clone())
-                        .collect();
-                    self.seen.prune_stale(Duration::from_secs(10));
-                    let trusted_seen_after: HashSet<String> = self
-                        .trusted
-                        .list()
-                        .filter(|d| self.seen.get(&d.id).is_some())
-                        .map(|d| d.id.clone())
-                        .collect();
-                    if trusted_seen_before != trusted_seen_after {
+               _ = prune_interval.tick() => {
+                    if self.seen.prune_stale(Duration::from_secs(10)) {
                         self.notify_devices_changed();
                     }
+
                     self.prune_expired_sessions();
                     self.check_stalled_downloads();
                 }
@@ -557,10 +541,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             last_seen: Instant::now(),
         });
 
-        // A trusted device just came back into view — its connection state
-        // flips Unavailable -> Disconnected even though nothing else here
-        // changed, so that needs its own ping too.
-        if just_appeared && self.trusted.is_trusted(&device_id) {
+        if just_appeared {
             self.notify_devices_changed();
         }
 

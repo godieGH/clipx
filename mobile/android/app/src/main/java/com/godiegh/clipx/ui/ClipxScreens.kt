@@ -72,6 +72,23 @@ import com.godiegh.clipx.SystemClipboardItem
 import com.godiegh.clipx.OutgoingFile
 import com.godiegh.clipx.ui.theme.LocalClipxPalette
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun DevicesScreen(
@@ -266,9 +283,9 @@ fun PairNewDeviceScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             ) {
                 ScanRadar()
-                Text("Scanning for Clipx devices…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
+                Text("Discovered Nearby Devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(top = 1.dp))
                 Text(
-                    "Make sure the other device has Clipx app open and is discoverable.",
+                    "Make sure the other device has Clipx app open and is reachable.",
                     color = palette.mutedText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 48.dp, vertical = 5.dp),
@@ -358,41 +375,388 @@ fun ThisDeviceScreen(identity: com.godiegh.clipx.ThisDeviceInfo?, onBack: () -> 
     }
 }
 
+private data class DiscoveryGuideStep(
+    val number: Int,
+    val title: String,
+    val summary: String,
+    val details: String,
+)
+
+private val discoveryGuideSteps = listOf(
+    DiscoveryGuideStep(
+        number = 1,
+        title = "Connect both devices",
+        summary = "Use the same Wi-Fi network for normal discovery.",
+        details = "Connect this phone and the other device to the same Wi-Fi network. Both devices need to be able to communicate over that network."
+    ),
+    DiscoveryGuideStep(
+        number = 2,
+        title = "Keep ClipX running",
+        summary = "Discovery happens automatically. There is no Scan button.",
+        details = "ClipX automatically announces its presence and listens for other ClipX devices. Keep ClipX running on both devices while you wait for them to discover each other."
+    ),
+    DiscoveryGuideStep(
+        number = 3,
+        title = "Devices discover each other",
+        summary = "Reachable devices are detected automatically.",
+        details = "When this phone receives an announcement from another ClipX device, the core identifies it and records it as an available device."
+    ),
+    DiscoveryGuideStep(
+        number = 4,
+        title = "The list updates automatically",
+        summary = "The discovered device appears under Available Devices.",
+        details = "When the available-device list changes, ClipX notifies the app. The app fetches the latest list and displays the device. You don't need to scan or manually refresh."
+    ),
+    DiscoveryGuideStep(
+        number = 5,
+        title = "Pair your device",
+        summary = "Tap Pair beside the device you want to connect.",
+        details = "Follow the pairing prompts to establish trust between the two devices. Once pairing succeeds, the device moves into your Paired Devices list."
+    ),
+    DiscoveryGuideStep(
+        number = 6,
+        title = "Availability stays up to date",
+        summary = "Devices can disappear and return automatically.",
+        details = "If a device stops announcing its presence for long enough, ClipX treats it as unavailable and removes it from the nearby list. When it becomes reachable and announces itself again, it will appear in the list."
+    ),
+)
+
 @Composable
 fun CantSeeDeviceScreen(onBack: () -> Unit) {
     val palette = LocalClipxPalette.current
     val listState = rememberLazyListState()
-    val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+    val elevated by remember {
+        derivedStateOf { listState.canScrollBackward }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("Can’t see your device?", onBack, elevated = elevated)
+        ScreenHeader(
+            "Can’t see your device?",
+            onBack,
+            elevated = elevated,
+        )
+
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            contentPadding = PaddingValues(
+                horizontal = 18.dp,
+                vertical = 16.dp,
+            ),
         ) {
+            // Introduction
             item {
                 GlassCard {
-                    Text("Connect over the same Wi-Fi", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-                    Spacer(Modifier.height(12.dp))
+                    Column {
+                        Text(
+                            text = "Devices appear automatically",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            text = "ClipX continuously discovers other running ClipX devices on your local network. You don't need to start a scan.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.mutedText,
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Text(
+                            text = "Make sure both devices are connected to the same Wi-Fi network and keep ClipX running. Follow the steps below to understand what happens next.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.mutedText,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+            }
+
+            // Automatic discovery lifecycle
+            item {
+                Text(
+                    text = "How automatic discovery works",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Expand any step to see what happens.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.mutedText,
+                )
+
+                Spacer(Modifier.height(16.dp))
+            }
+
+            itemsIndexed(
+                items = discoveryGuideSteps,
+                key = { _, step -> step.number },
+            ) { index, step ->
+                DiscoveryTimelineStep(
+                    step = step,
+                    isLast = index == discoveryGuideSteps.lastIndex,
+                    initiallyExpanded = index == 0,
+                    mutedText = palette.mutedText,
+                )
+            }
+
+            // Experimental Wi-Fi Direct information
+            item {
+                Spacer(Modifier.height(12.dp))
+
+                ExperimentalWifiDirectCard(
+                    mutedText = palette.mutedText,
+                )
+
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoveryTimelineStep(
+    step: DiscoveryGuideStep,
+    isLast: Boolean,
+    initiallyExpanded: Boolean,
+    mutedText: Color,
+) {
+    var expanded by rememberSaveable(step.number) {
+        mutableStateOf(initiallyExpanded)
+    }
+
+    val lineColor = MaterialTheme.colorScheme.outlineVariant
+    val numberBackground = MaterialTheme.colorScheme.primaryContainer
+    val numberColor = MaterialTheme.colorScheme.onPrimaryContainer
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+
+        // Number and connecting line
+        Column(
+            modifier = Modifier
+                .width(32.dp)
+                .fillMaxHeight(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(numberBackground),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = step.number.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = numberColor,
+                )
+            }
+
+            if (!isLast) {
+                Spacer(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .weight(1f)
+                        .background(lineColor),
+                )
+            }
+        }
+
+        // Expandable content
+        Column(
+            modifier = Modifier.weight(1f),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize()
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = if (expanded) {
+                            "Collapse ${step.title}"
+                        } else {
+                            "Expand ${step.title}"
+                        },
+                    ) {
+                        expanded = !expanded
+                    },
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        .copy(alpha = 0.45f),
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(
+                        alpha = 0.45f,
+                    ),
+                ),
+                elevation = CardDefaults.cardElevation(
+                    defaultElevation = 0.dp,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                text = step.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+
+                            Spacer(Modifier.height(4.dp))
+
+                            Text(
+                                text = step.summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = mutedText,
+                            )
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        ExpandChevron(expanded = expanded)
+                    }
+
+                    if (expanded) {
+                        Spacer(Modifier.height(14.dp))
+
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant
+                                .copy(alpha = 0.5f),
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Text(
+                            text = step.details,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = mutedText,
+                        )
+                    }
+                }
+            }
+
+            // This space is also occupied by the connecting line.
+            if (!isLast) {
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpandChevron(expanded: Boolean) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Canvas(
+        modifier = Modifier.size(22.dp),
+    ) {
+        val path = Path().apply {
+            if (expanded) {
+                moveTo(size.width * 0.25f, size.height * 0.60f)
+                lineTo(size.width * 0.50f, size.height * 0.40f)
+                lineTo(size.width * 0.75f, size.height * 0.60f)
+            } else {
+                moveTo(size.width * 0.25f, size.height * 0.40f)
+                lineTo(size.width * 0.50f, size.height * 0.60f)
+                lineTo(size.width * 0.75f, size.height * 0.40f)
+            }
+        }
+
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(
+                width = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun ExperimentalWifiDirectCard(
+    mutedText: Color,
+) {
+    var expanded by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    GlassCard {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = if (expanded) {
+                            "Collapse Wi-Fi Direct information"
+                        } else {
+                            "Expand Wi-Fi Direct information"
+                        },
+                    ) {
+                        expanded = !expanded
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                ) {
                     Text(
-                        "For now Clipx discovers devices on your local network. Put this phone and the other device on the same Wi-Fi network, then keep Clipx open on both devices.",
-                        color = palette.mutedText,
-                        style = MaterialTheme.typography.bodyLarge,
+                        text = "Wi-Fi Direct",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Spacer(Modifier.height(16.dp))
-                    Text("1. Join the same Wi-Fi network on both devices.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text("2. Open Clipx on the other device and keep it running.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text("3. Return here and open Scan again.", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(12.dp))
+
+                    Spacer(Modifier.height(4.dp))
+
                     Text(
-                        "This version uses local Wi‑Fi discovery and pairing; if the device still does not appear, keep both phones on the same Wi‑Fi and leave Clipx open on both sides.",
-                        color = palette.mutedText,
+                        text = "An experimental connection option",
                         style = MaterialTheme.typography.bodySmall,
+                        color = mutedText,
                     )
                 }
+
+                ExpandChevron(expanded = expanded)
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "Some ClipX builds also support an experimental Wi-Fi Direct link. You can try it as an alternative when normal local-network connectivity is unavailable. However, support and reliability can vary between devices.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = mutedText,
+                )
             }
         }
     }

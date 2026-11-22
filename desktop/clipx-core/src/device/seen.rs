@@ -31,9 +31,13 @@ impl SeenDeviceRegistry {
 
     /// Remove devices we haven't heard from in `max_age` — they've likely
     /// gone offline or left the network without a graceful goodbye.
-    pub fn prune_stale(&mut self, max_age: Duration) {
+    pub fn prune_stale(&mut self, max_age: Duration) -> bool {
         let now = Instant::now();
+        let previous_len = self.devices.len();
+
         self.devices
             .retain(|_, d| now.duration_since(d.last_seen) < max_age);
+
+        self.devices.len() != previous_len
     }
 }

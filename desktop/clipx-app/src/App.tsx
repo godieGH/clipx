@@ -63,7 +63,6 @@ function App() {
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [available, setAvailable] = useState<AvailableDevice[]>([]);
   const [history, setHistory] = useState<ClipItem[]>([]);
-  const [scanning, setScanning] = useState(false);
   const [showIdentity, setShowIdentity] = useState(false);
   const [showIdentityDisabled, setShowIdentityDisabled] = useState(true);
   const [detailFingerprint, setDetailFingerprint] = useState<string | null>(
@@ -236,6 +235,7 @@ function App() {
     const initialLoads = [
       getThisDeviceIdentity(),
       refreshPaired(),
+      refreshAvailable(),
       refreshHistory(),
     ];
 
@@ -279,7 +279,6 @@ function App() {
         ]);
         await appWindow.show();
       }
-      handleScan();
     }
     positionAppWindow();
 
@@ -289,7 +288,10 @@ function App() {
     let cancelled = false;
     const unlistenPromises = [
       listen("devices-changed", () => {
-        if (!cancelled) refreshPaired();
+        if (cancelled) return;
+
+        void refreshPaired();
+        void refreshAvailable();
       }),
       listen("clipboard-changed", () => {
         if (!cancelled) refreshHistory();
@@ -334,18 +336,6 @@ function App() {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
     };
   }, []);
-
-  function handleScan() {
-    setScanning(true);
-    refreshAvailable().finally(() => {
-      // Give a little delay to make the UI feel real, then refresh again in
-      // case anything changed.
-      setTimeout(async () => {
-        await refreshAvailable();
-        setScanning(false);
-      }, 3000);
-    });
-  }
 
   async function handleConnect(fingerprint: string) {
     setPaired((prev) =>
@@ -711,24 +701,12 @@ function App() {
 
           <section className="device-section">
             <div className="section-header">
-              <h2 className="section-title">Available Devices</h2>
-              <button
-                className={`scan-button ${scanning ? "spinning" : ""}`}
-                onClick={handleScan}
-                disabled={scanning}
-              >
-                <Radar size={14} />
-                {scanning ? "Scanning…" : "Scan"}
-              </button>
+              <h2 className="section-title">Nearby Devices</h2>
             </div>
             {available.length === 0 ? (
               <EmptyState
-                title={scanning ? "Scanning nearby…" : "No devices found"}
-                hint={
-                  scanning
-                    ? "Looking for ClipX devices on your network."
-                    : "Tap scan to search your network."
-                }
+                title="No nearby devices yet"
+                hint={"Discovered devices will appear here automatically."}
               />
             ) : (
               <ScrollFade className="devices-scroll">
