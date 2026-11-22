@@ -103,3 +103,15 @@
   min-height: 0;
   overflow-y: auto;
 }
+
+.scroll-fade-textarea {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scroll-fade-textarea::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

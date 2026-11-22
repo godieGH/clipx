@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { showToast, subscribeToast, ToastState } from "./components/toast";
 import { Toast } from "./components/Toast.tsx";
-import { ScrollFade } from "./components/ScrollFade";
+import { ScrollFade, ScrollFadeTextarea } from "./components/ScrollFade";
 import {
   AvailableRow,
   DeviceDetail,
@@ -921,7 +921,7 @@ function App() {
 
                   {editingText ? (
                     <div className="sync-message-editor-wrap">
-                      <textarea
+                      <ScrollFadeTextarea
                         className="sync-message-editor"
                         value={textDraft}
                         onChange={(e) => setTextDraft(e.target.value)}

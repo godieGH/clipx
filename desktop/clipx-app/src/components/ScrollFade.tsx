@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  TextareaHTMLAttributes,
+} from "react";
 
 interface ScrollFadeState {
   canUp: boolean;
@@ -9,7 +13,7 @@ interface ScrollFadeState {
   hasOverflow: boolean;
 }
 
-function useScrollFade<T extends HTMLDivElement>() {
+function useScrollFade<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const isDraggingRef = useRef(false);
   const startYRef = useRef(0);
@@ -164,6 +168,54 @@ export function ScrollFade({
         <div
           className="scroll-fade-thumb"
           style={{ top: `${state.thumbTop}%`, height: `${state.thumbHeight}%` }}
+          {...thumbProps}
+        />
+      )}
+    </div>
+  );
+}
+
+export function ScrollFadeTextarea({
+  className,
+  value,
+  onChange,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const { ref, state, onScroll, thumbProps } =
+    useScrollFade<HTMLTextAreaElement>();
+
+  // Recalculate the thumb when the text changes, even if the
+  // textarea's outer dimensions have not changed.
+  useEffect(() => {
+    onScroll();
+  }, [value, onScroll]);
+
+  return (
+    <div className="scroll-fade-wrap scroll-fade-textarea-wrap">
+      <textarea
+        {...props}
+        ref={ref}
+        value={value}
+        onChange={onChange}
+        onScroll={onScroll}
+        className={`scroll-fade-textarea ${className ?? ""}`}
+      />
+
+      <div
+        className={`scroll-fade-edge top ${state.canUp ? "visible" : ""}`}
+      />
+
+      <div
+        className={`scroll-fade-edge bottom ${state.canDown ? "visible" : ""}`}
+      />
+
+      {state.hasOverflow && (
+        <div
+          className="scroll-fade-thumb"
+          style={{
+            top: `${state.thumbTop}%`,
+            height: `${state.thumbHeight}%`,
+          }}
           {...thumbProps}
         />
       )}

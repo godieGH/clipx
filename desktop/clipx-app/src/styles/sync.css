@@ -20,7 +20,7 @@
   min-height: 0;
 }
 
-.sync-scroll .scroll-fade-viewport {
+.sync-scroll > .scroll-fade-viewport {
   height: 100%;
   padding: 0 2px 12px;
   overflow-y: auto;
@@ -744,6 +744,7 @@
   min-height: 125px;
   padding: 12px;
   resize: vertical;
+  overflow-y: auto;
   border: 1px solid rgba(128, 128, 128, 0.25);
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.025);
