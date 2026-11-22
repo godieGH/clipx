@@ -20,7 +20,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     fs::{self, File, OpenOptions},
     io::{Seek, SeekFrom, Write},
     path::PathBuf,

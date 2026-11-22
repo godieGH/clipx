@@ -27,10 +27,11 @@ humantime-serde = "1.1.1"
 if-addrs = "0.15.0"
 socket2 = { version = "0.5", features = ["all"] }
 interprocess = { version = "2.4.2", features = ["tokio"] }
+percent-encoding = "2"
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
-arboard = "3.6.1"
+arboard = {version = "3.6.1", features = ["wayland-data-control"]}
 
 
 [target.'cfg(windows)'.dependencies]
