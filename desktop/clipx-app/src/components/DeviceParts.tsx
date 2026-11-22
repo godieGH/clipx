@@ -18,6 +18,7 @@ import type {
 import { groupFingerprint } from "../utils";
 import { Popover, anchorOf } from "./Popover";
 import type { Anchor } from "./Popover";
+import { showToast } from "./toast";
 
 export function DeviceIcon({
   type,
@@ -288,6 +289,20 @@ export function DeviceDetail({
               onChange={(v) => onToggleAutoConnect(device.fingerprint, v)}
             />
           </div>
+          <div className="detail-setting">
+            <div className="detail-setting-text">
+              <div className="detail-setting-title">Auto-send</div>
+              <div className="detail-setting-hint">
+                Send to this device automatically when clipboard changes
+              </div>
+            </div>
+            <Toggle checked={false} onChange={(v) => {
+              console.debug(v)
+              showToast("This feature is not implemented yet")
+            }}/>
+          </div>
+
+          
 
           <div className="detail-actions">
             {isConnected && (

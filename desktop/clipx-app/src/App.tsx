@@ -900,7 +900,7 @@ function App() {
                       )}
 
                       <button
-                        className="sync-icon-action"
+                        className="sync-icon-action word-button"
                         onClick={refreshCurrentClipboard}
                         title="Paste from system clipboard"
                         aria-label="Paste from system clipboard"
@@ -910,7 +910,7 @@ function App() {
                       </button>
 
                       <button
-                        className="sync-icon-action"
+                        className="sync-icon-action word-button"
                         onClick={openTextEditor}
                         title="Write your own text"
                         aria-label="Write your own text"

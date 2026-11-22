@@ -693,8 +693,6 @@
 
   padding: 0;
   margin: 0;
-
-  border:1px solid rgba(0,0,0,.12);
   border-radius: 8px;
 
   background: transparent;
@@ -722,12 +720,10 @@
 
 .sync-icon-action:hover {
   opacity: 1;
-  border-color: transparent;
   background: rgba(0, 0, 0, 0.06);
 }
 
 .sync-icon-action:active {
-  border-color: transparent;
   background: rgba(0, 0, 0, 0.1);
 }
 

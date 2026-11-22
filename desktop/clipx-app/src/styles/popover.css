@@ -15,7 +15,7 @@
 }
 .popover-overlay--bubble .popover-panel {
   position: absolute;
-  width: 300px;
+  width: 310px;
   max-width: calc(100vw - 16px);
 }
 
