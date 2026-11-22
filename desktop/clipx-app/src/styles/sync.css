@@ -185,6 +185,13 @@
   opacity: 0.55;
 }
 
+.sync-file-extras {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
 .sync-clipboard-actions {
   display: flex;
   align-items: center;
@@ -687,7 +694,7 @@
   padding: 0;
   margin: 0;
 
-  border: 1px solid transparent;
+  border:1px solid rgba(0,0,0,.12);
   border-radius: 8px;
 
   background: transparent;

@@ -73,7 +73,7 @@ main {
   text-align: left;
 }
 
-.scan-button {
+.word-button {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -85,12 +85,12 @@ main {
 }
 
 @media (prefers-color-scheme: dark) {
-  .scan-button {
+  .word-button {
     border-color: rgba(255, 255, 255, 0.15);
   }
 }
 
-.scan-button.spinning svg {
+.word-button.spinning svg {
   animation: spin 1s linear infinite;
 }
 

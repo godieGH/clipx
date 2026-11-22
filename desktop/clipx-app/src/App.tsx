@@ -1019,9 +1019,14 @@ function App() {
                       </div>
                     </div>
                     {outgoingFiles.length > 0 && (
-                      <span className="sync-count-chip">
-                        {outgoingFiles.length}
-                      </span>
+                      <div className="sync-file-extras">
+                        <button className="word-button" onClick={() => {
+                          setOutgoingFiles([])
+                        }}>Clear all</button>
+                        <span className="sync-count-chip">
+                          {outgoingFiles.length}
+                        </span>
+                      </div>
                     )}
                   </div>
 
@@ -1269,7 +1274,7 @@ function App() {
               )}
             </div>
             {history.length > 0 && (
-              <button className="scan-button" onClick={handleClearAll}>
+              <button className="word-button" onClick={handleClearAll}>
                 Clear all
               </button>
             )}
