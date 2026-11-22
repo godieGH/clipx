@@ -6,8 +6,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{
-    Event, Level, Subscriber,
     field::{Field, Visit},
+    Event, Level, Subscriber,
 };
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
@@ -34,6 +34,7 @@ impl Visit for EventFields {
             "path",
             "ip",
             "address",
+            "addr",
             "fingerprint",
             "file_name",
             "filename",
@@ -94,10 +95,10 @@ pub fn init_logging() {
         #[cfg(target_os = "android")]
         {
             let bridge_filter = Targets::new().with_target("rust_mobile_ffi_bridge", Level::TRACE);
-            let core_filter = Targets::new().with_target("clipx_core", Level::TRACE);
+            let core_filter = Targets::new().with_target("clipx_core", Level::DEBUG);
             let diagnostic_filter = Targets::new()
                 .with_target("rust_mobile_ffi_bridge", Level::TRACE)
-                .with_target("clipx_core", Level::TRACE);
+                .with_target("clipx_core", Level::DEBUG);
             tracing_subscriber::registry()
                 .with(DiagnosticBufferLayer.with_filter(diagnostic_filter))
                 .with(

@@ -32,8 +32,7 @@ The same environment variable works in a POSIX shell with `export RUST_LOG=...`.
 ## Host scope
 
 The Android FFI bridge has a separate logger in
-`mobile/native/rust-mobile-ffi-bridge/src/logger.rs`. It currently installs
-fixed TRACE-level filters and keeps a bounded in-memory diagnostic buffer.
+`mobile/native/rust-mobile-ffi-bridge/src/logger.rs`. Core events are fixed at DEBUG on Android and bridge events at TRACE.The file keeps a bounded in-memory diagnostic buffer.
 This desktop patch does not add runtime level selection to that mobile logger;
 `RUST_LOG` examples above should not be assumed to configure Android.
 
