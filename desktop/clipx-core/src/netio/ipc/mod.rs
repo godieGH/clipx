@@ -227,6 +227,7 @@ impl IpcService {
             clipx::ipc_request::Request::SendFile(_) => "send_file",
             clipx::ipc_request::Request::SendFilePath(_) => "send_file_path",
             clipx::ipc_request::Request::DownloadClipboardFile(_) => "download_clipboard_file",
+            clipx::ipc_request::Request::CopyClipboardEntry(_) => "copy_clipboard_entry",
             clipx::ipc_request::Request::Shutdown(_) => "shutdown",
         };
         tracing::trace!(request = request_kind, "IPC request dispatch started");
@@ -703,6 +704,22 @@ impl IpcService {
                         clipx::DownloadClipboardFileResponse {
                             started: message == "download requested",
                             message,
+                        },
+                    )),
+                }
+            }
+            clipx::ipc_request::Request::CopyClipboardEntry(req) => {
+                let (tx, rx) = oneshot::channel();
+                let _ = clipboard_tx.send(ClipboardCommand::CopyHistoryEntry {
+                    id: req.id,
+                    reply_to: tx,
+                });
+                let result = rx.await?;
+                clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::CopyClipboardEntry(
+                        clipx::ClipboardCopyResponse {
+                            copied: result.is_ok(),
+                            message: result.err().unwrap_or_else(|| "copied".into()),
                         },
                     )),
                 }

@@ -395,6 +395,7 @@ pub fn run() {
             files_identical,
             send_file_path,
             download_clipboard_file,
+            copy_clipboard_entry,
             reveal_file_location,
             get_diagnostic_snapshot,
             open_logs_folder,
@@ -693,6 +694,11 @@ async fn send_file_path(
         .await
         .send_file_path(name, mime_type, path)
         .await
+}
+
+#[tauri::command]
+async fn copy_clipboard_entry(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    state.ipc.lock().await.copy_clipboard_entry(id).await
 }
 
 #[tauri::command]

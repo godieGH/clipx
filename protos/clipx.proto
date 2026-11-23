@@ -135,6 +135,7 @@ message IpcRequest {
     DownloadClipboardFileRequest download_clipboard_file = 20;
     SendFilePathRequest send_file_path = 21;
     ShutdownRequest shutdown = 22;
+    ClipboardCopyRequest copy_clipboard_entry = 23;
   }
 }
 message IpcResponse {
@@ -158,6 +159,7 @@ message IpcResponse {
     SendResponse send = 17;
     DownloadClipboardFileResponse download_clipboard_file = 18;
     ShutdownResponse shutdown = 19;
+    ClipboardCopyResponse copy_clipboard_entry = 20;
   }
 }
 message SeenRequest { enum Mode { ALL = 0; TRUSTED = 1; UNTRUSTED = 2; } Mode mode = 1; }
@@ -218,6 +220,8 @@ message SendFilePathRequest { string name = 1; string mime_type = 2; string path
 message SendResponse { bool sent = 1; string message = 2; }
 message DownloadClipboardFileRequest { string entry_id = 1; }
 message DownloadClipboardFileResponse { bool started = 1; string message = 2; }
+message ClipboardCopyRequest { string id = 1; }
+message ClipboardCopyResponse { bool copied = 1; string message = 2; }
 
 message DevicesChangedEvent {}
 message ClipboardChangedEvent {}

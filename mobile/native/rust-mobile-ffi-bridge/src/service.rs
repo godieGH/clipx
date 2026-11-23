@@ -229,6 +229,39 @@ impl BridgeService {
         Ok(())
     }
 
+    /// Auto-sync variants of the `send_*` calls. They go through the core's
+    /// local-change path, which drops payloads the core itself just wrote to
+    /// the system clipboard (e.g. a clip received from a peer), so background
+    /// syncing never echoes them back. Use `send_*` for explicit user sends.
+    pub async fn auto_sync_text(&self, content: String) -> Result<(), BridgeError> {
+        self.submit_local_change(clipx_core::clipboard::manager::ClipboardPayload::Text(
+            content,
+        ))
+        .await
+    }
+
+    pub async fn auto_sync_rich_text(&self, text: String, html: String) -> Result<(), BridgeError> {
+        self.submit_local_change(clipx_core::clipboard::manager::ClipboardPayload::RichText {
+            text,
+            html,
+        })
+        .await
+    }
+
+    pub async fn auto_sync_image(
+        &self,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) -> Result<(), BridgeError> {
+        self.submit_local_change(clipx_core::clipboard::manager::ClipboardPayload::Image {
+            width,
+            height,
+            rgba,
+        })
+        .await
+    }
+
     /// Explicit user-initiated clipboard send from the mobile UI.
     /// This bypasses local-change deduplication because pressing Send is
     /// deliberate, including when the text is identical to a previous send.
@@ -686,6 +719,22 @@ impl BridgeService {
 }
 
 impl BridgeService {
+    async fn submit_local_change(
+        &self,
+        payload: clipx_core::clipboard::manager::ClipboardPayload,
+    ) -> Result<(), BridgeError> {
+        self.require_connected_device().await?;
+        let tx = self
+            .inner
+            .lock()
+            .await
+            .clipboard_cmd_tx
+            .clone()
+            .ok_or_else(|| "core clipboard manager is stopped".to_string())?;
+        tx.send(clipx_core::clipboard::manager::ClipboardCommand::LocalChangeDetected { payload })
+            .map_err(|_| BridgeError::from("core clipboard manager is stopped"))
+    }
+
     async fn control_transfer_inner(
         &self,
         file_id: String,

@@ -17,7 +17,7 @@ export function ClipRow({
   nowMs,
 }: {
   item: ClipItem;
-  onCopy: (content: string) => void;
+  onCopy: (id: string) => void;
   onRemove: (id: string) => void;
   onDownload: (id: string) => void;
   onReveal: (path: string) => void;
@@ -89,7 +89,7 @@ export function ClipRow({
               <button
                 className="icon-button"
                 title="Copy to clipboard"
-                onClick={() => onCopy(item.content)}
+                onClick={() => onCopy(item.id)}
               >
                 <Copy size={15} />
               </button>

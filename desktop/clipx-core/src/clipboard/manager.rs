@@ -189,6 +189,13 @@ pub enum ClipboardCommand {
         entry_id: String,
         reply_to: oneshot::Sender<String>,
     },
+    /// Put a received text / rich-text history item back on the system
+    /// clipboard exactly as it arrived (HTML preserved), registering the write
+    /// so the watcher does not echo it back to the network.
+    CopyHistoryEntry {
+        id: String,
+        reply_to: oneshot::Sender<Result<(), String>>,
+    },
     FileDownloadReleased {
         file_id: String,
     },
@@ -431,6 +438,9 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             } => self.send_file_for_peer(device_id, file_id, Some(offset)),
             ClipboardCommand::DownloadHistoryFile { entry_id, reply_to } => {
                 let _ = reply_to.send(self.start_download(&entry_id));
+            }
+            ClipboardCommand::CopyHistoryEntry { id, reply_to } => {
+                let _ = reply_to.send(self.copy_history_entry(&id));
             }
             ClipboardCommand::FileDownloadReleased { file_id } => {
                 self.release_download(&file_id);
@@ -895,16 +905,9 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             return;
         }
         match resolved.payload {
-            IncomingPayload::Text(content) => {
-                self.remember_hash(payload_hash(&ClipboardPayload::Text(content.clone())));
-                self.clipboard_sink.write_text(content);
-            }
+            IncomingPayload::Text(content) => self.write_text_to_clipboard(content, None),
             IncomingPayload::RichText { text, html } => {
-                self.remember_hash(payload_hash(&ClipboardPayload::RichText {
-                    text: text.clone(),
-                    html: html.clone(),
-                }));
-                self.clipboard_sink.write_rich_text(text, html);
+                self.write_text_to_clipboard(text, Some(html))
             }
             IncomingPayload::Image {
                 width,
@@ -1156,6 +1159,39 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                     file_id: file_id.to_string(),
                 });
         }
+    }
+
+    /// Puts text (and its HTML, when present) on the system clipboard exactly
+    /// as received, and remembers the hash so the watcher does not send our
+    /// own write back out.
+    fn write_text_to_clipboard(&mut self, text: String, html: Option<String>) {
+        match html.filter(|h| !h.trim().is_empty()) {
+            Some(html) => {
+                self.remember_hash(payload_hash(&ClipboardPayload::RichText {
+                    text: text.clone(),
+                    html: html.clone(),
+                }));
+                self.clipboard_sink.write_rich_text(text, html);
+            }
+            None => {
+                self.remember_hash(payload_hash(&ClipboardPayload::Text(text.clone())));
+                self.clipboard_sink.write_text(text);
+            }
+        }
+    }
+
+    fn copy_history_entry(&mut self, id: &str) -> Result<(), String> {
+        let Some(item) = self.history_item(id) else {
+            return Err("Clipboard history item not found".into());
+        };
+        match item.kind {
+            ClipKind::Text => self.write_text_to_clipboard(item.content, None),
+            ClipKind::RichText => self.write_text_to_clipboard(item.content, item.html),
+            ClipKind::Image | ClipKind::File => {
+                return Err("Only text can be copied to the clipboard".into());
+            }
+        }
+        Ok(())
     }
 
     /// Look a history item up by its entry id or by its file id. Transfer
@@ -1443,6 +1479,7 @@ fn clipboard_command_name(command: &ClipboardCommand) -> &'static str {
         ClipboardCommand::SendFilePath { .. } => "send_file_path",
         ClipboardCommand::PeerFileDownloadRequest { .. } => "peer_file_download_request",
         ClipboardCommand::DownloadHistoryFile { .. } => "download_history_file",
+        ClipboardCommand::CopyHistoryEntry { .. } => "copy_history_entry",
         ClipboardCommand::FileDownloadReleased { .. } => "file_download_released",
         ClipboardCommand::ResumeDownload { .. } => "resume_download",
     }

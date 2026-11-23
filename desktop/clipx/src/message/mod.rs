@@ -220,6 +220,10 @@ pub trait IpcCmdBridge {
         &mut self,
         id: String,
     ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn copy_clipboard_entry(
+        &mut self,
+        id: String,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
 }
 
 impl IpcCmdBridge for crate::ipc::non_blocking::Client {
@@ -569,6 +573,22 @@ impl IpcCmdBridge for crate::ipc::non_blocking::Client {
             Some(clipx::ipc_response::Response::Send(r)) if r.sent => Ok(r.message),
             Some(clipx::ipc_response::Response::Send(r)) => Err(r.message),
             _ => Err("Unexpected send response".into()),
+        }
+    }
+    async fn copy_clipboard_entry(&mut self, id: String) -> Result<String, String> {
+        if !self.is_running() {
+            self.start().await?;
+        }
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::CopyClipboardEntry(
+                clipx::ClipboardCopyRequest { id },
+            )),
+        };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response {
+            Some(clipx::ipc_response::Response::CopyClipboardEntry(r)) if r.copied => Ok(r.message),
+            Some(clipx::ipc_response::Response::CopyClipboardEntry(r)) => Err(r.message),
+            _ => Err("Unexpected copy response".into()),
         }
     }
     async fn download_clipboard_file(&mut self, id: String) -> Result<String, String> {

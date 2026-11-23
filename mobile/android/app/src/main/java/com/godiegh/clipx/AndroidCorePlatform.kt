@@ -17,7 +17,6 @@ import com.godiegh.clipx.ui.ClipxSheetAction
 import com.godiegh.clipx.ui.ClipxSheetRequest
 import com.godiegh.clipx.ui.ClipxSheetResult
 import com.godiegh.clipx.ui.ClipxSheetResultType
-import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +45,6 @@ class AndroidClipboardPlatform(
         val items = readPrimaryClipboard(context)
         for (item in items) {
             if (!item.canSend) continue
-            if (item.isText && globalSuppressed.getAndSet(null) == item.text) continue
             val marker = markerFor(item)
             if (!force && marker == getLastSyncedMarker(context)) continue
             runCatching { sendItem(item) }
@@ -72,13 +70,13 @@ class AndroidClipboardPlatform(
                 val uri = item.fileUri?.let(android.net.Uri::parse)
                 if (uri != null) {
                     val image = decodeImage(context, uri) ?: throw IllegalStateException("Unable to read clipboard image")
-                    bridgeService.sendImage(image.first.toUInt(), image.second.toUInt(), image.third)
+                    bridgeService.autoSyncImage(image.first.toUInt(), image.second.toUInt(), image.third)
                 } else {
                     throw IllegalStateException("Unable to read clipboard image")
                 }
             }
-            item.isRichText -> bridgeService.sendRichText(item.text.orEmpty(), item.htmlText.orEmpty())
-            item.isText -> bridgeService.sendClipboard(item.text.orEmpty())
+            item.isRichText -> bridgeService.autoSyncRichText(item.text.orEmpty(), item.htmlText.orEmpty())
+            item.isText -> bridgeService.autoSyncText(item.text.orEmpty())
         }
     }
 
@@ -95,13 +93,16 @@ class AndroidClipboardPlatform(
         }
     }
 
-    /** Explicit, single-shot foreground check. This bypasses the core's local-change dedupe. */
+    /** Single-shot foreground check. Auto-sync goes through the core's local-change dedupe. */
     fun checkClipboardNow() {
         if (!isAutoSyncOnResumeEnabled(context)) return
         scope.launch { sendCurrentClipboardIfNeeded(force = false) }
     }
 
     override fun writeClipboard(content: String) {
+        // Record what we are about to write so neither the change listener nor
+        // the resume check sends our own write back to the peer.
+        setLastSyncedMarker(context, "text:$content")
         clipboardManager.setPrimaryClip(ClipData.newPlainText("Clipx", content))
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(context.applicationContext, "Copied to clipboard", Toast.LENGTH_SHORT).show()
@@ -109,6 +110,7 @@ class AndroidClipboardPlatform(
     }
 
     override fun writeRichText(text: String, html: String) {
+        setLastSyncedMarker(context, "rich:$text:$html")
         clipboardManager.setPrimaryClip(ClipData.newHtmlText("Clipx", text, html))
     }
 
@@ -132,6 +134,7 @@ class AndroidClipboardPlatform(
         imageFile.outputStream().use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
         bitmap.recycle()
         val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+        setLastSyncedMarker(context, "image:$uri:${imageFile.length()}")
         clipboardManager.setPrimaryClip(ClipData.newUri(context.contentResolver, "Clipx", uri))
         context.grantUriPermission(context.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
@@ -208,7 +211,6 @@ class AndroidClipboardPlatform(
     companion object {
         private const val PREFS_NAME = "clipboard_sync"
         private const val KEY_AUTO_SYNC_ON_RESUME = "auto_sync_on_resume"
-        private val globalSuppressed = AtomicReference<String?>(null)
 
         fun readPrimaryClipboard(context: Context): List<SystemClipboardItem> {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -290,10 +292,19 @@ class AndroidClipboardPlatform(
             }
         }
 
-        fun copyWithoutSync(context: Context, content: String) {
-            globalSuppressed.set(content)
+        /**
+         * Copies a history item to the system clipboard without syncing it back.
+         * Pass [html] for rich-text items so the formatting is preserved.
+         */
+        fun copyWithoutSync(context: Context, content: String, html: String? = null) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Clipx", content))
+            if (html.isNullOrBlank()) {
+                setLastSyncedMarker(context, "text:$content")
+                clipboard.setPrimaryClip(ClipData.newPlainText("Clipx", content))
+            } else {
+                setLastSyncedMarker(context, "rich:$content:$html")
+                clipboard.setPrimaryClip(ClipData.newHtmlText("Clipx", content, html))
+            }
         }
 
         private const val KEY_LAST_SYNCED_MARKER = "last_synced_marker"

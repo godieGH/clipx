@@ -62,6 +62,30 @@ impl ClipboardSink for ArboardClipboardSink {
             Err(error) => tracing::warn!(%error, "failed to open clipboard to apply remote text"),
         }
     }
+    fn write_rich_text(&self, content: String, html: String) {
+        if html.trim().is_empty() {
+            self.write_text(content);
+            return;
+        }
+        tracing::trace!(
+            text_bytes = content.len(),
+            html_bytes = html.len(),
+            "applying rich text to system clipboard"
+        );
+        match arboard::Clipboard::new() {
+            Ok(mut clipboard) => {
+                if let Err(error) = clipboard.set_html(html, Some(content.clone())) {
+                    tracing::warn!(%error, "failed to apply remote rich text; falling back to plain text");
+                    self.write_text(content);
+                } else {
+                    tracing::trace!("rich text applied to system clipboard");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to open clipboard to apply remote rich text")
+            }
+        }
+    }
     fn write_image(&self, width: u32, height: u32, rgba: Vec<u8>) {
         tracing::trace!(
             width,

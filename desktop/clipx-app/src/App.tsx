@@ -428,8 +428,12 @@ function App() {
     }, 95_000);
   }
 
-  function handleCopy(content: string) {
-    navigator.clipboard?.writeText(content).catch(() => {});
+  // Copy goes through the core (not the webview clipboard) so the write is
+  // registered with the echo guard and rich text keeps its HTML.
+  function handleCopy(id: string) {
+    invoke("copy_clipboard_entry", { id })
+      .then(() => showToast("Copied to clipboard"))
+      .catch((e) => showToast(`${e}`, { variant: "error" }));
   }
 
   function handleRemoveHistory(id: string) {

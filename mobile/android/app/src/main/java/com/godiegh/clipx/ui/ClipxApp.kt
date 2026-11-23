@@ -245,7 +245,7 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                     )
                                     else {
                                         AndroidClipboardPlatform.copyWithoutSync(
-                                            context, item.content
+                                            context, item.content, item.html
                                         )
                                         Toast.makeText(
                                             context, "Copied to clipboard", Toast.LENGTH_SHORT
@@ -265,7 +265,7 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                     onCopy = {
                         if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(item)
                         else {
-                            AndroidClipboardPlatform.copyWithoutSync(context, item.content)
+                            AndroidClipboardPlatform.copyWithoutSync(context, item.content, item.html)
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT)
                                 .show()
                         }
