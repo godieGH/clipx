@@ -24,6 +24,9 @@ pub async fn watch_clipboard(
     tracing::info!("clipboard watcher started");
 
     let mut last = String::new();
+    // The first pass only records what is already on the clipboard when the
+    // watcher starts. It is not a change, so it must not be sent anywhere.
+    let mut first_poll = true;
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => { if *shutdown_rx.borrow() { break; } }
@@ -32,6 +35,13 @@ pub async fn watch_clipboard(
         if *shutdown_rx.borrow() {
             break;
         }
+
+        let initial = std::mem::replace(&mut first_poll, false);
+        let emit = |payload: ClipboardPayload| {
+            if !initial {
+                let _ = tx.send(payload);
+            }
+        };
 
         if let Ok(list) = clipboard.get().file_list()
             && !list.is_empty()
@@ -48,7 +58,7 @@ pub async fn watch_clipboard(
                     files = paths.len(),
                     "clipboard file selection change detected"
                 );
-                let _ = tx.send(ClipboardPayload::Files(paths));
+                emit(ClipboardPayload::Files(paths));
             }
             continue;
         }
@@ -73,7 +83,7 @@ pub async fn watch_clipboard(
                         bytes = image.bytes.len(),
                         "clipboard image change detected"
                     );
-                    let _ = tx.send(ClipboardPayload::Image {
+                    emit(ClipboardPayload::Image {
                         width: image.width as u32,
                         height: image.height as u32,
                         rgba: image.bytes.to_vec(),
@@ -100,7 +110,7 @@ pub async fn watch_clipboard(
                     html_bytes = html.len(),
                     "clipboard rich-text change detected"
                 );
-                let _ = tx.send(ClipboardPayload::RichText { text, html });
+                emit(ClipboardPayload::RichText { text, html });
             }
             continue;
         }
@@ -116,11 +126,11 @@ pub async fn watch_clipboard(
                     && !paths.is_empty()
                 {
                     tracing::debug!(files = paths.len(), "clipboard file URI change detected");
-                    let _ = tx.send(ClipboardPayload::Files(paths));
+                    emit(ClipboardPayload::Files(paths));
                     continue;
                 }
                 tracing::debug!(bytes = current.len(), "clipboard text change detected");
-                let _ = tx.send(ClipboardPayload::Text(current));
+                emit(ClipboardPayload::Text(current));
             }
             Ok(_) => {}
             Err(arboard::Error::ContentNotAvailable) => {}
