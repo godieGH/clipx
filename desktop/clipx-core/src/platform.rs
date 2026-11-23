@@ -223,6 +223,13 @@ pub enum CoreEvent {
         total: u64,
         state: String,
         message: String,
+        /// The other end of this transfer (a transfer is one offer going to or
+        /// coming from one device; an offer sent to several devices is several
+        /// transfers).
+        device_id: String,
+        device_name: String,
+        /// False when the peer is an older build without pause/resume.
+        can_pause: bool,
     },
 }
 
@@ -249,6 +256,9 @@ pub trait CoreEventListener: Send + Sync {
         _total: u64,
         _state: String,
         _message: String,
+        _device_id: String,
+        _device_name: String,
+        _can_pause: bool,
     ) {
     }
 }

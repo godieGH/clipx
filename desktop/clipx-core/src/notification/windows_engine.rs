@@ -430,7 +430,7 @@ fn handle_transfer_notification_inner(
     let is_download = !is_upload;
 
     let done_forever = matches!(state, "complete" | "failed" | "expired");
-    let resettable_terminal = matches!(state, "cancelled" | "interrupted");
+    let resettable_terminal = matches!(state, "cancelled" | "interrupted" | "paused");
     let terminal = done_forever || resettable_terminal;
 
     if matches!(
@@ -1349,7 +1349,7 @@ impl Engine for NotificationEngine {
         // flood the notification thread with acknowledgements).
         let terminal = matches!(
             state.as_str(),
-            "complete" | "failed" | "expired" | "cancelled" | "interrupted"
+            "complete" | "failed" | "expired" | "cancelled" | "interrupted" | "paused"
         );
 
         let (completion, wait) = if terminal {

@@ -34,7 +34,10 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -104,6 +107,8 @@ fun DevicesScreen(
     onOpenDetails: (String) -> Unit,
     onPair: (String) -> Unit,
     onConnect: (String) -> Unit,
+    activeTransfers: Int = 0,
+    onOpenTransfers: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
@@ -114,6 +119,16 @@ fun DevicesScreen(
             showLogo = true,
             elevated = elevated,
             rightContent = {
+                IconButton(onClick = onOpenTransfers) {
+                    BadgedBox(badge = { if (activeTransfers > 0) Badge { Text("$activeTransfers") } }) {
+                        Icon(
+                            Icons.Filled.SwapVert,
+                            contentDescription = "Transfers",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(21.dp),
+                        )
+                    }
+                }
                 IconButton(onClick = onOpenSync) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
@@ -1465,6 +1480,9 @@ fun HistoryScreen(
     onClearAll: () -> Unit,
     onItemActions: (ClipxHistoryItem) -> Unit,
     onCopyItem: (ClipxHistoryItem) -> Unit,
+    onPauseTransfer: (ClipxHistoryItem) -> Unit = {},
+    onResumeTransfer: (ClipxHistoryItem) -> Unit = {},
+    onCancelTransfer: (ClipxHistoryItem) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val palette = LocalClipxPalette.current
@@ -1564,7 +1582,11 @@ fun HistoryScreen(
                     item,
                     transfer = fileTransfers[item.id],
                     onCopy = { onCopyItem(item) },
-                    onActions = { onItemActions(item) })
+                    onActions = { onItemActions(item) },
+                    onPause = { onPauseTransfer(item) },
+                    onResume = { onResumeTransfer(item) },
+                    onCancel = { onCancelTransfer(item) },
+                )
             }
         }
     }
@@ -1576,8 +1598,16 @@ private fun HistoryListItem(
     transfer: com.godiegh.clipx.FileTransferUi?,
     onCopy: () -> Unit,
     onActions: () -> Unit,
+    onPause: () -> Unit = {},
+    onResume: () -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
     val palette = LocalClipxPalette.current
+    // A running download can be paused or cancelled; a paused or interrupted one
+    // can be resumed or cancelled. "saving" has no controls: all bytes arrived.
+    val transferRunning =
+        transfer?.state == "requesting" || transfer?.state == "receiving" || transfer?.state == "sending"
+    val transferPaused = transfer?.state == "paused" || transfer?.state == "interrupted"
     val transferActive =
         transfer?.state == "requesting" || transfer?.state == "receiving" || transfer?.state == "sending" || transfer?.state == "saving"
     val transferPercent = transfer?.let {
@@ -1691,6 +1721,9 @@ private fun HistoryListItem(
                     transfer?.state == "requesting" -> "Starting download…"
                     transfer?.state == "receiving" -> "Downloading · ${"%.0f".format(transferPercent * 100)}%"
                     transfer?.state == "saving" -> "Saving file…"
+                    transfer?.state == "paused" -> "Paused · ${"%.0f".format(transferPercent * 100)}% · tap to resume"
+                    transfer?.state == "interrupted" -> "Interrupted · ${"%.0f".format(transferPercent * 100)}% · tap to resume"
+                    transfer?.state == "cancelled" -> "Download cancelled · tap to download again"
                     transfer?.state == "expired" -> "Offer expired"
                     item.fileDownloaded -> "Download finished"
                     transfer?.state == "complete" -> "Download finished"
@@ -1701,6 +1734,19 @@ private fun HistoryListItem(
                 color = palette.mutedText,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
             )
+            if (!item.fileDownloaded && (transferRunning || transferPaused)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (transferPaused) {
+                        TextButton(onClick = onResume) { Text("Resume") }
+                    } else {
+                        TextButton(onClick = onPause) { Text("Pause") }
+                    }
+                    TextButton(onClick = onCancel) { Text("Cancel") }
+                }
+            }
         }
     }
 }

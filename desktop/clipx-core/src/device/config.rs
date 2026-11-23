@@ -1,6 +1,9 @@
 use crate::message::proto::{
     DeviceType,
-    PeerCapabilities::{self, CapabilityFileTransferStallingReRequests, CapabilityWifiDirect},
+    PeerCapabilities::{
+        self, CapabilityFileTransferControl, CapabilityFileTransferStallingReRequests,
+        CapabilityWifiDirect,
+    },
 };
 use directories::ProjectDirs;
 use std::sync::OnceLock;
@@ -32,6 +35,10 @@ pub type ThisDeviceCapabilities = Vec<PeerCapabilities>;
 // Updated +1 when an old peer can not handle, not just with schema changes
 // eg. A new step in pairing handshake, a changed meaning for an existing field or rule
 // mostly application level compatibilities related to protos
+// Policy: a feature an old peer can simply live without (pause/resume, for example) is a new
+// capability and leaves both versions alone, so old builds keep pairing and transferring and only
+// lose that feature. Bump versions only for changes an old peer would mishandle, and raise
+// MINI_PROTO_VERSION only when old builds should stop being supported at all.
 pub const PROTO_VERSION: u32 = 1;
 // Bump when proto message field is removed, retyped, renumbered, reused a field number
 // semantic change would make peer misbehave not just ignoring. The old protocol is unsafe
@@ -297,5 +304,6 @@ pub fn get_device_capabilities() -> ThisDeviceCapabilities {
     Vec::from([
         CapabilityWifiDirect,
         CapabilityFileTransferStallingReRequests,
+        CapabilityFileTransferControl,
     ])
 }

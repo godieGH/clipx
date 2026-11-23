@@ -8,6 +8,10 @@ enum PeerCapabilities {
   CAPABILITY_WIFI_DIRECT = 3;
   // Supports file transfer stalling re-requests
   CAPABILITY_FILE_TRANSFER_STALLING_RE_REQUESTS = 4; 
+  // The peer understands FileTransferCancel.pause and FileTransferResume, so a transfer can be
+  // paused and resumed. Peers without it still transfer and can still cancel; pause/resume
+  // toward them is disabled instead of refusing the connection.
+  CAPABILITY_FILE_TRANSFER_CONTROL = 5;
 }
 message Hello { 
   uint32 proto_version = 1; // What currently I speak
@@ -52,7 +56,15 @@ message FileChunk {
     bytes sha256 = 7;
 }
 message FileChunkAck { string file_id = 1; uint64 confirmed_offset = 2; }
-message FileTransferCancel { string file_id = 1; }
+// Sent to the other side of a transfer. `pause = false` means the transfer is
+// abandoned and the receiver discards its partial data; `pause = true` means the
+// sender should stop streaming while the receiver keeps its partial data so a
+// later request can continue from the confirmed offset. Peers that predate the
+// field read it as false, which is the old cancel behavior.
+message FileTransferCancel { string file_id = 1; bool pause = 2; }
+// Sent by the sending side to a receiver that paused or was paused: "carry on". The receiver
+// asks again from its kept offset. Only sent to peers that advertise CAPABILITY_FILE_TRANSFER_CONTROL.
+message FileTransferResume { string file_id = 1; }
 
 enum DeviceType {
   UNSPECIFIED = 0;
@@ -95,6 +107,7 @@ message PeerMessage {
     FileChunk file_chunk = 12;
     FileChunkAck file_chunk_ack = 13;
     FileTransferCancel file_transfer_cancel = 14;
+    FileTransferResume file_transfer_resume = 15;
   }
 }
 
@@ -209,7 +222,7 @@ message DownloadClipboardFileResponse { bool started = 1; string message = 2; }
 message DevicesChangedEvent {}
 message ClipboardChangedEvent {}
 message PairingEvent { string device_id = 1; enum State { STARTED = 0; FAILED = 1; SUCCEEDED = 2; } State state = 2; string message = 3; }
-message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; string file_name = 7; string direction = 8; }
+message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; string file_name = 7; string direction = 8; string device_id = 9; string device_name = 10; bool can_pause = 11; }
 message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; } }
 message IpcServerMessage { oneof payload { IpcResponse response = 1; IpcEvent event = 2; } }
 

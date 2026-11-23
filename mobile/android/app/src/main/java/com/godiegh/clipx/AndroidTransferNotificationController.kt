@@ -20,7 +20,15 @@ class AndroidTransferNotificationController(private val context: Context) {
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val titles = ConcurrentHashMap<String, String>()
 
-    private fun notificationId(fileId: String): Int = 2000 + (fileId.hashCode() and 0x7fffffff) % 100000
+    /**
+     * One notification per transfer, not per file: an offer sent to several
+     * devices is several transfers that must not share (and overwrite) one
+     * notification.
+     */
+    private fun transferKey(deviceId: String, fileId: String): String = "$deviceId|$fileId"
+
+    private fun notificationId(deviceId: String, fileId: String): Int =
+        2000 + (transferKey(deviceId, fileId).hashCode() and 0x7fffffff) % 100000
 
     private fun titleFromMessage(message: String): String = when {
         message.startsWith("Requesting ") -> message.removePrefix("Requesting ")
@@ -53,20 +61,39 @@ class AndroidTransferNotificationController(private val context: Context) {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
     }
 
-    fun update(fileId: String, fileName: String, direction: String, done: Long, total: Long, state: String, message: String) {
+    fun update(
+        deviceId: String,
+        deviceName: String,
+        canPause: Boolean,
+        fileId: String,
+        fileName: String,
+        direction: String,
+        done: Long,
+        total: Long,
+        state: String,
+        message: String,
+    ) {
+        val key = transferKey(deviceId, fileId)
+        val notificationId = notificationId(deviceId, fileId)
         val percent = if (total > 0L) ((done.toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(0, 100) else 0
         val active = state == "requesting" || state == "receiving" || state == "sending" || state == "saving"
-        val title = if (active) {
+        val paused = state == "paused"
+        // A paused transfer keeps its notification (and title) so the user can
+        // still Resume or Cancel it from the tray.
+        val title = if (active || paused) {
             val resolved = fileName.ifBlank { titleFromMessage(message) }
-            titles.putIfAbsent(fileId, resolved) ?: resolved
+            titles.putIfAbsent(key, resolved) ?: resolved
         } else {
-            titles.remove(fileId) ?: fileName.ifBlank { titleFromMessage(message) }
+            titles.remove(key) ?: fileName.ifBlank { titleFromMessage(message) }
         }
         val content = when (state) {
             "requesting" -> if (direction == "send") "Sending file" else "Downloading file"
             "receiving" -> "Downloading · $percent%"
             "sending" -> if (done == 0L) "Sending file" else "Sending · $percent%"
             "saving" -> "Saving file…"
+            "paused" -> "Paused · $percent%"
+            "cancelled" -> if (direction == "send") "Sending cancelled" else "Download cancelled"
+            "interrupted" -> if (direction == "send") "Sending interrupted" else "Download interrupted · $percent%"
             "complete" -> if (direction == "send") "Sending finished" else "Download finished"
             "failed" -> "Download failed"
             "expired" -> if (direction == "send") "File offer expired" else "Download expired"
@@ -79,7 +106,10 @@ class AndroidTransferNotificationController(private val context: Context) {
             .setContentText(content)
             .setOnlyAlertOnce(true)
             .setOngoing(active)
-            .setAutoCancel(!active)
+            .setAutoCancel(!active && !paused)
+        if (deviceName.isNotBlank()) {
+            builder.setSubText(if (direction == "send") "To $deviceName" else "From $deviceName")
+        }
 
         if (state == "requesting" || state == "saving") {
             builder.setProgress(0, 0, true)
@@ -103,7 +133,7 @@ class AndroidTransferNotificationController(private val context: Context) {
             }
             val openPendingIntent = PendingIntent.getActivity(
                 context,
-                notificationId(fileId),
+                notificationId,
                 viewIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -112,7 +142,7 @@ class AndroidTransferNotificationController(private val context: Context) {
         } else {
             val openAppIntent = PendingIntent.getActivity(
                 context,
-                notificationId(fileId),
+                notificationId,
                 Intent(context, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 },
@@ -121,6 +151,65 @@ class AndroidTransferNotificationController(private val context: Context) {
             builder.setContentIntent(openAppIntent)
         }
 
-        notificationManager.notify(notificationId(fileId), builder.build())
+        addTransferActions(builder, notificationId, deviceId, fileId, direction, state, canPause)
+
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    /**
+     * Pause / Resume / Cancel buttons on the transfer notification, for this one
+     * transfer (device + file):
+     *  - a running transfer can be cancelled, and paused when the peer is a
+     *    build that supports it (older peers can still transfer and cancel),
+     *  - a paused transfer can be resumed or cancelled,
+     *  - an interrupted download can be resumed (asked for again from where it
+     *    stopped).
+     * "saving" has none: the bytes have all arrived and only the copy into the
+     * public folder is left. The buttons go to the foreground service, which
+     * owns the core bridge.
+     */
+    private fun addTransferActions(
+        builder: NotificationCompat.Builder,
+        notificationId: Int,
+        deviceId: String,
+        fileId: String,
+        direction: String,
+        state: String,
+        canPause: Boolean,
+    ) {
+        val running = state == "requesting" || state == "receiving" || state == "sending"
+        fun action(label: String, action: String, slot: Int) {
+            builder.addAction(0, label, transferActionIntent(notificationId, deviceId, fileId, direction, action, slot))
+        }
+        when {
+            running -> {
+                if (canPause) action("Pause", ClipxCoreForegroundService.ACTION_TRANSFER_PAUSE, 0)
+                action("Cancel", ClipxCoreForegroundService.ACTION_TRANSFER_CANCEL, 1)
+            }
+            state == "paused" -> {
+                action("Resume", ClipxCoreForegroundService.ACTION_TRANSFER_RESUME, 2)
+                action("Cancel", ClipxCoreForegroundService.ACTION_TRANSFER_CANCEL, 1)
+            }
+            state == "interrupted" && direction != "send" -> {
+                action("Resume", ClipxCoreForegroundService.ACTION_TRANSFER_RESUME, 2)
+            }
+        }
+    }
+
+    private fun transferActionIntent(
+        notificationId: Int,
+        deviceId: String,
+        fileId: String,
+        direction: String,
+        action: String,
+        slot: Int,
+    ): PendingIntent {
+        val intent = ClipxCoreForegroundService.transferActionIntent(context, action, deviceId, fileId, direction)
+        return PendingIntent.getService(
+            context,
+            notificationId * 4 + slot,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 }

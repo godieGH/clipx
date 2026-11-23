@@ -32,6 +32,39 @@ class ClipxCoreForegroundService : Service() {
         private const val ACTION_KILL_CLIPX =
             "com.godiegh.clipx.action.KILL_PROCESS"
 
+        /** Buttons on a file-transfer notification (see AndroidTransferNotificationController). */
+        const val ACTION_TRANSFER_PAUSE = "com.godiegh.clipx.action.TRANSFER_PAUSE"
+        const val ACTION_TRANSFER_RESUME = "com.godiegh.clipx.action.TRANSFER_RESUME"
+        const val ACTION_TRANSFER_CANCEL = "com.godiegh.clipx.action.TRANSFER_CANCEL"
+        private const val EXTRA_FILE_ID = "com.godiegh.clipx.extra.FILE_ID"
+        private const val EXTRA_DEVICE_ID = "com.godiegh.clipx.extra.DEVICE_ID"
+        private const val EXTRA_DIRECTION = "com.godiegh.clipx.extra.DIRECTION"
+        private val TRANSFER_ACTIONS =
+            setOf(ACTION_TRANSFER_PAUSE, ACTION_TRANSFER_RESUME, ACTION_TRANSFER_CANCEL)
+
+        /**
+         * Intent for a transfer notification button. A transfer is one file going to
+         * or from one device, so both ids travel with it. The data Uri makes the
+         * intent unique per transfer and action, so two transfers never share one
+         * PendingIntent (extras are ignored when Android compares intents).
+         */
+        fun transferActionIntent(
+            context: android.content.Context,
+            action: String,
+            deviceId: String,
+            fileId: String,
+            direction: String,
+        ): Intent =
+            Intent(context, ClipxCoreForegroundService::class.java).apply {
+                this.action = action
+                data = android.net.Uri.parse(
+                    "clipx-transfer://${android.net.Uri.encode(deviceId)}/${android.net.Uri.encode(fileId)}/$action"
+                )
+                putExtra(EXTRA_FILE_ID, fileId)
+                putExtra(EXTRA_DEVICE_ID, deviceId)
+                putExtra(EXTRA_DIRECTION, direction)
+            }
+
         /*
          * User preference:
          * whether Clipx should keep its Core running in the background.
@@ -198,6 +231,30 @@ class ClipxCoreForegroundService : Service() {
             stopSelfResult(startId)
             Process.killProcess(Process.myPid())
             return START_NOT_STICKY
+        }
+        val transferFileId = intent?.getStringExtra(EXTRA_FILE_ID)
+        if (intent?.action in TRANSFER_ACTIONS && transferFileId != null && coreStarted) {
+            // A notification button. If the core is not running there is no
+            // transfer to act on, so that case just falls through to startup.
+            // Act on this one transfer (device + file); an offer may be going to
+            // several devices at once.
+            val transferDeviceId = intent?.getStringExtra(EXTRA_DEVICE_ID)?.takeIf { it.isNotBlank() }
+            val sending = intent?.getStringExtra(EXTRA_DIRECTION) == "send"
+            scope.launch {
+                runCatching {
+                    when (intent?.action) {
+                        ACTION_TRANSFER_PAUSE -> bridgeService.pauseTransfer(transferFileId, transferDeviceId)
+                        ACTION_TRANSFER_CANCEL -> bridgeService.cancelTransfer(transferFileId, transferDeviceId)
+                        // A paused upload asks the receiver to continue. A
+                        // paused or interrupted download is a normal download
+                        // request: the core continues from the kept partial data.
+                        else ->
+                            if (sending) bridgeService.resumeTransfer(transferFileId, transferDeviceId)
+                            else bridgeService.downloadClipboardFile(transferFileId)
+                    }
+                }
+            }
+            return START_STICKY
         }
         if (!listening) {
             clipboardPlatform.startListening()

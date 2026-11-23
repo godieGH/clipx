@@ -29,7 +29,7 @@ import com.godiegh.clipx.AndroidClipboardPlatform
 import com.godiegh.clipx.ui.theme.ClipxLiveBackground
 
 private enum class AppRoute {
-    DEVICES, HISTORY, PAIR_NEW, THIS_DEVICE, DEVICE_DETAILS, SYNC, CANT_SEE_DEVICE, DIAGNOSTICS,
+    DEVICES, HISTORY, PAIR_NEW, THIS_DEVICE, DEVICE_DETAILS, SYNC, CANT_SEE_DEVICE, DIAGNOSTICS, TRANSFERS,
 }
 
 enum class RootTab { DEVICES, HISTORY }
@@ -65,6 +65,11 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
     LaunchedEffect(route) {
         if (route == AppRoute.PAIR_NEW) viewModel.startActiveScan()
         else viewModel.stopActiveScan()
+    }
+
+    LaunchedEffect(route) {
+        // Transfers that started before this screen existed (a restarted app).
+        if (route == AppRoute.TRANSFERS) viewModel.refreshTransfers()
     }
 
     LaunchedEffect(viewModel.sharedSyncRequested) {
@@ -110,6 +115,8 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                 onOpenPair = { route = AppRoute.PAIR_NEW },
                                 onOpenThisDevice = { route = AppRoute.THIS_DEVICE },
                                 onOpenDiagnostics = { route = AppRoute.DIAGNOSTICS },
+                                activeTransfers = viewModel.activeTransferCount,
+                                onOpenTransfers = { route = AppRoute.TRANSFERS },
                                 onOpenSync = {
                                     viewModel.clearSyncClipboardItem()
                                     route = AppRoute.SYNC
@@ -195,6 +202,15 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                 route = AppRoute.PAIR_NEW
                             })
 
+                            AppRoute.TRANSFERS -> TransfersScreen(
+                                transfers = viewModel.transfers.values.toList(),
+                                onBack = ::openDevices,
+                                onToggle = viewModel::toggleTransfer,
+                                onCancel = viewModel::cancelTransferRow,
+                                onClear = viewModel::clearTransfer,
+                                onClearFinished = viewModel::clearFinishedTransfers,
+                            )
+
                             AppRoute.DIAGNOSTICS -> DiagnosticsScreen(
                                 logs = viewModel.diagnosticLogs,
                                 onBack = ::openDevices,
@@ -210,6 +226,9 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                 onBack = ::openHistory,
                                 onClearAll = viewModel::clearHistory,
                                 onItemActions = { selectedHistory = it },
+                                onPauseTransfer = viewModel::pauseTransfer,
+                                onResumeTransfer = viewModel::resumeTransfer,
+                                onCancelTransfer = viewModel::cancelTransfer,
                                 onCopyItem = { item ->
                                     if (item.type == ClipType.FILE) viewModel.downloadHistoryFile(
                                         item

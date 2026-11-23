@@ -6,8 +6,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{
-    field::{Field, Visit},
     Event, Level, Subscriber,
+    field::{Field, Visit},
 };
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};

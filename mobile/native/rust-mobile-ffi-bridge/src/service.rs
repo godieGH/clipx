@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use clipx_core::device::manager::{DeviceCommands, SeenMode};
+use clipx_core::device::manager::{DeviceCommands, SeenMode, TransferAction};
 use clipx_core::message::proto::{ConnectionState, DeviceType};
 use clipx_core::notification::platform::{PlatformNotificationEngine, PromptResult};
 use tokio::task::JoinHandle;
@@ -19,6 +19,23 @@ pub struct MobileIdentity {
     pub device_type: String,
     pub ip_address: String,
     pub ws_port: u32,
+}
+
+/// One live transfer: an offer going to, or coming from, one device.
+#[derive(uniffi::Record, Clone)]
+pub struct MobileTransfer {
+    pub device_id: String,
+    pub device_name: String,
+    pub entry_id: String,
+    pub file_id: String,
+    pub file_name: String,
+    /// "download" or "send".
+    pub direction: String,
+    pub done: u64,
+    pub total: u64,
+    pub state: String,
+    /// False when the peer is an older build without pause/resume.
+    pub can_pause: bool,
 }
 
 /// Peer device information for the paired list presented by the UI.
@@ -348,6 +365,70 @@ impl BridgeService {
             .map_err(|_| BridgeError::from("core clipboard manager is stopped"))
     }
 
+    /// Pause a running transfer. A paused download keeps its partial data and
+    /// history entry; continue it with `resume_transfer` (an upload the sender
+    /// paused) or `download_clipboard_file` (a download). `device_id` picks one
+    /// transfer when the same offer is going to several devices. A peer that
+    /// is an older build cannot pause: the returned message says so.
+    pub async fn pause_transfer(
+        &self,
+        file_id: String,
+        device_id: Option<String>,
+    ) -> Result<String, BridgeError> {
+        self.control_transfer_inner(file_id, device_id, TransferAction::Pause)
+            .await
+    }
+
+    /// Resume an upload this device paused: the receiver is asked to continue.
+    pub async fn resume_transfer(
+        &self,
+        file_id: String,
+        device_id: Option<String>,
+    ) -> Result<String, BridgeError> {
+        self.control_transfer_inner(file_id, device_id, TransferAction::Resume)
+            .await
+    }
+
+    /// Cancel a running or paused transfer (download or upload) without
+    /// removing its history entry. A cancelled download discards its partial
+    /// data and can be downloaded again while its offer is valid. Works with
+    /// every peer, old builds included.
+    pub async fn cancel_transfer(
+        &self,
+        file_id: String,
+        device_id: Option<String>,
+    ) -> Result<String, BridgeError> {
+        self.control_transfer_inner(file_id, device_id, TransferAction::Cancel)
+            .await
+    }
+
+    /// Every live transfer right now, for a screen that opens after they
+    /// started (later changes arrive as `on_file_transfer` events).
+    pub async fn list_transfers(&self) -> Result<Vec<MobileTransfer>, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::ListTransfers { reply_to: reply_tx })
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        let rows = reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())?;
+        Ok(rows
+            .into_iter()
+            .map(|t| MobileTransfer {
+                device_id: t.device_id,
+                device_name: t.device_name,
+                entry_id: t.entry_id,
+                file_id: t.file_id,
+                file_name: t.file_name,
+                direction: t.direction,
+                done: t.done,
+                total: t.total,
+                state: t.state,
+                can_pause: t.can_pause,
+            })
+            .collect())
+    }
+
     pub async fn get_identity(&self) -> Result<MobileIdentity, BridgeError> {
         let tx = self.device_sender().await?;
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -605,6 +686,27 @@ impl BridgeService {
 }
 
 impl BridgeService {
+    async fn control_transfer_inner(
+        &self,
+        file_id: String,
+        device_id: Option<String>,
+        action: TransferAction,
+    ) -> Result<String, BridgeError> {
+        let tx = self.device_sender().await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(DeviceCommands::ControlTransfer {
+            device_id,
+            file_id,
+            action,
+            reply_to: reply_tx,
+        })
+        .map_err(|_| "core device manager is stopped".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "core device manager is stopped".to_string())?
+            .map_err(BridgeError::from)
+    }
+
     async fn send_file_path_inner(
         &self,
         name: String,

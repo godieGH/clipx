@@ -93,7 +93,11 @@ fn describe(m: &proto::PeerMessage) -> String {
             "FileChunkAck{{file_id={}, confirmed_offset={}}}",
             a.file_id, a.confirmed_offset
         ),
-        Some(Body::FileTransferCancel(c)) => format!("FileTransferCancel{{file_id={}}}", c.file_id),
+        Some(Body::FileTransferCancel(c)) => format!(
+            "FileTransferCancel{{file_id={}, pause={}}}",
+            c.file_id, c.pause
+        ),
+        Some(Body::FileTransferResume(r)) => format!("FileTransferResume{{file_id={}}}", r.file_id),
         None => "EMPTY".to_string(),
     }
 }

@@ -36,5 +36,8 @@ pub trait ClipxEventListener: Send + Sync {
         total: u64,
         state: String,
         message: String,
+        device_id: String,
+        device_name: String,
+        can_pause: bool,
     );
 }

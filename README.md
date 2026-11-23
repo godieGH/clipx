@@ -178,7 +178,7 @@ Pairing requests expire after about a minute and a half. If you miss it, just st
 - **Clipboard:** press *Add clipboard* to pick up what you currently have copied.
 - **Files:** drop files anywhere in the window, or click the box to choose them. Files stay on your device until you press **Send now**.
 
-**Files are offers.** When you send a file, the other device gets an *offer*. They press the download button in **History** when they want it. An offer stays available for up to 24 hours, and an interrupted download can pick up where it left off.
+**Files are offers.** When you send a file, the other device gets an *offer*. They press the download button in **History** when they want it. An offer stays available for up to 24 hours, and an interrupted download can pick up where it left off. On Android you can **pause**, **resume** or **cancel** a transfer from its notification or from the History row. Cancelling stops the transfer and discards the partial download, but the entry stays in History, so the file can be downloaded again while its offer is valid. Only removing the entry from History deletes the offer.
 
 **History.** The clipboard icon in the title bar shows what has arrived (up to the 200 most recent items). You can copy an item again, download a file, remove one item, or **Clear all**.
 
@@ -522,7 +522,7 @@ Read `protos/clipx.proto` first. It is the canonical contract for both device-to
 
 **Clipboard sync.** A watcher polls the local clipboard (text, rich text via HTML, images, and `file://` lists). Changes are broadcast to connected trusted peers; incoming content is applied through the platform's clipboard sink and recorded in history (the 200 most recent entries).
 
-**Files.** Files never travel inside a clipboard message. The sender publishes a short-lived `FileOffer` (id, name, type, size, expiry). The receiver asks for it with a `FileDownloadRequest` (with an offset, so it can resume), and the sender streams `FileChunk`s with a SHA-256 and waits for `FileChunkAck`s. Stalled downloads re-ask the sender a few times before reporting the transfer as interrupted.
+**Files.** Files never travel inside a clipboard message. The sender publishes a short-lived `FileOffer` (id, name, type, size, expiry). The receiver asks for it with a `FileDownloadRequest` (with an offset, so it can resume), and the sender streams `FileChunk`s with a SHA-256 and waits for `FileChunkAck`s. Stalled downloads re-ask the sender a few times before reporting the transfer as interrupted. A `FileTransferCancel` message tells the other side to stop; its `pause` flag means "keep your partial data", so a later `FileDownloadRequest` continues from the confirmed offset. A paused download is marked on disk so it is not restarted automatically on reconnect or app restart.
 
 **IPC.** The UI and CLI connect to the core on a local socket named `clipx` (an abstract/namespaced socket on Linux, a named pipe on Windows), wrap it in a WebSocket, and exchange `IpcRequest`/`IpcResponse` messages. The core can also push events (`devices_changed`, `clipboard_changed`, pairing and file-transfer progress), so the UI re-fetches on demand instead of polling.
 

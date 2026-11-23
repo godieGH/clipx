@@ -261,6 +261,8 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
     }
     fn notify_transfer(
         &self,
+        device_id: &str,
+        device_name: &str,
         entry_id: &str,
         file_id: &str,
         file_name: &str,
@@ -288,6 +290,11 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             total,
             state: state.to_string(),
             message: message.clone(),
+            device_id: device_id.to_string(),
+            device_name: device_name.to_string(),
+            // These are the saving/complete/failed states of a finished
+            // download, where pausing no longer applies.
+            can_pause: false,
         });
 
         // ClipboardManager owns the post-transfer stages (saving/complete)
@@ -959,9 +966,13 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             return;
         };
         let entry_id = item.id.clone();
+        let peer_id = item.source_device_id.clone();
+        let peer_name = item.source_device.clone();
         if item.source_device_id != source_device_id {
             let _ = fs::remove_file(&path);
             self.notify_transfer(
+                &peer_id,
+                &peer_name,
                 &entry_id,
                 &file_id,
                 item.file_name.as_deref().unwrap_or("file"),
@@ -977,6 +988,8 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         if item.file_expires_at_ms < now_ms() {
             let _ = fs::remove_file(&path);
             self.notify_transfer(
+                &peer_id,
+                &peer_name,
                 &entry_id,
                 &file_id,
                 item.file_name.as_deref().unwrap_or("file"),
@@ -1000,6 +1013,8 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         tracing::debug!(%file_id, bytes = size, "saving completed clipboard file download");
         self.notify_transfer(
+            &peer_id,
+            &peer_name,
             &entry_id,
             &file_id,
             &name,
@@ -1023,13 +1038,17 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
                 let _ = self.store.update(updated);
                 self.notify_clipboard_changed();
                 self.notify_transfer(
-                    &entry_id, &file_id, &name, "download", size, size, "complete", path,
+                    &peer_id, &peer_name, &entry_id, &file_id, &name, "download", size, size,
+                    "complete", path,
                 );
                 self.release_download(&file_id);
             }
             Err(e) => {
                 tracing::warn!(%file_id, error = %e, "failed to save completed clipboard file download");
-                self.notify_transfer(&entry_id, &file_id, &name, "download", 0, size, "failed", e);
+                self.notify_transfer(
+                    &peer_id, &peer_name, &entry_id, &file_id, &name, "download", 0, size,
+                    "failed", e,
+                );
                 self.release_download(&file_id);
             }
         }
@@ -1065,7 +1084,9 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
             .send(ClipboardOutbound::FileRequest {
                 device_id: item.source_device_id,
                 file_id: file_id.clone(),
-                entry_id: entry_id.to_string(),
+                // The canonical entry id, even when the caller only knew the
+                // file id (a notification action): resume state is keyed on it.
+                entry_id: item.id.clone(),
                 file_name: file_name.clone(),
                 total_size: item.file_size,
                 offer_expires_at_ms: item.file_expires_at_ms,
@@ -1123,6 +1144,7 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         let marker = incoming_dir.join(format!("clipx-{file_id}.cancelled"));
         let _ = fs::write(&marker, now_ms().to_string());
         let _ = fs::remove_file(incoming_dir.join(format!("clipx-{file_id}.resume")));
+        let _ = fs::remove_file(incoming_dir.join(format!("clipx-{file_id}.paused")));
         let _ = fs::remove_file(incoming_dir.join(format!("clipx-{device_id}-{file_id}")));
     }
 
@@ -1136,11 +1158,19 @@ impl<E: Engine + Clone + 'static, S: ClipboardSink + 'static> ClipboardManager<E
         }
     }
 
+    /// Look a history item up by its entry id or by its file id. Transfer
+    /// notifications only carry the file id, so both must work.
     fn history_item(&self, id: &str) -> Option<ClipItem> {
         self.store
             .history
             .iter()
             .find(|item| item.id == id)
+            .or_else(|| {
+                self.store
+                    .history
+                    .iter()
+                    .find(|item| item.file_id.as_deref() == Some(id))
+            })
             .cloned()
     }
 
@@ -1733,6 +1763,100 @@ mod tests {
         assert!(!dir.join("old.meta").exists());
         assert!(dir.join("live").exists());
         assert!(dir.join("live.meta").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    // --- user-requested pause / cancel -------------------------------------
+
+    #[derive(Clone)]
+    struct QuietEngine;
+
+    impl Engine for QuietEngine {
+        fn ask_pair<'a>(
+            &'a self,
+            _: crate::notification::Prompt,
+            _: std::time::Duration,
+        ) -> crate::notification::platform::NotificationFuture<'a, crate::notification::PairDecision>
+        {
+            Box::pin(async { crate::notification::PairDecision::NoResponse })
+        }
+        fn ask_clipboard<'a>(
+            &'a self,
+            _: crate::notification::Prompt,
+            _: std::time::Duration,
+        ) -> crate::notification::platform::NotificationFuture<
+            'a,
+            crate::notification::IncomingClipboardDecision,
+        > {
+            Box::pin(async { crate::notification::IncomingClipboardDecision::Ignore })
+        }
+        fn notify_info<'a>(
+            &'a self,
+            _: &'a str,
+            _: String,
+        ) -> crate::notification::platform::NotificationFuture<'a, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    struct NullSink;
+
+    impl ClipboardSink for NullSink {
+        fn write_text(&self, _: String) {}
+        fn write_image(&self, _: u32, _: u32, _: Vec<u8>) {}
+        fn save_file(&self, _: &str, _: &str, _: &[u8]) -> Result<String, String> {
+            Err("unused".into())
+        }
+    }
+
+    fn manager_with_file_entry() -> (
+        ClipboardManager<QuietEngine, NullSink>,
+        mpsc::UnboundedReceiver<ClipboardOutbound>,
+        PathBuf,
+    ) {
+        let dir = temp_dir();
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (events_tx, _) = broadcast::channel(8);
+        let mut mgr = ClipboardManager::new(
+            dir.join("history.json"),
+            50,
+            QuietEngine,
+            NullSink,
+            out_tx,
+            events_tx,
+        );
+        mgr.store.add(ClipItem {
+            id: "entry-1".into(),
+            content: "movie.mp4".into(),
+            source_device: "Phone".into(),
+            source_device_id: "dev-a".into(),
+            received_at_ms: now_ms(),
+            kind: ClipKind::File,
+            html: None,
+            file_id: Some("file-1".into()),
+            file_name: Some("movie.mp4".into()),
+            mime_type: Some("video/mp4".into()),
+            file_size: 4096,
+            file_expires_at_ms: now_ms() + 3_600_000,
+            file_downloaded: false,
+            local_file_path: None,
+        });
+        (mgr, out_rx, dir)
+    }
+
+    #[test]
+    fn resuming_by_file_id_requests_with_the_canonical_entry_id() {
+        let (mut mgr, mut out_rx, dir) = manager_with_file_entry();
+        assert_eq!(mgr.start_download("file-1"), "download requested");
+        match out_rx.try_recv() {
+            Ok(ClipboardOutbound::FileRequest {
+                entry_id, file_id, ..
+            }) => {
+                assert_eq!(entry_id, "entry-1");
+                assert_eq!(file_id, "file-1");
+            }
+            other => panic!("expected FileRequest, got {other:?}"),
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }

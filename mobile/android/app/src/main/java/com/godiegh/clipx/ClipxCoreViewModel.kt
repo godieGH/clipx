@@ -63,6 +63,12 @@ class ClipxCoreViewModel(
         private set
     var fileTransfers by androidx.compose.runtime.mutableStateOf<Map<String, FileTransferUi>>(emptyMap())
         private set
+    /**
+     * Every transfer, one entry per file *and device* (key "deviceId|fileId"):
+     * an offer sent to two devices is two transfers. Feeds the Transfers screen.
+     */
+    var transfers by androidx.compose.runtime.mutableStateOf<Map<String, FileTransferUi>>(emptyMap())
+        private set
     var refreshing by androidx.compose.runtime.mutableStateOf(false)
         private set
     var sendingFiles by androidx.compose.runtime.mutableStateOf(false)
@@ -105,7 +111,9 @@ class ClipxCoreViewModel(
                 }
             }
             is CoreUiEvent.FileTransferChanged -> {
-                fileTransfers = fileTransfers + (event.entryId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message)) + (event.fileId to FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message))
+                val ui = FileTransferUi(event.fileId, event.fileName, event.direction, event.done, event.total, event.state, event.message, event.deviceId, event.deviceName, event.canPause)
+                fileTransfers = fileTransfers + (event.entryId to ui) + (event.fileId to ui)
+                transfers = trimFinishedTransfers(transfers + (transferKey(event.deviceId, event.fileId) to ui))
             }
         }
     }
@@ -535,6 +543,102 @@ class ClipxCoreViewModel(
         }
     }
 
+    // ---- Pause / resume / cancel ----------------------------------------
+    // The core decides what is allowed. A peer that is an older build cannot
+    // pause or resume; the core answers with an error whose message explains it,
+    // which is shown as a toast. Cancel works with every peer.
+
+    private fun runTransferAction(failure: String, block: suspend (BridgeService) -> Unit) {
+        viewModelScope.launch {
+            bridge?.let { service ->
+                runCatching { block(service) }.onFailure { emitMessage(it.message ?: failure) }
+            }
+        }
+    }
+
+    /** History row: stops the download but keeps the partial data; [resumeTransfer] continues it. */
+    fun pauseTransfer(item: ClipxHistoryItem) {
+        val fileId = item.fileId ?: return
+        runTransferAction("Could not pause transfer") { it.pauseTransfer(fileId, null) }
+    }
+
+    /** History row: continues a paused or interrupted download from where it stopped. */
+    fun resumeTransfer(item: ClipxHistoryItem) = downloadHistoryFile(item)
+
+    /** History row: stops the transfer and discards partial data; the entry stays, so the file can be downloaded again. */
+    fun cancelTransfer(item: ClipxHistoryItem) {
+        val fileId = item.fileId ?: return
+        runTransferAction("Could not cancel transfer") { it.cancelTransfer(fileId, null) }
+    }
+
+    /** Transfers screen: the ring. Pauses a running transfer, or resumes a paused one. */
+    fun toggleTransfer(row: FileTransferUi) {
+        val device = row.deviceId.ifBlank { null }
+        when (row.state) {
+            "requesting", "receiving", "sending" -> {
+                if (!row.canPause) {
+                    emitMessage("${row.deviceName.ifBlank { "That device" }} runs an older ClipX that can't pause or resume transfers. You can still cancel.")
+                    return
+                }
+                runTransferAction("Could not pause transfer") { it.pauseTransfer(row.fileId, device) }
+            }
+            "paused" ->
+                // A paused upload asks the receiver to continue; a paused
+                // download is asked for again and continues from its kept offset.
+                if (row.direction == "send") runTransferAction("Could not resume transfer") { it.resumeTransfer(row.fileId, device) }
+                else runTransferAction("Could not resume transfer") { it.downloadClipboardFile(row.fileId) }
+            "interrupted" ->
+                if (row.direction == "send") emitMessage("${row.deviceName.ifBlank { "The receiving device" }} continues an interrupted transfer when it is ready.")
+                else runTransferAction("Could not resume transfer") { it.downloadClipboardFile(row.fileId) }
+        }
+    }
+
+    /** Transfers screen: cancels this one transfer (not the same offer going to other devices). */
+    fun cancelTransferRow(row: FileTransferUi) {
+        runTransferAction("Could not cancel transfer") { it.cancelTransfer(row.fileId, row.deviceId.ifBlank { null }) }
+    }
+
+    /** Removes a finished row from the list. It does not touch history or the file. */
+    fun clearTransfer(row: FileTransferUi) {
+        transfers = transfers - transferKey(row.deviceId, row.fileId)
+    }
+
+    fun clearFinishedTransfers() {
+        transfers = transfers.filterValues { !it.isFinished() }
+    }
+
+    /** Fills in transfers that started before this screen (or this process) existed. Live events win. */
+    fun refreshTransfers() {
+        viewModelScope.launch {
+            val service = bridge ?: return@launch
+            runCatching { service.listTransfers() }.onSuccess { rows ->
+                val merged = LinkedHashMap(transfers)
+                rows.forEach { t ->
+                    val key = transferKey(t.deviceId, t.fileId)
+                    if (key !in merged) {
+                        merged[key] = FileTransferUi(t.fileId, t.fileName, t.direction, t.done.toLong(), t.total.toLong(), t.state, "", t.deviceId, t.deviceName, t.canPause)
+                    }
+                }
+                transfers = merged
+            }
+        }
+    }
+
+    /** Rows still doing something, or waiting for the user: what the badge counts. */
+    val activeTransferCount: Int
+        get() = transfers.values.count { it.isActive() || it.state == "paused" }
+
+    private fun trimFinishedTransfers(all: Map<String, FileTransferUi>): Map<String, FileTransferUi> {
+        val limit = 100
+        if (all.size <= limit) return all
+        var extra = all.size - limit
+        val kept = LinkedHashMap<String, FileTransferUi>()
+        for ((key, value) in all) {
+            if (extra > 0 && value.isFinished()) extra-- else kept[key] = value
+        }
+        return kept
+    }
+
     fun setAutoSyncOnResume(context: Context, enabled: Boolean) {
         AndroidClipboardPlatform.setAutoSyncOnResumeEnabled(context, enabled)
         autoSyncOnResume = enabled
@@ -636,7 +740,27 @@ private fun timeAgo(timestampMs: ULong): String {
 }
 
 
-data class FileTransferUi(val fileId: String, val fileName: String, val direction: String, val done: Long, val total: Long, val state: String, val message: String)
+data class FileTransferUi(
+    val fileId: String,
+    val fileName: String,
+    val direction: String,
+    val done: Long,
+    val total: Long,
+    val state: String,
+    val message: String,
+    /** The other end of this transfer; empty for events from before the core reported it. */
+    val deviceId: String = "",
+    val deviceName: String = "",
+    /** False when the peer is an older build that cannot pause or resume. */
+    val canPause: Boolean = false,
+) {
+    fun isActive(): Boolean = state == "requesting" || state == "receiving" || state == "sending" || state == "saving"
+
+    /** Nothing more will happen to this row on its own and it needs no action. */
+    fun isFinished(): Boolean = state == "complete" || state == "failed" || state == "expired" || state == "cancelled"
+}
+
+fun transferKey(deviceId: String, fileId: String): String = "$deviceId|$fileId"
 
 private fun readImage(context: Context, uri: android.net.Uri): Triple<Int, Int, ByteArray>? {
     val bitmap = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null

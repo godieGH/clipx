@@ -82,9 +82,22 @@ impl clipx_core::platform::CoreEventListener for ClipxEventAdapter {
         total: u64,
         state: String,
         message: String,
+        device_id: String,
+        device_name: String,
+        can_pause: bool,
     ) {
         self.0.on_file_transfer(
-            entry_id, file_id, file_name, direction, done, total, state, message,
+            entry_id,
+            file_id,
+            file_name,
+            direction,
+            done,
+            total,
+            state,
+            message,
+            device_id,
+            device_name,
+            can_pause,
         );
     }
 }

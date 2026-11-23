@@ -51,6 +51,8 @@ fn device_command_name(command: &DeviceCommands) -> &'static str {
         DeviceCommands::ForgetDevice { .. } => "forget_device",
         DeviceCommands::PendingPairings { .. } => "pending_pairings",
         DeviceCommands::ApprovePairing { .. } => "approve_pairing",
+        DeviceCommands::ControlTransfer { .. } => "control_transfer",
+        DeviceCommands::ListTransfers { .. } => "list_transfers",
     }
 }
 
@@ -70,6 +72,7 @@ fn peer_message_name(body: &Body) -> &'static str {
         Body::FileChunk(_) => "file_chunk",
         Body::FileChunkAck(_) => "file_chunk_ack",
         Body::FileTransferCancel(_) => "file_transfer_cancel",
+        Body::FileTransferResume(_) => "file_transfer_resume",
     }
 }
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -122,6 +125,7 @@ pub struct DeviceManager<E: Engine> {
     // slower subscriber and make a large transfer appear stuck.
     transfer_progress: HashMap<String, (String, u8)>,
     upload_sessions: HashMap<(String, String), UploadSession>,
+    held_uploads: HashMap<(String, String), HeldUpload>,
     upload_done_tx: mpsc::UnboundedSender<(String, String, u64)>,
     upload_done_rx: mpsc::UnboundedReceiver<(String, String, u64)>,
     next_upload_id: u64,
@@ -182,12 +186,57 @@ struct ResumeState {
     updated_at_ms: u64,
 }
 
+/// What the user asked for on a running transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferAction {
+    Pause,
+    Resume,
+    Cancel,
+}
+
+/// One live transfer, for UIs that open after it started. A transfer is one
+/// offer going to, or coming from, one device: an offer sent to several
+/// devices is several transfers.
+#[derive(Debug, Clone)]
+pub struct TransferSnapshot {
+    pub device_id: String,
+    pub device_name: String,
+    pub entry_id: String,
+    pub file_id: String,
+    pub file_name: String,
+    /// "download" or "send".
+    pub direction: String,
+    pub done: u64,
+    pub total: u64,
+    pub state: String,
+    /// False when the peer is an older build without pause/resume.
+    pub can_pause: bool,
+}
+
+/// An upload the sending user paused. Nothing is streaming; the receiver keeps
+/// its partial data and asks again when it (or the sender, via
+/// `FileTransferResume`) continues.
+struct HeldUpload {
+    file_name: String,
+    total_size: u64,
+    done: u64,
+    /// The sender pressed Resume and is waiting for the receiver to ask again.
+    waiting: bool,
+}
+
 struct UploadSession {
     /// Identifies this session so a late "done" message from a replaced
     /// session cannot remove its replacement.
     id: u64,
     cancel: CancellationToken,
     interrupt: CancellationToken,
+    file_name: String,
+    total_size: u64,
+    /// Bytes the receiver has acknowledged so far.
+    confirmed: Arc<AtomicU64>,
+    /// Set when the local user paused this upload, so the task reports
+    /// "paused" instead of "interrupted".
+    paused: Arc<AtomicBool>,
     /// Set when a newer request for the same file replaced this session, so
     /// the old task exits quietly without reporting "interrupted".
     superseded: Arc<AtomicBool>,
@@ -243,6 +292,19 @@ pub enum DeviceCommands {
     },
     GetIdentity {
         reply_to: oneshot::Sender<IdentitySnapshot>,
+    },
+    /// Pause, resume or cancel one transfer without touching clipboard
+    /// history. `device_id` narrows it to one device when the same offer is
+    /// going to several. `Err` is a message for the user (a toast) explaining
+    /// a refusal, such as a peer that cannot pause.
+    ControlTransfer {
+        device_id: Option<String>,
+        file_id: String,
+        action: TransferAction,
+        reply_to: oneshot::Sender<Result<String, String>>,
+    },
+    ListTransfers {
+        reply_to: oneshot::Sender<Vec<TransferSnapshot>>,
     },
     GetPaired {
         reply_to: oneshot::Sender<Vec<proto::DeviceInfo>>,
@@ -302,6 +364,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             pending_downloads: HashMap::new(),
             transfer_progress: HashMap::new(),
             upload_sessions: HashMap::new(),
+            held_uploads: HashMap::new(),
             upload_done_tx,
             upload_done_rx,
             next_upload_id: 0,
@@ -494,6 +557,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                             file_id: file_id.clone(),
                         });
                     self.notify_transfer(
+                        &device_id,
                         &entry_id,
                         &file_id,
                         &file_name,
@@ -505,33 +569,15 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     );
                     return;
                 }
-                self.pending_downloads.insert(
-                    file_id.clone(),
-                    PendingDownload {
-                        device_id: device_id.clone(),
-                        entry_id: entry_id.clone(),
-                        file_name: file_name.clone(),
-                        total_size,
-                        offer_expires_at_ms,
-                        received_size: 0,
-                        received_complete: false,
-                        last_activity: Instant::now(),
-                        stall_retries: 0,
-                    },
-                );
-                self.notify_transfer(
-                    &entry_id,
-                    &file_id,
-                    &file_name,
-                    "download",
-                    0,
+                // Continues from a kept partial download (paused or
+                // interrupted) when one is still valid, else starts at 0.
+                self.start_or_resume_download(
+                    device_id,
+                    file_id,
+                    entry_id,
+                    file_name,
                     total_size,
-                    "requesting",
-                    "Downloading file".to_string(),
-                );
-                self.send_peer(
-                    &device_id,
-                    Body::FileDownloadRequest(proto::FileDownloadRequest { file_id, offset: 0 }),
+                    offer_expires_at_ms,
                 );
             }
             ClipboardOutbound::FileDownloadFinished { file_id } => {
@@ -541,7 +587,10 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 self.cancel_local_transfer(&file_id);
                 self.send_peer(
                     &device_id,
-                    Body::FileTransferCancel(proto::FileTransferCancel { file_id }),
+                    Body::FileTransferCancel(proto::FileTransferCancel {
+                        file_id,
+                        pause: false,
+                    }),
                 );
             }
             ClipboardOutbound::FileStream {
@@ -851,6 +900,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 s.profile.log_summary(&file_id, "interrupted");
             }
             self.notify_transfer(
+                &pending.device_id,
                 &pending.entry_id,
                 &file_id,
                 &pending.file_name,
@@ -900,6 +950,8 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         }
         // drop the effective_version related to avoid stale
         self.effective_versions.remove(&device_id);
+        // A paused upload has nothing left to resume once the receiver is gone.
+        self.held_uploads.retain(|(d, _), _| d != &device_id);
     }
 
     /// A dial never became a live connection at all (TCP connect failed/timed
@@ -992,6 +1044,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             Some(Body::FileTransferCancel(cancel)) => {
                 self.on_file_transfer_cancel(device_id, cancel);
+            }
+            Some(Body::FileTransferResume(resume)) => {
+                self.on_file_transfer_resume(device_id, resume);
             }
             None => tracing::warn!("empty PeerMessage from {device_id}"),
         }
@@ -2057,6 +2112,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 active.received_complete = true;
             }
             self.notify_transfer(
+                &pending.device_id,
                 &pending.entry_id,
                 &chunk.file_id,
                 &pending.file_name,
@@ -2078,6 +2134,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 let _ = fs::remove_file(done_state.temp_path);
                 self.release_pending_download(&chunk.file_id);
                 self.notify_transfer(
+                    &pending.device_id,
                     &pending.entry_id,
                     &chunk.file_id,
                     &pending.file_name,
@@ -2095,6 +2152,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             state.received_size = new_offset;
         }
         self.notify_transfer(
+            &pending.device_id,
             &pending.entry_id,
             &chunk.file_id,
             &pending.file_name,
@@ -2118,13 +2176,101 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     }
 
     fn on_file_transfer_cancel(&mut self, device_id: String, cancel: proto::FileTransferCancel) {
+        // The peer stopped receiving from us. A pause keeps the receiver's
+        // partial data, so end our stream as an interruption, not a cancel.
         if let Some(session) = self
             .upload_sessions
-            .get(&(device_id, cancel.file_id.clone()))
+            .get(&(device_id.clone(), cancel.file_id.clone()))
         {
-            session.cancel.cancel();
+            if cancel.pause {
+                session.interrupt.cancel();
+            } else {
+                session.cancel.cancel();
+            }
         }
-        self.cancel_local_download(&cancel.file_id);
+        // The peer stopped sending to us.
+        let ours = self
+            .pending_downloads
+            .get(&cancel.file_id)
+            .is_some_and(|p| p.device_id == device_id);
+        if ours && let Some(p) = self.release_pending_download(&cancel.file_id) {
+            if cancel.pause {
+                // Kept for an explicit resume (ours, or the sender's
+                // FileTransferResume), never restarted on its own.
+                let _ = fs::write(
+                    self.incoming_paused_path(&cancel.file_id),
+                    Self::now_ms().to_string(),
+                );
+                let message = format!("{} was paused by the sender", p.file_name);
+                self.park_download(&p, &cancel.file_id, true, "paused", message);
+            } else {
+                let message = format!("The sender cancelled {}", p.file_name);
+                self.park_download(&p, &cancel.file_id, false, "cancelled", message);
+            }
+            return;
+        }
+        if !cancel.pause {
+            // May be a partial we kept (a paused download) that the sender
+            // has now given up on.
+            self.discard_kept_partial(&device_id, &cancel.file_id);
+        }
+    }
+
+    /// The sender asked us to continue a transfer we hold a partial download
+    /// of. We ask again from the kept offset.
+    fn on_file_transfer_resume(&mut self, device_id: String, resume: proto::FileTransferResume) {
+        let file_id = resume.file_id;
+        if self.pending_downloads.contains_key(&file_id) || !self.connected.contains_key(&device_id)
+        {
+            return;
+        }
+        let Some(state) = fs::read(self.incoming_state_path(&file_id))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<ResumeState>(&b).ok())
+        else {
+            return;
+        };
+        if state.device_id != device_id || state.offer_expires_at_ms < Self::now_ms() {
+            return;
+        }
+        self.resume_candidates.remove(&file_id);
+        self.start_or_resume_download(
+            state.device_id,
+            state.file_id,
+            state.entry_id,
+            state.file_name,
+            state.total_size,
+            state.offer_expires_at_ms,
+        );
+    }
+
+    /// Drop a kept partial download the sender cancelled, and report it so the
+    /// row does not stay "paused" for a transfer that can no longer continue.
+    fn discard_kept_partial(&mut self, device_id: &str, file_id: &str) {
+        let Some(state) = fs::read(self.incoming_state_path(file_id))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<ResumeState>(&b).ok())
+        else {
+            return;
+        };
+        if state.device_id != device_id {
+            return;
+        }
+        let _ = fs::remove_file(self.incoming_temp_path(device_id, file_id));
+        let _ = fs::remove_file(self.incoming_state_path(file_id));
+        let _ = fs::remove_file(self.incoming_paused_path(file_id));
+        self.resume_candidates.remove(file_id);
+        self.notify_transfer(
+            device_id,
+            &state.entry_id,
+            file_id,
+            &state.file_name,
+            "download",
+            state.confirmed_offset,
+            state.total_size,
+            "cancelled",
+            format!("The sender cancelled {}", state.file_name),
+        );
     }
 
     fn start_or_resume_download(
@@ -2140,6 +2286,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         {
             return;
         }
+        let _ = fs::remove_file(self.incoming_paused_path(&file_id));
         let offset = self
             .load_valid_resume_state(
                 &file_id,
@@ -2170,6 +2317,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             },
         );
         self.notify_transfer(
+            &device_id,
             &entry_id,
             &file_id,
             &file_name,
@@ -2222,6 +2370,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             if give_up {
                 tracing::warn!(%file_id, "download stalled; giving up until retried");
                 self.notify_transfer(
+                    &snapshot.device_id,
                     &snapshot.entry_id,
                     &file_id,
                     &snapshot.file_name,
@@ -2239,6 +2388,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     "download stalled; re-requesting from current offset"
                 );
                 self.notify_transfer(
+                    &snapshot.device_id,
                     &snapshot.entry_id,
                     &file_id,
                     &snapshot.file_name,
@@ -2334,30 +2484,40 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let interrupt = CancellationToken::new();
         let (ack_tx, mut ack_rx) = mpsc::unbounded_channel();
 
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let confirmed_offset = Arc::new(AtomicU64::new(start_offset));
+        let confirmed_offset_task = confirmed_offset.clone();
+        let paused_by_user = Arc::new(AtomicBool::new(false));
+        let paused_task = paused_by_user.clone();
+        // The receiver is asking again, so any paused/waiting upload is live.
+        self.held_uploads.remove(&key);
+
         self.upload_sessions.insert(
             key.clone(),
             UploadSession {
                 id: session_id,
                 cancel: cancel.clone(),
                 interrupt: interrupt.clone(),
+                file_name: file_name.clone(),
+                total_size,
+                confirmed: confirmed_offset.clone(),
+                paused: paused_by_user,
                 superseded,
                 ack_tx,
             },
         );
+        let peer_id = device_id.clone();
+        let peer_name = self.peer_name(&device_id);
+        let can_pause = self.peer_supports_transfer_control(&device_id);
 
         let done_tx = self.upload_done_tx.clone();
         let events_tx = self.events_tx.clone();
         let notification = self.notification.clone();
         let connection_id_for_task = connection_id.clone();
-
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("file")
-            .to_string();
-
-        let confirmed_offset = Arc::new(AtomicU64::new(start_offset));
-        let confirmed_offset_task = confirmed_offset.clone();
 
         tokio::spawn(async move {
             let mut profile = SenderProfile::new();
@@ -2383,6 +2543,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 let _ = Self::emit_transfer(
                     &events_tx,
                     &notification,
+                    &peer_id,
+                    &peer_name,
+                    can_pause,
                     &file_id,
                     &file_name,
                     "send",
@@ -2514,6 +2677,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Self::emit_transfer(
                         &events_tx,
                         &notification,
+                        &peer_id,
+                        &peer_name,
+                        can_pause,
                         &file_id,
                         &file_name,
                         "send",
@@ -2550,6 +2716,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Self::emit_transfer(
                         &events_tx,
                         &notification,
+                        &peer_id,
+                        &peer_name,
+                        can_pause,
                         &file_id,
                         &file_name,
                         "send",
@@ -2557,6 +2726,23 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                         total_size,
                         "cancelled",
                         format!("Sending {file_name} was cancelled"),
+                    )
+                    .await;
+                } else if error == "INTERRUPTED" && paused_task.load(Ordering::Acquire) {
+                    let confirmed = confirmed_offset.load(Ordering::Acquire);
+                    Self::emit_transfer(
+                        &events_tx,
+                        &notification,
+                        &peer_id,
+                        &peer_name,
+                        can_pause,
+                        &file_id,
+                        &file_name,
+                        "send",
+                        confirmed,
+                        total_size,
+                        "paused",
+                        format!("Paused sending {file_name}"),
                     )
                     .await;
                 } else if error == "INTERRUPTED"
@@ -2568,6 +2754,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Self::emit_transfer(
                     &events_tx,
                     &notification,
+                    &peer_id,
+                    &peer_name,
+                    can_pause,
                     &file_id,
                     &file_name,
                     "send",
@@ -2583,6 +2772,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     Self::emit_transfer(
                         &events_tx,
                         &notification,
+                        &peer_id,
+                        &peer_name,
+                        can_pause,
                         &file_id,
                         &file_name,
                         "send",
@@ -2619,6 +2811,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                     file_id: file_id.to_string(),
                 });
             self.notify_transfer(
+                &p.device_id,
                 &p.entry_id,
                 file_id,
                 &p.file_name,
@@ -2659,6 +2852,379 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             });
     }
 
+    fn peer_name(&self, device_id: &str) -> String {
+        self.trusted
+            .list()
+            .find(|d| d.id == device_id)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| device_id.to_string())
+    }
+
+    /// Whether this peer advertised pause/resume in its hello. Older builds
+    /// (and peers that sent no hello at all) do not, and still transfer fine.
+    fn peer_supports_transfer_control(&self, device_id: &str) -> bool {
+        self.effective_versions
+            .get(device_id)
+            .is_some_and(|(_, caps)| {
+                caps.contains(&(proto::PeerCapabilities::CapabilityFileTransferControl as i32))
+            })
+    }
+
+    /// A user's pause / resume / cancel on one transfer. Cancel is always
+    /// allowed (every build understands FileTransferCancel). Pause and resume
+    /// need the peer's cooperation, so they are refused, with an explanation
+    /// for the toast, when the peer is an older build.
+    fn control_transfer(
+        &mut self,
+        file_id: &str,
+        device_id: Option<&str>,
+        action: TransferAction,
+    ) -> Result<String, String> {
+        let wanted = |d: &str| device_id.is_none_or(|w| w == d);
+        let mut running: Vec<String> = Vec::new();
+        if let Some(p) = self.pending_downloads.get(file_id)
+            && wanted(&p.device_id)
+        {
+            running.push(p.device_id.clone());
+        }
+        running.extend(
+            self.upload_sessions
+                .keys()
+                .filter(|(d, f)| f == file_id && wanted(d))
+                .map(|(d, _)| d.clone()),
+        );
+        let held: Vec<String> = self
+            .held_uploads
+            .keys()
+            .filter(|(d, f)| f == file_id && wanted(d))
+            .map(|(d, _)| d.clone())
+            .collect();
+        let paused: Vec<ResumeState> = self
+            .paused_downloads()
+            .into_iter()
+            .filter(|s| s.file_id == file_id && wanted(&s.device_id))
+            .collect();
+        let refusal = |this: &Self, peers: &[String]| -> Option<String> {
+            peers
+                .iter()
+                .find(|d| !this.peer_supports_transfer_control(d))
+                .map(|d| {
+                    format!(
+                        "{} runs an older ClipX that can't pause or resume transfers. You can still cancel.",
+                        this.peer_name(d)
+                    )
+                })
+        };
+        match action {
+            TransferAction::Cancel => {
+                if running.is_empty() && held.is_empty() && paused.is_empty() {
+                    return Err("No running transfer to cancel".into());
+                }
+                self.stop_transfer(file_id, device_id, false);
+                // A paused download has nothing running: drop its kept partial
+                // data and tell the sender it will not continue.
+                for state in paused {
+                    self.discard_kept_partial(&state.device_id, file_id);
+                    self.send_peer(
+                        &state.device_id,
+                        Body::FileTransferCancel(proto::FileTransferCancel {
+                            file_id: file_id.to_string(),
+                            pause: false,
+                        }),
+                    );
+                }
+                Ok("transfer cancelled".into())
+            }
+            TransferAction::Pause => {
+                if running.is_empty() {
+                    return Err("No running transfer to pause".into());
+                }
+                if let Some(message) = refusal(self, &running) {
+                    return Err(message);
+                }
+                self.stop_transfer(file_id, device_id, true);
+                Ok("transfer paused".into())
+            }
+            TransferAction::Resume => {
+                // Only a paused upload is resumed from here; a paused download
+                // is resumed by asking for the file again.
+                if held.is_empty() {
+                    return Err(
+                        "Nothing to resume here: the device receiving the file resumes it".into(),
+                    );
+                }
+                if let Some(message) = refusal(self, &held) {
+                    return Err(message);
+                }
+                for peer in held {
+                    let key = (peer.clone(), file_id.to_string());
+                    let Some(h) = self.held_uploads.get_mut(&key) else {
+                        continue;
+                    };
+                    h.waiting = true;
+                    let (name, done, total) = (h.file_name.clone(), h.done, h.total_size);
+                    self.send_peer(
+                        &peer,
+                        Body::FileTransferResume(proto::FileTransferResume {
+                            file_id: file_id.to_string(),
+                        }),
+                    );
+                    let waiting_for = self.peer_name(&peer);
+                    self.notify_transfer(
+                        &peer,
+                        file_id,
+                        file_id,
+                        &name,
+                        "send",
+                        done,
+                        total,
+                        "requesting",
+                        format!("Waiting for {waiting_for} to continue"),
+                    );
+                }
+                Ok("waiting for the receiver to continue".into())
+            }
+        }
+    }
+
+    /// Stop transfers of `file_id`, optionally only the one with `device_id`.
+    /// The history entry and the sender's staged offer are left alone, so the
+    /// file can be downloaded again. `pause` keeps the partial download
+    /// (continued from the confirmed offset on the next request); otherwise
+    /// it is discarded.
+    fn stop_transfer(&mut self, file_id: &str, device_id: Option<&str>, pause: bool) {
+        let wanted = |d: &str| device_id.is_none_or(|w| w == d);
+        // Receiving side.
+        if let Some(p) = self
+            .pending_downloads
+            .get(file_id)
+            .filter(|p| wanted(&p.device_id))
+            .cloned()
+        {
+            self.pending_downloads.remove(file_id);
+            // Free the clipboard manager's slot before replying, so a Resume
+            // right after cannot be refused as "already in progress".
+            let _ = self
+                .clipboard_tx
+                .send(ClipboardCommand::FileDownloadReleased {
+                    file_id: file_id.to_string(),
+                });
+            if pause {
+                let _ = fs::write(
+                    self.incoming_paused_path(file_id),
+                    Self::now_ms().to_string(),
+                );
+            }
+            let (state, message) = if pause {
+                ("paused", format!("Paused {}", p.file_name))
+            } else {
+                ("cancelled", format!("Cancelled {}", p.file_name))
+            };
+            self.park_download(&p, file_id, pause, state, message);
+            self.send_peer(
+                &p.device_id,
+                Body::FileTransferCancel(proto::FileTransferCancel {
+                    file_id: file_id.to_string(),
+                    pause,
+                }),
+            );
+        }
+        // Sending side: every session streaming this file to a wanted device.
+        let keys: Vec<(String, String)> = self
+            .upload_sessions
+            .keys()
+            .filter(|(d, f)| f == file_id && wanted(d))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(s) = self.upload_sessions.remove(&key) {
+                if pause {
+                    s.paused.store(true, Ordering::Release);
+                    self.held_uploads.insert(
+                        key.clone(),
+                        HeldUpload {
+                            file_name: s.file_name.clone(),
+                            total_size: s.total_size,
+                            done: s.confirmed.load(Ordering::Acquire),
+                            waiting: false,
+                        },
+                    );
+                    s.interrupt.cancel();
+                } else {
+                    s.cancel.cancel();
+                }
+            }
+            self.send_peer(
+                &key.0,
+                Body::FileTransferCancel(proto::FileTransferCancel {
+                    file_id: file_id.to_string(),
+                    pause,
+                }),
+            );
+        }
+        // A paused (or waiting) upload has no task left to report a cancel.
+        if !pause {
+            let held: Vec<(String, String)> = self
+                .held_uploads
+                .keys()
+                .filter(|(d, f)| f == file_id && wanted(d))
+                .cloned()
+                .collect();
+            for key in held {
+                if let Some(h) = self.held_uploads.remove(&key) {
+                    self.notify_transfer(
+                        &key.0,
+                        file_id,
+                        file_id,
+                        &h.file_name,
+                        "send",
+                        h.done,
+                        h.total_size,
+                        "cancelled",
+                        format!("Sending {} was cancelled", h.file_name),
+                    );
+                    self.send_peer(
+                        &key.0,
+                        Body::FileTransferCancel(proto::FileTransferCancel {
+                            file_id: file_id.to_string(),
+                            pause: false,
+                        }),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Downloads the user paused: partial data and resume state are on disk,
+    /// nothing is running. They survive an app restart.
+    fn paused_downloads(&self) -> Vec<ResumeState> {
+        let Ok(entries) = fs::read_dir(&self.incoming_files_dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension().and_then(|x| x.to_str()) != Some("resume") {
+                    return None;
+                }
+                let state: ResumeState = serde_json::from_slice(&fs::read(&path).ok()?).ok()?;
+                (self.incoming_paused_path(&state.file_id).exists()
+                    && !self.pending_downloads.contains_key(&state.file_id)
+                    && state.offer_expires_at_ms >= Self::now_ms())
+                .then_some(state)
+            })
+            .collect()
+    }
+
+    /// Every live transfer, for a UI that opened after they started.
+    fn list_transfers(&self) -> Vec<TransferSnapshot> {
+        let mut out = Vec::new();
+        for (file_id, p) in &self.pending_downloads {
+            out.push(TransferSnapshot {
+                device_id: p.device_id.clone(),
+                device_name: self.peer_name(&p.device_id),
+                entry_id: p.entry_id.clone(),
+                file_id: file_id.clone(),
+                file_name: p.file_name.clone(),
+                direction: "download".into(),
+                done: p.received_size,
+                total: p.total_size,
+                state: if p.received_size > 0 {
+                    "receiving"
+                } else {
+                    "requesting"
+                }
+                .into(),
+                can_pause: self.peer_supports_transfer_control(&p.device_id),
+            });
+        }
+        for state in self.paused_downloads() {
+            out.push(TransferSnapshot {
+                device_id: state.device_id.clone(),
+                device_name: self.peer_name(&state.device_id),
+                entry_id: state.entry_id.clone(),
+                file_id: state.file_id.clone(),
+                file_name: state.file_name.clone(),
+                direction: "download".into(),
+                done: state.confirmed_offset,
+                total: state.total_size,
+                state: "paused".into(),
+                can_pause: self.peer_supports_transfer_control(&state.device_id),
+            });
+        }
+        for ((device_id, file_id), s) in &self.upload_sessions {
+            out.push(TransferSnapshot {
+                device_id: device_id.clone(),
+                device_name: self.peer_name(device_id),
+                entry_id: file_id.clone(),
+                file_id: file_id.clone(),
+                file_name: s.file_name.clone(),
+                direction: "send".into(),
+                done: s.confirmed.load(Ordering::Acquire),
+                total: s.total_size,
+                state: "sending".into(),
+                can_pause: self.peer_supports_transfer_control(device_id),
+            });
+        }
+        for ((device_id, file_id), h) in &self.held_uploads {
+            out.push(TransferSnapshot {
+                device_id: device_id.clone(),
+                device_name: self.peer_name(device_id),
+                entry_id: file_id.clone(),
+                file_id: file_id.clone(),
+                file_name: h.file_name.clone(),
+                direction: "send".into(),
+                done: h.done,
+                total: h.total_size,
+                state: if h.waiting { "requesting" } else { "paused" }.into(),
+                can_pause: self.peer_supports_transfer_control(device_id),
+            });
+        }
+        out
+    }
+
+    /// Retire a download that stopped for a reason other than failure.
+    /// `keep_partial` leaves the temp file and resume state on disk so the
+    /// download can continue from the confirmed offset; otherwise both go.
+    fn park_download(
+        &mut self,
+        p: &PendingDownload,
+        file_id: &str,
+        keep_partial: bool,
+        state: &str,
+        message: String,
+    ) {
+        if let Some(s) = self
+            .incoming_files
+            .remove(&(p.device_id.clone(), file_id.to_string()))
+        {
+            s.profile.log_summary(file_id, state);
+            if !keep_partial {
+                let _ = fs::remove_file(&s.temp_path);
+            }
+        }
+        // Never leave it on the auto-resume list: only an explicit request
+        // (or, for an interruption, a reconnect scan on next start) resumes it.
+        self.resume_candidates.remove(file_id);
+        if !keep_partial {
+            let _ = fs::remove_file(self.incoming_temp_path(&p.device_id, file_id));
+            let _ = fs::remove_file(self.incoming_state_path(file_id));
+            let _ = fs::remove_file(self.incoming_paused_path(file_id));
+        }
+        self.notify_transfer(
+            &p.device_id,
+            &p.entry_id,
+            file_id,
+            &p.file_name,
+            "download",
+            p.received_size,
+            p.total_size,
+            state,
+            message,
+        );
+    }
+
     fn cancel_local_transfer(&mut self, file_id: &str) {
         let keys: Vec<(String, String)> = self
             .upload_sessions
@@ -2681,6 +3247,12 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     fn incoming_state_path(&self, file_id: &str) -> PathBuf {
         self.incoming_files_dir
             .join(format!("clipx-{file_id}.resume"))
+    }
+    /// Marks a download the user paused: its partial data and resume state are
+    /// kept, but it must not restart by itself on reconnect or app restart.
+    fn incoming_paused_path(&self, file_id: &str) -> PathBuf {
+        self.incoming_files_dir
+            .join(format!("clipx-{file_id}.paused"))
     }
 
     fn persist_resume_state(
@@ -2765,6 +3337,11 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
                 .exists()
             {
                 let _ = fs::remove_file(&path);
+                continue;
+            }
+            // Paused by the user: keep the files, but wait for an explicit
+            // resume instead of restarting on the next connection.
+            if self.incoming_paused_path(&file_id).exists() {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
@@ -2865,6 +3442,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
 
     fn notify_transfer(
         &mut self,
+        device_id: &str,
         entry_id: &str,
         file_id: &str,
         file_name: &str,
@@ -2877,7 +3455,7 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
         let message = message.into();
         let terminal = matches!(
             state,
-            "complete" | "failed" | "expired" | "cancelled" | "interrupted"
+            "complete" | "failed" | "expired" | "cancelled" | "interrupted" | "paused"
         );
         let should_emit = if terminal || total == 0 || !matches!(state, "receiving" | "sending") {
             true
@@ -2911,6 +3489,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             total,
             state: state.to_string(),
             message: message.clone(),
+            device_id: device_id.to_string(),
+            device_name: self.peer_name(device_id),
+            can_pause: self.peer_supports_transfer_control(device_id),
         });
         let notification_future = self.notification.notify_file_transfer(
             file_id.to_string(),
@@ -2932,6 +3513,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
     async fn emit_transfer(
         events_tx: &broadcast::Sender<CoreEvent>,
         notification: &E,
+        device_id: &str,
+        device_name: &str,
+        can_pause: bool,
         file_id: &str,
         file_name: &str,
         direction: &str,
@@ -2949,6 +3533,9 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             total,
             state: state.to_string(),
             message: message.clone(),
+            device_id: device_id.to_string(),
+            device_name: device_name.to_string(),
+            can_pause,
         });
         notification
             .notify_file_transfer(
@@ -3249,6 +3836,18 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             DeviceCommands::GetPaired { reply_to } => {
                 let _ = reply_to.send(self.build_paired_devices().await);
             }
+            DeviceCommands::ControlTransfer {
+                device_id,
+                file_id,
+                action,
+                reply_to,
+            } => {
+                let _ =
+                    reply_to.send(self.control_transfer(&file_id, device_id.as_deref(), action));
+            }
+            DeviceCommands::ListTransfers { reply_to } => {
+                let _ = reply_to.send(self.list_transfers());
+            }
             DeviceCommands::Disconnect {
                 device_id,
                 reply_to,
@@ -3341,5 +3940,770 @@ impl<E: Engine + Clone + 'static> DeviceManager<E> {
             }
             _ => "not awaiting approval right now".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod transfer_control_tests {
+    use super::*;
+    use crate::notification::platform::NotificationFuture;
+    use crate::notification::{IncomingClipboardDecision, PairDecision, Prompt};
+
+    /// Engine that does nothing, so the tests behave the same on every OS
+    /// (the real Windows engine would raise toasts).
+    #[derive(Clone)]
+    struct QuietEngine;
+
+    impl Engine for QuietEngine {
+        fn ask_pair<'a>(&'a self, _: Prompt, _: Duration) -> NotificationFuture<'a, PairDecision> {
+            Box::pin(async { PairDecision::NoResponse })
+        }
+        fn ask_clipboard<'a>(
+            &'a self,
+            _: Prompt,
+            _: Duration,
+        ) -> NotificationFuture<'a, IncomingClipboardDecision> {
+            Box::pin(async { IncomingClipboardDecision::Ignore })
+        }
+        fn notify_info<'a>(&'a self, _: &'a str, _: String) -> NotificationFuture<'a, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    struct Harness {
+        mgr: DeviceManager<QuietEngine>,
+        transport_rx: mpsc::UnboundedReceiver<TransportCommand>,
+        clipboard_rx: mpsc::UnboundedReceiver<ClipboardCommand>,
+        events_rx: broadcast::Receiver<CoreEvent>,
+        dir: PathBuf,
+    }
+
+    const DEVICE: &str = "dev-a";
+    const OTHER: &str = "dev-b";
+    const FILE: &str = "file-1";
+    const ENTRY: &str = "entry-1";
+    const TOTAL: u64 = 4096;
+    const PARTIAL: u64 = 1024;
+
+    fn harness() -> Harness {
+        let dir =
+            std::env::temp_dir().join(format!("clipx-transfer-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let (transport_tx, transport_rx) = mpsc::unbounded_channel();
+        let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
+        let (events_tx, events_rx) = broadcast::channel(64);
+        let identity = Arc::new(DeviceIdentity::load_or_create(dir.join("identity.key")));
+        let mut mgr = DeviceManager::new(
+            dir.join("trusted.json"),
+            identity,
+            Some(transport_tx),
+            QuietEngine,
+            clipboard_tx,
+            events_tx,
+        );
+        mgr.incoming_files_dir = dir.join("incoming");
+        fs::create_dir_all(&mgr.incoming_files_dir).unwrap();
+        Harness {
+            mgr,
+            transport_rx,
+            clipboard_rx,
+            events_rx,
+            dir,
+        }
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn offer_expiry() -> u64 {
+        DeviceManager::<QuietEngine>::now_ms() + 60 * 60 * 1000
+    }
+
+    /// Marks a peer as speaking this build's protocol, with or without the
+    /// pause/resume capability.
+    fn peer(h: &mut Harness, device: &str, can_control: bool) {
+        let caps = if can_control {
+            vec![proto::PeerCapabilities::CapabilityFileTransferControl as i32]
+        } else {
+            vec![]
+        };
+        h.mgr
+            .effective_versions
+            .insert(device.to_string(), (1, caps));
+        h.mgr.connected.insert(device.into(), "conn-1".into());
+    }
+
+    /// A download that already received PARTIAL bytes, exactly as the chunk
+    /// handler leaves it: pending entry, temp file and resume state.
+    fn partial_download(h: &mut Harness) {
+        let pending = PendingDownload {
+            device_id: DEVICE.into(),
+            entry_id: ENTRY.into(),
+            file_name: "movie.mp4".into(),
+            total_size: TOTAL,
+            offer_expires_at_ms: offer_expiry(),
+            received_size: PARTIAL,
+            received_complete: false,
+            last_activity: Instant::now(),
+            stall_retries: 0,
+        };
+        fs::write(
+            h.mgr.incoming_temp_path(DEVICE, FILE),
+            vec![7u8; PARTIAL as usize],
+        )
+        .unwrap();
+        h.mgr.persist_resume_state(DEVICE, FILE, &pending, PARTIAL);
+        h.mgr.pending_downloads.insert(FILE.into(), pending);
+        peer(h, DEVICE, true);
+    }
+
+    struct Tokens {
+        cancel: CancellationToken,
+        interrupt: CancellationToken,
+    }
+
+    fn upload_to(h: &mut Harness, device: &str, done: u64) -> Tokens {
+        let (ack_tx, _ack_rx) = mpsc::unbounded_channel();
+        let tokens = Tokens {
+            cancel: CancellationToken::new(),
+            interrupt: CancellationToken::new(),
+        };
+        h.mgr.upload_sessions.insert(
+            (device.into(), FILE.into()),
+            UploadSession {
+                id: 1,
+                cancel: tokens.cancel.clone(),
+                interrupt: tokens.interrupt.clone(),
+                file_name: "movie.mp4".into(),
+                total_size: TOTAL,
+                confirmed: Arc::new(AtomicU64::new(done)),
+                paused: Arc::new(AtomicBool::new(false)),
+                superseded: Arc::new(AtomicBool::new(false)),
+                ack_tx,
+            },
+        );
+        tokens
+    }
+
+    /// (device, file, pause) for every FileTransferCancel sent.
+    fn cancels(h: &mut Harness) -> Vec<(String, String, bool)> {
+        let mut out = Vec::new();
+        while let Ok(cmd) = h.transport_rx.try_recv() {
+            if let TransportCommand::SendPeerMessage {
+                device_id, message, ..
+            } = cmd
+                && let Some(Body::FileTransferCancel(c)) = message.body
+            {
+                out.push((device_id, c.file_id, c.pause));
+            }
+        }
+        out
+    }
+
+    fn resumes_sent(h: &mut Harness) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        while let Ok(cmd) = h.transport_rx.try_recv() {
+            if let TransportCommand::SendPeerMessage {
+                device_id, message, ..
+            } = cmd
+                && let Some(Body::FileTransferResume(r)) = message.body
+            {
+                out.push((device_id, r.file_id));
+            }
+        }
+        out
+    }
+
+    fn download_requests(h: &mut Harness) -> Vec<u64> {
+        let mut out = Vec::new();
+        while let Ok(cmd) = h.transport_rx.try_recv() {
+            if let TransportCommand::SendPeerMessage { message, .. } = cmd
+                && let Some(Body::FileDownloadRequest(r)) = message.body
+            {
+                out.push(r.offset);
+            }
+        }
+        out
+    }
+
+    struct Seen {
+        state: String,
+        done: u64,
+        device_id: String,
+        can_pause: bool,
+    }
+
+    fn last_event(h: &mut Harness) -> Option<Seen> {
+        let mut last = None;
+        while let Ok(ev) = h.events_rx.try_recv() {
+            if let CoreEvent::FileTransferChanged {
+                state,
+                done,
+                device_id,
+                can_pause,
+                ..
+            } = ev
+            {
+                last = Some(Seen {
+                    state,
+                    done,
+                    device_id,
+                    can_pause,
+                });
+            }
+        }
+        last
+    }
+
+    fn last_state(h: &mut Harness) -> Option<(String, u64)> {
+        last_event(h).map(|e| (e.state, e.done))
+    }
+
+    #[tokio::test]
+    async fn pause_keeps_partial_data_and_tells_the_sender() {
+        let mut h = harness();
+        partial_download(&mut h);
+
+        h.mgr.stop_transfer(FILE, None, true);
+
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+        assert!(
+            h.mgr.incoming_temp_path(DEVICE, FILE).exists(),
+            "partial file must stay"
+        );
+        assert!(
+            h.mgr.incoming_state_path(FILE).exists(),
+            "resume state must stay"
+        );
+        assert!(
+            h.mgr.incoming_paused_path(FILE).exists(),
+            "paused marker must be written"
+        );
+        let ev = last_event(&mut h).unwrap();
+        assert_eq!((ev.state.as_str(), ev.done), ("paused", PARTIAL));
+        assert_eq!(
+            ev.device_id, DEVICE,
+            "events say which device the transfer is with"
+        );
+        assert!(ev.can_pause);
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), true)]);
+    }
+
+    #[tokio::test]
+    async fn cancel_discards_partial_data_but_not_the_history_entry() {
+        let mut h = harness();
+        partial_download(&mut h);
+
+        h.mgr.stop_transfer(FILE, None, false);
+
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+        assert!(!h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert!(!h.mgr.incoming_state_path(FILE).exists());
+        assert!(!h.mgr.incoming_paused_path(FILE).exists());
+        assert!(
+            !h.mgr
+                .incoming_files_dir
+                .join(format!("clipx-{FILE}.cancelled"))
+                .exists(),
+            "no .cancelled marker: that is only for history removal"
+        );
+        assert_eq!(last_state(&mut h), Some(("cancelled".into(), PARTIAL)));
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), false)]);
+        let mut released = false;
+        while let Ok(cmd) = h.clipboard_rx.try_recv() {
+            assert!(!matches!(cmd, ClipboardCommand::RemoveEntry { .. }));
+            released |= matches!(cmd, ClipboardCommand::FileDownloadReleased { .. });
+        }
+        assert!(
+            released,
+            "the clipboard manager's download slot must be freed"
+        );
+    }
+
+    #[tokio::test]
+    async fn paused_download_is_not_restarted_by_the_startup_scan() {
+        let mut h = harness();
+        partial_download(&mut h);
+        h.mgr.stop_transfer(FILE, None, true);
+
+        h.mgr.load_resume_candidates();
+        assert!(
+            h.mgr.resume_candidates.is_empty(),
+            "paused downloads wait for the user"
+        );
+        assert!(
+            h.mgr.incoming_state_path(FILE).exists(),
+            "scan must not delete paused state"
+        );
+
+        // An interrupted (not paused) download is still resumed automatically.
+        fs::remove_file(h.mgr.incoming_paused_path(FILE)).unwrap();
+        h.mgr.load_resume_candidates();
+        assert!(h.mgr.resume_candidates.contains_key(FILE));
+    }
+
+    fn file_request(h: &Harness) -> ClipboardOutbound {
+        ClipboardOutbound::FileRequest {
+            device_id: DEVICE.into(),
+            file_id: FILE.into(),
+            entry_id: ENTRY.into(),
+            file_name: "movie.mp4".into(),
+            total_size: TOTAL,
+            offer_expires_at_ms: offer_expiry_of(h),
+        }
+    }
+
+    /// The expiry recorded in the kept resume state (a fresh `offer_expiry()`
+    /// would not match it).
+    fn offer_expiry_of(h: &Harness) -> u64 {
+        let bytes = fs::read(h.mgr.incoming_state_path(FILE)).unwrap();
+        serde_json::from_slice::<ResumeState>(&bytes)
+            .unwrap()
+            .offer_expires_at_ms
+    }
+
+    #[tokio::test]
+    async fn resume_continues_from_the_kept_offset_and_clears_the_marker() {
+        let mut h = harness();
+        partial_download(&mut h);
+        h.mgr.stop_transfer(FILE, None, true);
+        let _ = cancels(&mut h);
+
+        let req = file_request(&h);
+        h.mgr
+            .handle_clipboard_outbound(req, &h.mgr.clipboard_tx.clone());
+
+        assert_eq!(download_requests(&mut h), vec![PARTIAL]);
+        assert_eq!(h.mgr.pending_downloads[FILE].received_size, PARTIAL);
+        assert!(!h.mgr.incoming_paused_path(FILE).exists());
+        assert!(h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn download_after_cancel_starts_from_zero() {
+        let mut h = harness();
+        partial_download(&mut h);
+        let req = file_request(&h);
+        h.mgr.stop_transfer(FILE, None, false);
+        let _ = cancels(&mut h);
+
+        h.mgr
+            .handle_clipboard_outbound(req, &h.mgr.clipboard_tx.clone());
+
+        assert_eq!(download_requests(&mut h), vec![0]);
+        assert_eq!(h.mgr.pending_downloads[FILE].received_size, 0);
+    }
+
+    #[tokio::test]
+    async fn pausing_with_an_old_peer_is_refused_but_cancel_still_works() {
+        let mut h = harness();
+        partial_download(&mut h);
+        peer(&mut h, DEVICE, false); // an older build: no pause/resume capability
+
+        let reply = h.mgr.control_transfer(FILE, None, TransferAction::Pause);
+        let message = reply.clone().unwrap_err();
+        assert!(
+            message.contains("older ClipX"),
+            "toast explains why: {message}"
+        );
+        assert!(
+            h.mgr.pending_downloads.contains_key(FILE),
+            "transfer keeps running"
+        );
+        assert!(
+            cancels(&mut h).is_empty(),
+            "nothing is sent to the old peer"
+        );
+        assert!(!last_event(&mut h).is_some_and(|e| e.state == "paused"));
+
+        let reply = h.mgr.control_transfer(FILE, None, TransferAction::Cancel);
+        assert_eq!(reply, Ok("transfer cancelled".to_string()));
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+        // The old peer understands a plain cancel (the extra field is ignored).
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), false)]);
+    }
+
+    #[tokio::test]
+    async fn a_peer_with_no_hello_at_all_counts_as_old() {
+        let mut h = harness();
+        partial_download(&mut h);
+        h.mgr.effective_versions.remove(DEVICE);
+        assert!(!h.mgr.peer_supports_transfer_control(DEVICE));
+        assert!(
+            h.mgr
+                .control_transfer(FILE, None, TransferAction::Pause)
+                .unwrap_err()
+                .contains("older ClipX")
+        );
+    }
+
+    #[tokio::test]
+    async fn old_peers_still_pass_the_hello_gate_and_new_ones_advertise_control() {
+        let mut h = harness();
+        // A hello with no capabilities (an older build) is accepted, not rejected.
+        let old = Hello {
+            proto_version: config::PROTO_VERSION,
+            min_proto_version: config::MINI_PROTO_VERSION,
+            capabilities: vec![],
+        };
+        assert!(h.mgr.check_hello("old-peer", Some(old)).is_ok());
+        assert!(!h.mgr.peer_supports_transfer_control("old-peer"));
+        // This build advertises the capability and a peer that sends it is recognised.
+        let mine = config::local_hello();
+        assert!(h.mgr.check_hello("new-peer", Some(mine)).is_ok());
+        assert!(h.mgr.peer_supports_transfer_control("new-peer"));
+        // A peer that sends no hello (legacy) still connects.
+        assert!(h.mgr.check_hello("legacy", None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn one_offer_to_two_devices_is_controlled_per_device() {
+        let mut h = harness();
+        peer(&mut h, DEVICE, true);
+        peer(&mut h, OTHER, true);
+        let a = upload_to(&mut h, DEVICE, 100);
+        let b = upload_to(&mut h, OTHER, 200);
+
+        let reply = h
+            .mgr
+            .control_transfer(FILE, Some(DEVICE), TransferAction::Cancel);
+        assert_eq!(reply, Ok("transfer cancelled".to_string()));
+
+        assert!(
+            a.cancel.is_cancelled(),
+            "the chosen device's transfer is cancelled"
+        );
+        assert!(
+            !b.cancel.is_cancelled(),
+            "the other device's transfer keeps going"
+        );
+        assert!(
+            h.mgr
+                .upload_sessions
+                .contains_key(&(OTHER.into(), FILE.into()))
+        );
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), false)]);
+
+        let snapshot = h.mgr.list_transfers();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(
+            (snapshot[0].device_id.as_str(), snapshot[0].done),
+            (OTHER, 200)
+        );
+    }
+
+    #[tokio::test]
+    async fn stopping_an_upload_cancels_it_and_pausing_holds_it() {
+        for pause in [false, true] {
+            let mut h = harness();
+            peer(&mut h, DEVICE, true);
+            let t = upload_to(&mut h, DEVICE, 512);
+
+            h.mgr.stop_transfer(FILE, None, pause);
+
+            assert_eq!(t.cancel.is_cancelled(), !pause);
+            assert_eq!(t.interrupt.is_cancelled(), pause);
+            assert!(h.mgr.upload_sessions.is_empty());
+            assert_eq!(h.mgr.held_uploads.len(), usize::from(pause));
+            assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), pause)]);
+        }
+    }
+
+    #[tokio::test]
+    async fn sender_pause_then_resume_asks_the_receiver_to_continue() {
+        let mut h = harness();
+        peer(&mut h, DEVICE, true);
+        let _t = upload_to(&mut h, DEVICE, 512);
+
+        assert_eq!(
+            h.mgr.control_transfer(FILE, None, TransferAction::Pause),
+            Ok("transfer paused".to_string())
+        );
+        let held = &h.mgr.held_uploads[&(DEVICE.to_string(), FILE.to_string())];
+        assert_eq!((held.done, held.waiting), (512, false));
+        let _ = cancels(&mut h);
+        assert_eq!(h.mgr.list_transfers()[0].state, "paused");
+
+        assert!(
+            h.mgr
+                .control_transfer(FILE, None, TransferAction::Resume)
+                .is_ok()
+        );
+        assert_eq!(resumes_sent(&mut h), vec![(DEVICE.into(), FILE.into())]);
+        assert!(h.mgr.held_uploads[&(DEVICE.to_string(), FILE.to_string())].waiting);
+        assert_eq!(h.mgr.list_transfers()[0].state, "requesting");
+
+        // Cancelling while waiting reports it (no task is left to) and tells the peer.
+        let _ = last_event(&mut h);
+        assert!(
+            h.mgr
+                .control_transfer(FILE, None, TransferAction::Cancel)
+                .is_ok()
+        );
+        assert!(h.mgr.held_uploads.is_empty());
+        assert_eq!(last_state(&mut h), Some(("cancelled".into(), 512)));
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), false)]);
+    }
+
+    #[tokio::test]
+    async fn the_receiver_asking_again_clears_a_held_upload() {
+        let mut h = harness();
+        peer(&mut h, DEVICE, true);
+        h.mgr.held_uploads.insert(
+            (DEVICE.into(), FILE.into()),
+            HeldUpload {
+                file_name: "movie.mp4".into(),
+                total_size: TOTAL,
+                done: 512,
+                waiting: true,
+            },
+        );
+        // stream_file_to_peer clears it before anything is sent; with no real
+        // file it returns early, so check the disconnect cleanup instead.
+        h.mgr.held_uploads.retain(|(d, _), _| d != DEVICE);
+        assert!(h.mgr.held_uploads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resuming_an_upload_to_an_old_peer_is_refused() {
+        let mut h = harness();
+        peer(&mut h, DEVICE, false);
+        h.mgr.held_uploads.insert(
+            (DEVICE.into(), FILE.into()),
+            HeldUpload {
+                file_name: "movie.mp4".into(),
+                total_size: TOTAL,
+                done: 512,
+                waiting: false,
+            },
+        );
+        let reply = h.mgr.control_transfer(FILE, None, TransferAction::Resume);
+        assert!(reply.unwrap_err().contains("older ClipX"));
+        assert!(resumes_sent(&mut h).is_empty());
+    }
+
+    #[tokio::test]
+    async fn sender_cancelling_ends_our_download_and_reports_it() {
+        let mut h = harness();
+        partial_download(&mut h);
+
+        h.mgr.on_file_transfer_cancel(
+            DEVICE.into(),
+            proto::FileTransferCancel {
+                file_id: FILE.into(),
+                pause: false,
+            },
+        );
+
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+        assert!(!h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert_eq!(last_state(&mut h), Some(("cancelled".into(), PARTIAL)));
+        let released = std::iter::from_fn(|| h.clipboard_rx.try_recv().ok())
+            .any(|c| matches!(c, ClipboardCommand::FileDownloadReleased { .. }));
+        assert!(released, "clipboard manager must free the download slot");
+    }
+
+    #[tokio::test]
+    async fn sender_pausing_keeps_our_partial_data_and_waits_for_a_resume() {
+        let mut h = harness();
+        partial_download(&mut h);
+
+        h.mgr.on_file_transfer_cancel(
+            DEVICE.into(),
+            proto::FileTransferCancel {
+                file_id: FILE.into(),
+                pause: true,
+            },
+        );
+
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+        assert!(h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert!(h.mgr.incoming_state_path(FILE).exists());
+        assert!(
+            h.mgr.incoming_paused_path(FILE).exists(),
+            "must not restart by itself"
+        );
+        assert_eq!(last_state(&mut h), Some(("paused".into(), PARTIAL)));
+        let _ = download_requests(&mut h);
+
+        // The sender presses Resume: we ask again from the kept offset.
+        h.mgr.on_file_transfer_resume(
+            DEVICE.into(),
+            proto::FileTransferResume {
+                file_id: FILE.into(),
+            },
+        );
+        assert_eq!(download_requests(&mut h), vec![PARTIAL]);
+        assert!(!h.mgr.incoming_paused_path(FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn a_resume_from_the_wrong_device_or_with_nothing_kept_is_ignored() {
+        let mut h = harness();
+        partial_download(&mut h);
+        h.mgr.stop_transfer(FILE, None, true);
+        let _ = download_requests(&mut h);
+        peer(&mut h, OTHER, true);
+
+        h.mgr.on_file_transfer_resume(
+            OTHER.into(),
+            proto::FileTransferResume {
+                file_id: FILE.into(),
+            },
+        );
+        h.mgr.on_file_transfer_resume(
+            DEVICE.into(),
+            proto::FileTransferResume {
+                file_id: "unknown".into(),
+            },
+        );
+        assert!(download_requests(&mut h).is_empty());
+        assert!(!h.mgr.pending_downloads.contains_key(FILE));
+    }
+
+    #[tokio::test]
+    async fn sender_cancelling_a_paused_download_discards_the_kept_partial() {
+        let mut h = harness();
+        partial_download(&mut h);
+        h.mgr.stop_transfer(FILE, None, true);
+        let _ = last_event(&mut h);
+
+        h.mgr.on_file_transfer_cancel(
+            DEVICE.into(),
+            proto::FileTransferCancel {
+                file_id: FILE.into(),
+                pause: false,
+            },
+        );
+
+        assert!(!h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert!(!h.mgr.incoming_state_path(FILE).exists());
+        assert!(!h.mgr.incoming_paused_path(FILE).exists());
+        assert_eq!(last_state(&mut h), Some(("cancelled".into(), PARTIAL)));
+    }
+
+    #[tokio::test]
+    async fn cancel_from_another_device_does_not_touch_our_download() {
+        let mut h = harness();
+        partial_download(&mut h);
+
+        h.mgr.on_file_transfer_cancel(
+            "someone-else".into(),
+            proto::FileTransferCancel {
+                file_id: FILE.into(),
+                pause: true,
+            },
+        );
+        h.mgr.on_file_transfer_cancel(
+            "someone-else".into(),
+            proto::FileTransferCancel {
+                file_id: FILE.into(),
+                pause: false,
+            },
+        );
+
+        assert!(h.mgr.pending_downloads.contains_key(FILE));
+        assert!(h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert!(h.mgr.incoming_state_path(FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn the_snapshot_lists_downloads_uploads_and_paused_uploads_per_device() {
+        let mut h = harness();
+        partial_download(&mut h);
+        peer(&mut h, OTHER, false);
+        let _t = upload_to(&mut h, OTHER, 300);
+        h.mgr.held_uploads.insert(
+            ("dev-c".into(), "file-2".into()),
+            HeldUpload {
+                file_name: "a.zip".into(),
+                total_size: 10,
+                done: 5,
+                waiting: false,
+            },
+        );
+
+        let mut snap = h.mgr.list_transfers();
+        snap.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+        let rows: Vec<_> = snap
+            .iter()
+            .map(|t| {
+                (
+                    t.device_id.as_str(),
+                    t.direction.as_str(),
+                    t.state.as_str(),
+                    t.done,
+                    t.can_pause,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (DEVICE, "download", "receiving", PARTIAL, true),
+                (OTHER, "send", "sending", 300, false),
+                ("dev-c", "send", "paused", 5, false),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_paused_download_can_be_cancelled_and_survives_in_the_snapshot() {
+        let mut h = harness();
+        partial_download(&mut h);
+        assert!(
+            h.mgr
+                .control_transfer(FILE, None, TransferAction::Pause)
+                .is_ok()
+        );
+        let _ = (cancels(&mut h), last_event(&mut h));
+
+        // Nothing is running, yet the paused download is listed (this is what
+        // makes it visible again after an app restart).
+        let snap = h.mgr.list_transfers();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(
+            (
+                snap[0].state.as_str(),
+                snap[0].direction.as_str(),
+                snap[0].done
+            ),
+            ("paused", "download", PARTIAL)
+        );
+
+        // Cancel drops the kept partial data and tells the sender.
+        assert_eq!(
+            h.mgr
+                .control_transfer(FILE, Some(DEVICE), TransferAction::Cancel),
+            Ok("transfer cancelled".to_string())
+        );
+        assert!(!h.mgr.incoming_temp_path(DEVICE, FILE).exists());
+        assert!(!h.mgr.incoming_state_path(FILE).exists());
+        assert!(!h.mgr.incoming_paused_path(FILE).exists());
+        assert_eq!(last_state(&mut h), Some(("cancelled".into(), PARTIAL)));
+        assert_eq!(cancels(&mut h), vec![(DEVICE.into(), FILE.into(), false)]);
+        assert!(h.mgr.list_transfers().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nothing_to_control_gives_a_clear_message() {
+        let mut h = harness();
+        assert_eq!(
+            h.mgr.control_transfer("none", None, TransferAction::Cancel),
+            Err("No running transfer to cancel".to_string())
+        );
+        assert_eq!(
+            h.mgr.control_transfer("none", None, TransferAction::Pause),
+            Err("No running transfer to pause".to_string())
+        );
+        assert!(
+            h.mgr
+                .control_transfer("none", None, TransferAction::Resume)
+                .unwrap_err()
+                .contains("receiving")
+        );
     }
 }

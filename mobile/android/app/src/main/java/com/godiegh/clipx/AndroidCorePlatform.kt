@@ -482,9 +482,9 @@ class AndroidCoreEventListener(
         application.publishCoreEvent(CoreUiEvent.PairingChanged(deviceId, state.toInt(), message))
     }
 
-    override fun onFileTransfer(entryId: String, fileId: String, fileName: String, direction: String, done: ULong, total: ULong, state: String, message: String) {
-        application.publishCoreEvent(CoreUiEvent.FileTransferChanged(entryId, fileId, fileName, direction, done.toLong(), total.toLong(), state, message))
-        application.transferNotifications.update(fileId, fileName, direction, done.toLong(), total.toLong(), state, message)
+    override fun onFileTransfer(entryId: String, fileId: String, fileName: String, direction: String, done: ULong, total: ULong, state: String, message: String, deviceId: String, deviceName: String, canPause: Boolean) {
+        application.publishCoreEvent(CoreUiEvent.FileTransferChanged(entryId, fileId, fileName, direction, done.toLong(), total.toLong(), state, message, deviceId, deviceName, canPause))
+        application.transferNotifications.update(deviceId, deviceName, canPause, fileId, fileName, direction, done.toLong(), total.toLong(), state, message)
     }
 }
 

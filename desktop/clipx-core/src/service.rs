@@ -275,8 +275,8 @@ where
                                     };
                                     events.on_pairing_change(device_id, state, message);
                                 }
-                                crate::platform::CoreEvent::FileTransferChanged { entry_id, file_id, file_name, direction, done, total, state, message } => {
-                                    events.on_file_transfer(entry_id, file_id, file_name, direction, done, total, state, message);
+                                crate::platform::CoreEvent::FileTransferChanged { entry_id, file_id, file_name, direction, done, total, state, message, device_id, device_name, can_pause } => {
+                                    events.on_file_transfer(entry_id, file_id, file_name, direction, done, total, state, message, device_id, device_name, can_pause);
                                 }
                             },
                             Err(broadcast::error::RecvError::Lagged(count)) => {

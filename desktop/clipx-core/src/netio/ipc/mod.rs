@@ -152,8 +152,8 @@ impl IpcService {
                                         })),
                                     }
                                 }
-                                CoreEvent::FileTransferChanged { entry_id, file_id, file_name, direction, done, total, state, message } => clipx::IpcEvent {
-                                    event: Some(clipx::ipc_event::Event::FileTransfer(clipx::FileTransferEvent { entry_id, done, total, state, message, file_id, file_name, direction })),
+                                CoreEvent::FileTransferChanged { entry_id, file_id, file_name, direction, done, total, state, message, device_id, device_name, can_pause } => clipx::IpcEvent {
+                                    event: Some(clipx::ipc_event::Event::FileTransfer(clipx::FileTransferEvent { entry_id, done, total, state, message, file_id, file_name, direction, device_id, device_name, can_pause })),
                                 },
                             };
                             let envelope = clipx::IpcServerMessage {
