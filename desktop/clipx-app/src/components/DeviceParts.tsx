@@ -200,7 +200,7 @@ export function DeviceIdentity({
               <div className="identity-value">{identity.ipAddress}</div>
             </div>
             <div className="identity-cell">
-              <label>WS Port</label>
+              <label>Port</label>
               <div className="identity-value">{identity.wsPort}</div>
             </div>
           </div>
@@ -266,7 +266,7 @@ export function DeviceDetail({
                 <div className="identity-value">{device.ipAddress}</div>
               </div>
               <div className="identity-cell">
-                <label>WS Port</label>
+                <label>Port</label>
                 <div className="identity-value">{device.wsPort}</div>
               </div>
             </div>
