@@ -242,7 +242,9 @@ pub fn run() {
                             Some(clipx::ipc_event::Event::FileTransfer(payload)) => {
                                 let _ = app_handle.emit("file-transfer", payload);
                             }
-                            None => continue,
+                            // Includes event kinds this UI does not handle (yet), such as
+                            // the notification-center prompts it has not attached for.
+                            _ => continue,
                         }
                     }
                 });

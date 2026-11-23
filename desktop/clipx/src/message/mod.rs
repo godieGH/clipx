@@ -224,6 +224,32 @@ pub trait IpcCmdBridge {
         &mut self,
         id: String,
     ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    /// Asks the core to show its prompts (pairing, code confirmation, incoming
+    /// files) in this UI instead of in the OS notification system. Returns how
+    /// many prompts were already waiting; they follow as events. Attachment ends
+    /// when the connection closes, and the core then uses its native engine again.
+    fn attach_notification_center(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<u32, String>> + Send;
+    /// Answers a prompt received as a `NotificationPrompt` event. `Err` carries
+    /// why it could not be answered (already answered, expired, wrong kind of answer).
+    fn resolve_prompt(
+        &mut self,
+        prompt_id: String,
+        decision: clipx::resolve_prompt_request::Decision,
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
+    /// Pause, resume or cancel one transfer. `device_id` narrows it to one device
+    /// when the same offer goes to several. `Err` carries the reason when it is
+    /// refused, such as a peer on an older build that cannot pause.
+    fn control_transfer(
+        &mut self,
+        file_id: String,
+        device_id: Option<String>,
+        action: clipx::control_transfer_request::Action,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+    fn list_transfers(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Vec<clipx::TransferInfo>, String>> + Send;
 }
 
 impl IpcCmdBridge for crate::ipc::non_blocking::Client {
@@ -607,6 +633,85 @@ impl IpcCmdBridge for crate::ipc::non_blocking::Client {
             }
             Some(clipx::ipc_response::Response::DownloadClipboardFile(r)) => Err(r.message),
             _ => Err("Unexpected download response".into()),
+        }
+    }
+    async fn attach_notification_center(&mut self) -> Result<u32, String> {
+        if !self.is_running() {
+            self.start().await?;
+        }
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::AttachNotificationCenter(
+                clipx::AttachNotificationCenterRequest {},
+            )),
+        };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response {
+            Some(clipx::ipc_response::Response::AttachNotificationCenter(r)) => Ok(r.pending),
+            Some(clipx::ipc_response::Response::Error(e)) => Err(e.message),
+            _ => Err("Unexpected attach response".into()),
+        }
+    }
+    async fn resolve_prompt(
+        &mut self,
+        prompt_id: String,
+        decision: clipx::resolve_prompt_request::Decision,
+    ) -> Result<(), String> {
+        if !self.is_running() {
+            self.start().await?;
+        }
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::ResolvePrompt(
+                clipx::ResolvePromptRequest {
+                    prompt_id,
+                    decision: decision as i32,
+                },
+            )),
+        };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response {
+            Some(clipx::ipc_response::Response::ResolvePrompt(r)) if r.resolved => Ok(()),
+            Some(clipx::ipc_response::Response::ResolvePrompt(r)) => Err(r.message),
+            _ => Err("Unexpected prompt response".into()),
+        }
+    }
+    async fn control_transfer(
+        &mut self,
+        file_id: String,
+        device_id: Option<String>,
+        action: clipx::control_transfer_request::Action,
+    ) -> Result<String, String> {
+        if !self.is_running() {
+            self.start().await?;
+        }
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::ControlTransfer(
+                clipx::ControlTransferRequest {
+                    file_id,
+                    device_id: device_id.unwrap_or_default(),
+                    action: action as i32,
+                },
+            )),
+        };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response {
+            Some(clipx::ipc_response::Response::ControlTransfer(r)) if r.ok => Ok(r.message),
+            Some(clipx::ipc_response::Response::ControlTransfer(r)) => Err(r.message),
+            _ => Err("Unexpected transfer response".into()),
+        }
+    }
+    async fn list_transfers(&mut self) -> Result<Vec<clipx::TransferInfo>, String> {
+        if !self.is_running() {
+            self.start().await?;
+        }
+        let req = clipx::IpcRequest {
+            request: Some(clipx::ipc_request::Request::ListTransfers(
+                clipx::ListTransfersRequest {},
+            )),
+        };
+        let res = self.send(req).await.map_err(|e| e.to_string())?;
+        match res.response {
+            Some(clipx::ipc_response::Response::ListTransfers(r)) => Ok(r.transfers),
+            _ => Err("Unexpected transfers response".into()),
         }
     }
 }

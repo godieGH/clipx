@@ -84,6 +84,22 @@ impl<T: NotificationPrompter> PlatformNotificationEngine<T> {
     }
 }
 
+/// Registers a prompt for an engine that is not a [`PlatformNotificationEngine`]
+/// (the IPC engine). Answered through [`resolve_prompt`] like any other.
+pub(crate) fn register_pending_prompt() -> (String, oneshot::Receiver<PromptResult>) {
+    let prompt_id = Uuid::new_v4().to_string();
+    let (tx, rx) = oneshot::channel();
+    PENDING_PROMPTS
+        .lock()
+        .unwrap()
+        .insert(prompt_id.clone(), tx);
+    (prompt_id, rx)
+}
+
+pub(crate) fn remove_pending_prompt(prompt_id: &str) {
+    PENDING_PROMPTS.lock().unwrap().remove(prompt_id);
+}
+
 pub fn resolve_prompt(prompt_id: String, result: PromptResult) {
     let result_kind = match &result {
         PromptResult::Pair(_) => "pair",

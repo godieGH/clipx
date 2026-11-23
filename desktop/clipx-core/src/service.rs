@@ -85,7 +85,12 @@ impl CoreService {
         tracing::info!("Core service starting");
 
         let clipboard_sink = ArboardClipboardSink::new();
-        let notification_engine = crate::notification::NotificationEngine::new();
+        // The native engine stays as the fallback: it is used whenever no UI has
+        // attached to show prompts itself.
+        let notification_engine = crate::notification::ipc_engine::IpcNotificationEngine::new(
+            crate::notification::NotificationEngine::new(),
+        );
+        let prompt_hub = notification_engine.hub();
         let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx) =
             spawn_core_tasks(clipboard_sink, notification_engine.clone(), None);
         self.tasks = tasks;
@@ -101,6 +106,7 @@ impl CoreService {
             clipboard_cmd_tx,
             core_events_tx,
             stop_tx,
+            prompt_hub,
         );
         self.tasks
             .push(tokio::spawn(async move { ipc_service.start().await }));

@@ -526,6 +526,8 @@ Read `protos/clipx.proto` first. It is the canonical contract for both device-to
 
 **IPC.** The UI and CLI connect to the core on a local socket named `clipx` (an abstract/namespaced socket on Linux, a named pipe on Windows), wrap it in a WebSocket, and exchange `IpcRequest`/`IpcResponse` messages. The core can also push events (`devices_changed`, `clipboard_changed`, pairing and file-transfer progress), so the UI re-fetches on demand instead of polling.
 
+**Notification center.** Prompts (pairing approval, code confirmation, incoming files) normally go to the OS notification system, which is partial on Windows and missing on Linux and macOS. A UI can ask to show them itself: it sends `AttachNotificationCenter` on its IPC connection and then receives `NotificationPrompt`, `NotificationClosed` and `NotificationInfo` events, answers a prompt with `ResolvePrompt`, and controls transfers with `ControlTransfer` and `ListTransfers`. Until a connection attaches it receives none of this, so a UI that predates it keeps working and the core keeps using its native engine. While at least one connection is attached, prompts go only to it (and native transfer progress toasts are suppressed, since the UI follows the transfer events); when the last one disconnects the core falls back to the native engine, so a prompt is never lost because the app is closed. Prompts wait for their timeout and nothing is stored: a UI that attaches late is shown only the prompts still waiting. The engine is `notification/ipc_engine.rs`.
+
 **Suggested reading order for the code:**
 
 1. `protos/clipx.proto`

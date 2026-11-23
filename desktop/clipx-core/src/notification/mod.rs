@@ -5,6 +5,7 @@
 //! `IncomingClipboardDecision`. Platform-specific details stay inside
 //! the platform notification engine.
 
+pub mod ipc_engine;
 pub mod platform;
 
 #[cfg(target_os = "windows")]

@@ -136,6 +136,10 @@ message IpcRequest {
     SendFilePathRequest send_file_path = 21;
     ShutdownRequest shutdown = 22;
     ClipboardCopyRequest copy_clipboard_entry = 23;
+    AttachNotificationCenterRequest attach_notification_center = 24;
+    ResolvePromptRequest resolve_prompt = 25;
+    ControlTransferRequest control_transfer = 26;
+    ListTransfersRequest list_transfers = 27;
   }
 }
 message IpcResponse {
@@ -160,6 +164,10 @@ message IpcResponse {
     DownloadClipboardFileResponse download_clipboard_file = 18;
     ShutdownResponse shutdown = 19;
     ClipboardCopyResponse copy_clipboard_entry = 20;
+    AttachNotificationCenterResponse attach_notification_center = 21;
+    ResolvePromptResponse resolve_prompt = 22;
+    ControlTransferResponse control_transfer = 23;
+    ListTransfersResponse list_transfers = 24;
   }
 }
 message SeenRequest { enum Mode { ALL = 0; TRUSTED = 1; UNTRUSTED = 2; } Mode mode = 1; }
@@ -227,7 +235,79 @@ message DevicesChangedEvent {}
 message ClipboardChangedEvent {}
 message PairingEvent { string device_id = 1; enum State { STARTED = 0; FAILED = 1; SUCCEEDED = 2; } State state = 2; string message = 3; }
 message FileTransferEvent { string entry_id = 1; uint64 done = 2; uint64 total = 3; string state = 4; string message = 5; string file_id = 6; string file_name = 7; string direction = 8; string device_id = 9; string device_name = 10; bool can_pause = 11; }
-message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; } }
+message IpcEvent { oneof event { DevicesChangedEvent devices_changed = 1; ClipboardChangedEvent clipboard_changed = 2; PairingEvent pairing_event = 3; FileTransferEvent file_transfer = 4; NotificationPromptEvent notification_prompt = 5; NotificationClosedEvent notification_closed = 6; NotificationInfoEvent notification_info = 7; } }
+
+// ---- Notification center -------------------------------------------------
+// A UI that wants to show prompts (pairing, code confirmation, incoming files)
+// itself, instead of the OS notification system, sends AttachNotificationCenter
+// on its IPC connection. Until it does it receives none of the events below, so
+// a UI that does not know about them keeps working and the core keeps using its
+// native notifications. While at least one connection is attached the core
+// sends prompts only here; when the last one detaches or disconnects it goes
+// back to the native engine.
+message AttachNotificationCenterRequest {}
+// Prompts still waiting for an answer are pushed right after this response, so
+// a UI that attaches late (or reconnects) misses nothing.
+message AttachNotificationCenterResponse { uint32 pending = 1; }
+
+message NotificationPromptEvent {
+  enum Kind { PAIR_REQUEST = 0; CONFIRM_CODE = 1; INCOMING_CLIPBOARD = 2; }
+  enum ContentKind { TEXT = 0; RICH_TEXT = 1; IMAGE = 2; FILE = 3; }
+  string prompt_id = 1;
+  Kind kind = 2;
+  string peer_name = 3;
+  // Pairing code to compare, for CONFIRM_CODE.
+  string code = 4;
+  // A short preview of what arrived, for INCOMING_CLIPBOARD (cut to a few thousand characters).
+  string content = 5;
+  ContentKind content_kind = 6;
+  // How long the core waits for an answer before treating the prompt as ignored.
+  uint32 timeout_ms = 7;
+  uint64 shown_at_ms = 8;
+}
+message NotificationClosedEvent {
+  enum Reason { ANSWERED = 0; TIMED_OUT = 1; }
+  string prompt_id = 1;
+  Reason reason = 2;
+}
+// A plain message with nothing to answer ("Image saved", "File expired", ...).
+message NotificationInfoEvent { string id = 1; string title = 2; string body = 3; uint64 at_ms = 4; }
+
+message ResolvePromptRequest {
+  // ALLOW / DENY answer a pairing or code prompt; COPY / IGNORE answer an
+  // incoming-clipboard prompt (COPY also means "download" for a file).
+  enum Decision { ALLOW = 0; DENY = 1; COPY = 2; IGNORE = 3; }
+  string prompt_id = 1;
+  Decision decision = 2;
+}
+message ResolvePromptResponse { bool resolved = 1; string message = 2; }
+
+// Pause, resume or cancel one transfer. device_id narrows it to one device when
+// the same offer goes to several (empty means any).
+message ControlTransferRequest {
+  enum Action { PAUSE = 0; RESUME = 1; CANCEL = 2; }
+  string file_id = 1;
+  string device_id = 2;
+  Action action = 3;
+}
+// ok = false carries the reason in message (for example a peer on an older
+// build that cannot pause).
+message ControlTransferResponse { bool ok = 1; string message = 2; }
+
+message ListTransfersRequest {}
+message TransferInfo {
+  string device_id = 1;
+  string device_name = 2;
+  string entry_id = 3;
+  string file_id = 4;
+  string file_name = 5;
+  string direction = 6;
+  uint64 done = 7;
+  uint64 total = 8;
+  string state = 9;
+  bool can_pause = 10;
+}
+message ListTransfersResponse { repeated TransferInfo transfers = 1; }
 message IpcServerMessage { oneof payload { IpcResponse response = 1; IpcEvent event = 2; } }
 
 message ShutdownRequest {}
