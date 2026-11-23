@@ -19,7 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
@@ -29,12 +29,10 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PhoneIphone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -94,7 +92,20 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.ui.draw.rotate
 
 @Composable
 fun DevicesScreen(
@@ -109,49 +120,136 @@ fun DevicesScreen(
     onConnect: (String) -> Unit,
     activeTransfers: Int = 0,
     onOpenTransfers: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val elevated by remember { derivedStateOf { listState.canScrollBackward } }
+
+    var actionsOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) actionsOpen = false
+    }
+    LaunchedEffect(actionsOpen) {
+        if (actionsOpen) {
+            delay(5_000.milliseconds)
+            actionsOpen = false
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         AppTopBar(
             title = "",
             showLogo = true,
             elevated = elevated,
+            leftContent = {
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(LocalClipxPalette.current.cardBorder)
+                )
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(42.dp)) {
+                    Icon(
+                        Icons.Outlined.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            },
             rightContent = {
-                IconButton(onClick = onOpenTransfers) {
-                    BadgedBox(badge = { if (activeTransfers > 0) Badge { Text("$activeTransfers") } }) {
-                        Icon(
-                            Icons.Filled.SwapVert,
-                            contentDescription = "Transfers",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(21.dp),
-                        )
+                val borderColor = LocalClipxPalette.current.cardBorder
+                AnimatedVisibility(
+                    visible = !actionsOpen,
+                    enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+                    exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onOpenSync, modifier = Modifier.size(44.dp)) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Send,
+                                contentDescription = "Send",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .offset(x = (-1).dp, y = 1.dp)
+                                    .size(22.dp)
+                                    .rotate(-45f),
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
                     }
                 }
-                IconButton(onClick = onOpenSync) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(21.dp),
-                    )
-                }
-                IconButton(onClick = onOpenDiagnostics) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.HelpOutline,
-                        contentDescription = "Help and diagnostics",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(21.dp)
-                    )
-                }
-                IconButton(onClick = onOpenThisDevice) {
-                    Icon(
-                        Icons.Filled.PhoneIphone,
-                        contentDescription = "Device identity",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(21.dp)
-                    )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                        .border(1.dp, borderColor, RoundedCornerShape(50))
+                        .padding(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AnimatedVisibility(
+                        visible = actionsOpen,
+                        enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+                        exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = onOpenSync, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.Send,
+                                    contentDescription = "Send",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp).rotate(-45f),
+                                )
+                            }
+                            IconButton(onClick = onOpenTransfers, modifier = Modifier.size(44.dp)) {
+                                BadgedBox(badge = { if (activeTransfers > 0) Badge { Text("$activeTransfers") } }) {
+                                    Icon(
+                                        Icons.Outlined.SwapVert,
+                                        contentDescription = "Transfers",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                }
+                            }
+                            Box(
+                                Modifier
+                                    .width(1.dp)
+                                    .height(18.dp)
+                                    .background(borderColor)
+                            )
+                            IconButton(onClick = onOpenDiagnostics, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.HelpOutline,
+                                    contentDescription = "Help and diagnostics",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                            IconButton(onClick = onOpenThisDevice, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    Icons.Outlined.PhoneAndroid,
+                                    contentDescription = "Device identity",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        }
+                    }
+                    IconButton(
+                        onClick = { actionsOpen = !actionsOpen },
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        BadgedBox(badge = { if (activeTransfers > 0 && !actionsOpen) Badge() }) {
+                            Crossfade(targetState = actionsOpen, label = "actions-toggle") { open ->
+                                Icon(
+                                    if (open) Icons.Filled.ChevronRight else Icons.Filled.MoreHoriz,
+                                    contentDescription = if (open) "Hide actions" else "Show actions",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        }
+                    }
                 }
             },
         )
@@ -223,6 +321,7 @@ fun DeviceDetailsScreen(
     onAutoConnectChange: (Boolean) -> Unit,
     onDisconnect: () -> Unit,
     onForget: () -> Unit,
+    onAutoSendClick: () -> Unit = {},
 ) {
     val palette = LocalClipxPalette.current
     if (device == null) {
@@ -301,6 +400,17 @@ fun DeviceDetailsScreen(
                         description = "Connect automatically when device is available",
                         checked = device.autoConnect,
                         onCheckedChange = onAutoConnectChange,
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 6.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = palette.divider
+                    )
+                    ToggleRow(
+                        label = "Auto-send",
+                        description = "Send to this device automatically when clipboard changes",
+                        checked = false,
+                        onCheckedChange = { onAutoSendClick() },
                     )
                 }
             }
@@ -622,8 +732,7 @@ private fun DiscoveryTimelineStep(
     }
 
     val lineColor = MaterialTheme.colorScheme.outlineVariant
-    val numberBackground = MaterialTheme.colorScheme.primaryContainer
-    val numberColor = MaterialTheme.colorScheme.onPrimaryContainer
+    val numberColor = MaterialTheme.colorScheme.primary
 
     Row(
         modifier = Modifier
@@ -643,25 +752,26 @@ private fun DiscoveryTimelineStep(
             Box(
                 modifier = Modifier
                     .size(30.dp)
-                    .clip(CircleShape)
-                    .background(numberBackground),
+                    .border(1.5.dp, numberColor, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = step.number.toString(),
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     color = numberColor,
                 )
             }
 
             if (!isLast) {
+                Spacer(Modifier.height(4.dp))
                 Spacer(
                     modifier = Modifier
-                        .width(2.dp)
+                        .width(1.5.dp)
                         .weight(1f)
                         .background(lineColor),
                 )
+                Spacer(Modifier.height(4.dp))
             }
         }
 

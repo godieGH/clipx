@@ -117,6 +117,11 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                 onOpenDiagnostics = { route = AppRoute.DIAGNOSTICS },
                                 activeTransfers = viewModel.activeTransferCount,
                                 onOpenTransfers = { route = AppRoute.TRANSFERS },
+                                onOpenSettings = {
+                                    Toast.makeText(
+                                        context, "This feature is not implemented yet.", Toast.LENGTH_SHORT
+                                    ).show()
+                                },
                                 onOpenSync = {
                                     viewModel.clearSyncClipboardItem()
                                     route = AppRoute.SYNC
@@ -147,6 +152,11 @@ fun ClipxApp(viewModel: ClipxCoreViewModel) {
                                     },
                                     onForget = {
                                         forgetDeviceId = detailDeviceId
+                                    },
+                                    onAutoSendClick = {
+                                        Toast.makeText(
+                                            context, "This feature is not implemented yet.", Toast.LENGTH_SHORT
+                                        ).show()
                                     },
                                 )
                             }

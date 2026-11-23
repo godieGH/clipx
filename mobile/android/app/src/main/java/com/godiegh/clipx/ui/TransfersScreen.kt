@@ -1,7 +1,7 @@
 package com.godiegh.clipx.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +37,15 @@ import androidx.compose.ui.unit.dp
 import com.godiegh.clipx.FileTransferUi
 import com.godiegh.clipx.transferKey
 import com.godiegh.clipx.ui.theme.LocalClipxPalette
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.Color
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
 
 /**
  * Downloads and uploads in one list, one row per transfer. A transfer is a file
@@ -104,7 +109,6 @@ private fun TransferItem(
     onClear: (FileTransferUi) -> Unit,
 ) {
     val palette = LocalClipxPalette.current
-    val sending = row.direction == "send"
     // An interrupted row is waiting for the other device; cancelling it is not
     // possible, so the word clears it from the list instead.
     val clearsRow = row.isFinished() || row.state == "interrupted"
@@ -115,7 +119,7 @@ private fun TransferItem(
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            DirectionBadge(sending)
+            TransferRing(row, onClick = { onToggle(row) })
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -134,33 +138,12 @@ private fun TransferItem(
                     modifier = Modifier.padding(top = 3.dp),
                 )
             }
-            TransferRing(row, onClick = { onToggle(row) })
             if (row.state != "saving") {
                 TextButton(onClick = { if (clearsRow) onClear(row) else onCancel(row) }) {
                     Text(if (clearsRow) "Clear" else "Cancel")
                 }
             }
         }
-    }
-}
-
-/** Up arrow for what this device sends, down arrow for what it receives. */
-@Composable
-private fun DirectionBadge(sending: Boolean) {
-    val color = if (sending) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.16f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            if (sending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
-            contentDescription = if (sending) "Sending" else "Receiving",
-            tint = color,
-            modifier = Modifier.size(20.dp),
-        )
     }
 }
 
@@ -189,10 +172,12 @@ private fun TransferRing(row: FileTransferUi, onClick: () -> Unit) {
         "cancelled" -> "–"
         else -> "${(percent * 100f).toInt()}%"
     }
+    val sending = row.direction == "send"
+    val kind = if (sending) "upload" else "download"
     val description = when {
-        row.state == "paused" || row.state == "interrupted" -> "Resume transfer"
-        running -> "Pause transfer"
-        else -> "Transfer ${row.state}"
+        row.state == "paused" || row.state == "interrupted" -> "Resume $kind"
+        running -> "Pause $kind"
+        else -> "${kind.replaceFirstChar { it.uppercase() }} ${row.state}"
     }
     Box(
         modifier = Modifier
@@ -203,6 +188,7 @@ private fun TransferRing(row: FileTransferUi, onClick: () -> Unit) {
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
+        if (running) FlowArrows(sending, arcColor)
         Canvas(modifier = Modifier
             .fillMaxSize()
             .padding(4.dp)) {
@@ -214,6 +200,53 @@ private fun TransferRing(row: FileTransferUi, onClick: () -> Unit) {
             }
         }
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** Two staggered arrows drifting through the ring: down = receiving, up = sending. */
+/** Arrow dropping into a tray (receiving) or rising out of one (sending). */
+@Composable
+private fun FlowArrows(sending: Boolean, color: Color) {
+    val t by rememberInfiniteTransition(label = "flow").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing)),
+        label = "flowProgress",
+    )
+    Canvas(modifier = Modifier.size(26.dp)) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val head = w * 0.2f
+        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // Receiving draws top-down; sending is the same drawing mirrored.
+        fun y(v: Float) = if (sending) h - v else v
+
+        // Pipe: a thick horizontal bar the arrow lands on.
+        drawLine(
+            color = color.copy(alpha = 0.4f),
+            start = Offset(w * 0.28f, y(h * 0.82f)),
+            end = Offset(w * 0.72f, y(h * 0.82f)),
+            strokeWidth = 4.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+
+        // Arrow: eases toward the tray, fades in at the start and out at the end.
+        val p = FastOutSlowInEasing.transform((t / 0.8f).coerceIn(0f, 1f))
+        val tip = h * 0.36f + (h * 0.32f) * p
+        val a = when {
+            t < 0.15f -> t / 0.15f
+            t > 0.8f -> (1f - t) / 0.2f
+            else -> 1f
+        }.coerceIn(0f, 1f) * 0.6f
+        val arrow = Path().apply {
+            moveTo(cx, y(tip - h * 0.34f))
+            lineTo(cx, y(tip))
+            moveTo(cx - head, y(tip - head))
+            lineTo(cx, y(tip))
+            lineTo(cx + head, y(tip - head))
+        }
+        drawPath(arrow, color.copy(alpha = a), style = stroke)
     }
 }
 

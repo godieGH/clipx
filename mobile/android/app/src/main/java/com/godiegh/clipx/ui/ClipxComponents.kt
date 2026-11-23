@@ -158,6 +158,7 @@ fun AppTopBar(
     showLogo: Boolean = false,
     onBack: (() -> Unit)? = null,
     elevated: Boolean = false,
+    leftContent: @Composable RowScope.() -> Unit = {},
     rightContent: @Composable RowScope.() -> Unit = {},
 ) {
     TopBarSurface(elevated = elevated) {
@@ -175,6 +176,7 @@ fun AppTopBar(
             ClipxLogo(size = 34.dp)
             Spacer(Modifier.width(9.dp))
         }
+        leftContent()
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
