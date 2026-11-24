@@ -44,7 +44,7 @@ fn harness() -> Harness {
     let (transport_tx, transport_rx) = mpsc::unbounded_channel();
     let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
     let (events_tx, events_rx) = broadcast::channel(64);
-    let identity = Arc::new(DeviceIdentity::load_or_create(dir.join("identity.key")));
+    let identity = Arc::new(DeviceIdentity::load_or_create(dir.join("identity.key")).unwrap());
     let mut mgr = DeviceManager::new(
         dir.join("trusted.json"),
         identity,

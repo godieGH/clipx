@@ -74,6 +74,13 @@ async fn connect_with_retry(client: &mut Client, tries: u32) -> Result<(), Strin
     Err(last)
 }
 
+/// Last ERROR line of the newest core log, to show the user why the core died.
+fn last_core_error() -> Option<String> {
+    let file = crate::newest_log_file(&crate::logs_directory())?;
+    let lines = crate::read_recent_log_lines(&file).ok()?;
+    lines.into_iter().rev().find(|l| l.contains(" ERROR "))
+}
+
 impl CoreSupervisor {
     pub fn new() -> Self {
         Self {
@@ -116,7 +123,27 @@ impl CoreSupervisor {
         }
         *self.child.lock().unwrap() = Some(spawn_child()?);
 
-        match connect_with_retry(&mut c, 20).await {
+        let mut result = Err(String::new());
+        for _ in 0..20 {
+            // about 5 seconds
+            result = connect_with_retry(&mut c, 1).await;
+            if result.is_ok() {
+                break;
+            }
+            let exited = match self.child.lock().unwrap().as_mut() {
+                Some(ch) => ch.try_wait().ok().flatten(),
+                None => None,
+            };
+            if let Some(status) = exited {
+                let detail = last_core_error().unwrap_or_else(|| "no error found in log".into());
+                result = Err(format!(
+                    "core exited ({status}): {detail}\nLogs: {}",
+                    crate::logs_directory().display()
+                ));
+                break;
+            }
+        }
+        match result {
             // about 5 seconds
             Ok(()) => {
                 self.set(CoreStatus::Running);

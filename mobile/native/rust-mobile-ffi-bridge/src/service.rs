@@ -173,7 +173,8 @@ impl BridgeService {
                 clipboard_adapter,
                 notification_engine,
                 Some(core_event_listener),
-            );
+            )
+            .expect("failed to start the core");
 
         inner.tasks = tasks;
         inner.shutdown_tx = Some(shutdown_tx);

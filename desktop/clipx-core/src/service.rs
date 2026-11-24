@@ -92,7 +92,7 @@ impl CoreService {
         );
         let prompt_hub = notification_engine.hub();
         let (tasks, shutdown_tx, clipboard_cmd_tx, device_tx, core_events_tx) =
-            spawn_core_tasks(clipboard_sink, notification_engine.clone(), None);
+            spawn_core_tasks(clipboard_sink, notification_engine.clone(), None)?;
         self.tasks = tasks;
         tracing::debug!(tasks = self.tasks.len(), "core task graph spawned");
         self.shutdown_tx = Some(shutdown_tx.clone());
@@ -157,13 +157,16 @@ pub fn spawn_core_tasks<S, N>(
     clipboard_sink: S,
     notification_engine: N,
     core_events: Option<Arc<dyn CoreEventListener>>,
-) -> (
-    Vec<JoinHandle<()>>,
-    watch::Sender<bool>,
-    mpsc::UnboundedSender<crate::clipboard::manager::ClipboardCommand>,
-    mpsc::UnboundedSender<crate::device::manager::DeviceCommands>,
-    broadcast::Sender<CoreEvent>,
-)
+) -> Result<
+    (
+        Vec<JoinHandle<()>>,
+        watch::Sender<bool>,
+        mpsc::UnboundedSender<crate::clipboard::manager::ClipboardCommand>,
+        mpsc::UnboundedSender<crate::device::manager::DeviceCommands>,
+        broadcast::Sender<CoreEvent>,
+    ),
+    Box<dyn std::error::Error + Send + Sync>,
+>
 where
     S: ClipboardSink + 'static,
     N: crate::notification::platform::NotificationEngine + Clone + Send + Sync + 'static,
@@ -172,7 +175,7 @@ where
     tracing::debug!("constructing core task graph");
     let identity = Arc::new(DeviceIdentity::load_or_create(
         device::config::identity_key_path(),
-    ));
+    )?);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let (clipboard_cmd_tx, clipboard_cmd_rx) = mpsc::unbounded_channel();
@@ -297,13 +300,13 @@ where
         }));
     }
 
-    (
+    Ok((
         tasks,
         shutdown_tx,
         clipboard_cmd_tx,
         device_tx,
         core_events_tx,
-    )
+    ))
 }
 
 #[cfg(test)]
