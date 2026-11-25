@@ -3,7 +3,7 @@
     "beforeBuildCommand": "pnpm build && node scripts/prepare-core.mjs"
   },
   "bundle": {
-    "externalBin": ["binaries/clipx-core", "binaries/clipx-send"],
+    "externalBin": ["binaries/clipx-core", "binaries/clipx-send", "binaries/clipx"],
     "windows": {
       "nsis": {
         "installerHooks": "./windows/hooks.nsh",

@@ -160,7 +160,9 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "widestring",
  "windows",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

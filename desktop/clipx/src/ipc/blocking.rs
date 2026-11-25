@@ -1,7 +1,8 @@
+use super::endpoint;
 use crate::clipx;
-use interprocess::local_socket::{prelude::*, GenericNamespaced, Name, Stream, ToNsName};
+use interprocess::local_socket::{prelude::*, Stream};
 use prost::Message;
-use tungstenite::{client, WebSocket};
+use tungstenite::{client, client::IntoClientRequest, http::HeaderValue, WebSocket};
 
 pub struct Client {
     name: String,
@@ -28,16 +29,17 @@ impl Client {
             println!("The Ipc service is already running...");
             return self;
         };
-        let name = self.create_name().unwrap();
+        let name = endpoint::endpoint_name(&self.name).unwrap();
         let conn = Stream::connect(name).unwrap();
-        let (ws, _response) = client("ws://localhost/", conn).unwrap();
+        let mut req = "ws://localhost/".into_client_request().unwrap();
+        req.headers_mut().insert(
+            "Authorization",
+            HeaderValue::from_str(&endpoint::bearer(&self.name).unwrap()).unwrap(),
+        );
+        let (ws, _response) = client(req, conn).unwrap();
         self.ws = Some(ws);
         self.state = State::Running;
         self
-    }
-
-    fn create_name(&self) -> std::io::Result<Name<'_>> {
-        self.name.clone().to_ns_name::<GenericNamespaced>()
     }
 
     pub fn is_running(&self) -> bool {

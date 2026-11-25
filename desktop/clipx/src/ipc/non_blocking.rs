@@ -1,17 +1,20 @@
 //! This is non blocking implementation of the blocking IPC
 //! It does nothing much but to wrap all blocking ipc APIs so the can be used asyncrounous
 
+use super::endpoint;
 use crate::clipx;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
-use interprocess::local_socket::{
-    tokio::Stream as LocalStream, ConnectOptions, GenericNamespaced, Name, ToNsName,
-};
+use interprocess::local_socket::{tokio::Stream as LocalStream, ConnectOptions};
 use prost::Message;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{client_async, tungstenite::Message as WsMessage, WebSocketStream};
+use tokio_tungstenite::{
+    client_async,
+    tungstenite::{client::IntoClientRequest, http::HeaderValue, Message as WsMessage},
+    WebSocketStream,
+};
 
 type WsSink = SplitSink<WebSocketStream<LocalStream>, WsMessage>;
 
@@ -89,14 +92,25 @@ impl Client {
             println!("The Ipc service is already running...");
             return Ok(());
         };
-        let name = self.create_name().unwrap();
+        let name =
+            endpoint::endpoint_name(&self.name).map_err(|e| format!("Bad IPC endpoint: {}", e))?;
         let conn = ConnectOptions::new()
             .name(name)
             .connect_tokio()
             .await
             .map_err(|e| format!("Failed to connect to the IPC: {}", e))?;
 
-        let (ws, _response) = client_async("ws://localhost/", conn)
+        let mut req = "ws://localhost/"
+            .into_client_request()
+            .map_err(|e| e.to_string())?;
+        let bearer = endpoint::bearer(&self.name)
+            .map_err(|e| format!("Could not read the IPC token: {}", e))?;
+        req.headers_mut().insert(
+            "Authorization",
+            HeaderValue::from_str(&bearer).map_err(|e| e.to_string())?,
+        );
+
+        let (ws, _response) = client_async(req, conn)
             .await
             .map_err(|e| format!("Websocket handshake failed: {}", e))?;
 
@@ -164,10 +178,6 @@ impl Client {
             }
         }
         Ok(())
-    }
-
-    fn create_name(&self) -> std::io::Result<Name<'_>> {
-        self.name.clone().to_ns_name::<GenericNamespaced>()
     }
 
     pub fn is_running(&self) -> bool {

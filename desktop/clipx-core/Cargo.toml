@@ -55,6 +55,9 @@ windows = { version = "0.62", features = [
     "UI_Notifications",
     "Win32_System_Com",
 ] }
+# IPC endpoint hardening: current-user SID -> SDDL for the named pipe DACL.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+widestring = "1"
 
 [build-dependencies]
 prost-build = "0.14.4"

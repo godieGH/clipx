@@ -9,11 +9,8 @@ import { ScrollFade } from "../components/ScrollFade";
 import { useWindowMaterial } from "../useWindowMaterial";
 import { NotificationCard } from "./NotificationCards";
 import { canMarkRead, isWaitingPrompt, splitByTab } from "./logic";
-import type {
-  AppNotification,
-  PromptDecision,
-  TransferAction,
-} from "./types";
+import { playChime } from "./sound";
+import type { AppNotification, PromptDecision, TransferAction } from "./types";
 import "./nc.css";
 
 type Tab = "unread" | "read";
@@ -39,10 +36,27 @@ export default function NotificationCenter() {
   const [tab, setTab] = useState<Tab>("unread");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const errorTimers = useRef<Record<string, number>>({});
+  const seenIds = useRef<Set<string> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setItems(await invoke<AppNotification[]>("nc_list"));
+      const list = await invoke<AppNotification[]>("nc_list");
+      const seen = seenIds.current;
+      const now = Date.now();
+      // After the first load: any unread id we haven't seen is new.
+      // On the first load (window just created): only a prompt that
+      // arrived in the last few seconds counts, so old items and seeded
+      // in-flight transfers stay quiet.
+      const fresh = list.filter(
+        (n) =>
+          n.unread &&
+          (seen
+            ? !seen.has(n.id)
+            : n.kind !== "transfer" && now - n.createdAtMs < 3000),
+      );
+      seenIds.current = new Set(list.map((n) => n.id));
+      if (fresh.length > 0) playChime();
+      setItems(list);
     } catch (error) {
       console.error("could not load notifications", error);
     }
@@ -67,9 +81,10 @@ export default function NotificationCenter() {
   const now = useNow(waiting > 0);
 
   useEffect(() => {
-    document.title = unread.length > 0
-      ? `Clipx notifications (${unread.length})`
-      : "Clipx notifications";
+    document.title =
+      unread.length > 0
+        ? `Clipx notifications (${unread.length})`
+        : "Clipx notifications";
   }, [unread.length]);
 
   const showError = useCallback((id: string, message: string) => {

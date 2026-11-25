@@ -6,16 +6,24 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use interprocess::local_socket::{
-    GenericNamespaced, ListenerOptions, Name, ToNsName,
+    ListenerOptions,
     tokio::{Listener, Stream as LocalStream},
     traits::tokio::Listener as ListenerTrait,
 };
 use prost::Message;
-use std::time::Instant;
+use std::{sync::Arc, time::Duration, time::Instant};
 use tokio::sync::{broadcast, mpsc::UnboundedSender, oneshot, watch};
-use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message as WsMessage};
+use tokio_tungstenite::{
+    WebSocketStream, accept_hdr_async,
+    tungstenite::{
+        Message as WsMessage,
+        handshake::server::{Request, Response},
+    },
+};
 use tokio_util::task::TaskTracker;
 
+mod auth;
+pub mod endpoint;
 mod notification_center;
 use crate::notification::ipc_engine::{AttachGuard, HubEvent, PromptHub};
 
@@ -63,8 +71,14 @@ impl IpcService {
     /// Same shape as before — spawn/await this like any other core task.
     /// No caller-side changes needed.
     pub async fn start(&mut self) {
-        let name = self.create_name().unwrap();
-        let listener = ListenerOptions::new().name(name).create_tokio().unwrap();
+        let (listener, token) = match self.bind() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, "IPC endpoint could not be created securely; stopping core");
+                let _ = self.stop_tx.send(());
+                return;
+            }
+        };
         self.listener = Some(listener);
 
         tracing::info!("IPC services started");
@@ -87,9 +101,10 @@ impl IpcService {
                         let client_shutdown_rx = self.core_service_shutdown_rx.clone();
                         let stop_tx = self.stop_tx.clone();
                         let prompt_hub = self.prompt_hub.clone();
+                        let token = token.clone();
                         self.tracker.spawn(async move {
                             if let Err(err) =
-                                IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, stop_tx, prompt_hub, client_shutdown_rx).await
+                                IpcService::handle_client(stream, device_tx, clipboard_tx, events_tx, stop_tx, prompt_hub, token, client_shutdown_rx).await
                             {
                                 tracing::warn!(error = %err, "IPC client handler ended with an error");
                             }
@@ -106,9 +121,36 @@ impl IpcService {
         // shutdown signal internally, so this resolves promptly).
         self.tracker.close();
         self.tracker.wait().await;
+        auth::remove_token(&self.name);
         tracing::info!("All IPC client connections closed");
     }
 
+    /// Issues the session token first, then creates the endpoint restricted to
+    /// the current user, so any client that can connect can read the token.
+    fn bind(&self) -> anyhow::Result<(Listener, Arc<str>)> {
+        let token = auth::issue_token(&self.name)?;
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(endpoint::socket_path(&self.name)?); // stale socket from a crash
+        let opts = ListenerOptions::new().name(endpoint::endpoint_name(&self.name)?);
+        #[cfg(windows)]
+        let opts = {
+            use interprocess::os::windows::local_socket::ListenerOptionsExt;
+            opts.security_descriptor(auth::current_user_sd()?)
+        };
+        let listener = opts.create_tokio()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                endpoint::socket_path(&self.name)?,
+                std::fs::Permissions::from_mode(0o600),
+            )?;
+        }
+        Ok((listener, Arc::from(token)))
+    }
+
+    // The handshake callback's error type is fixed by tungstenite.
+    #[allow(clippy::result_large_err)]
     async fn handle_client(
         conn: LocalStream,
         device_tx: UnboundedSender<DeviceCommands>,
@@ -116,9 +158,17 @@ impl IpcService {
         events_tx: broadcast::Sender<CoreEvent>,
         stop_tx: UnboundedSender<()>,
         prompt_hub: PromptHub,
+        token: Arc<str>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        let mut ws = accept_async(conn).await?;
+        // No valid token within 5s: dropped before any request is parsed.
+        let mut ws = tokio::time::timeout(
+            Duration::from_secs(5),
+            accept_hdr_async(conn, |req: &Request, resp: Response| {
+                auth::check(req, &token).map(|_| resp)
+            }),
+        )
+        .await??;
         let mut events_rx = events_tx.subscribe();
         // Set once this connection asks to show prompts. `announced` holds the
         // prompts already sent from the pending snapshot, so one that also
@@ -852,10 +902,6 @@ impl IpcService {
 }
 
 impl IpcService {
-    fn create_name(&self) -> std::io::Result<Name<'_>> {
-        self.name.clone().to_ns_name::<GenericNamespaced>()
-    }
-
     async fn send_response(
         ws: &mut WebSocketStream<LocalStream>,
         response: clipx::IpcResponse,
@@ -917,7 +963,10 @@ mod socket_tests {
         time::Duration,
     };
     use tokio::{sync::mpsc, time::timeout};
-    use tokio_tungstenite::client_async;
+    use tokio_tungstenite::{
+        client_async,
+        tungstenite::{client::IntoClientRequest, http::HeaderValue},
+    };
 
     /// The "native" engine: counts how often it is asked and refuses everything.
     #[derive(Clone, Default)]
@@ -988,9 +1037,14 @@ mod socket_tests {
     impl Rig {
         async fn connect(&self) -> Ws {
             for _ in 0..100 {
-                let name = self.name.clone().to_ns_name::<GenericNamespaced>().unwrap();
+                let name = endpoint::endpoint_name(&self.name).unwrap();
                 if let Ok(conn) = ConnectOptions::new().name(name).connect_tokio().await {
-                    let (ws, _) = client_async("ws://localhost/", conn).await.unwrap();
+                    let mut req = "ws://localhost/".into_client_request().unwrap();
+                    req.headers_mut().insert(
+                        "Authorization",
+                        HeaderValue::from_str(&endpoint::bearer(&self.name).unwrap()).unwrap(),
+                    );
+                    let (ws, _) = client_async(req, conn).await.unwrap();
                     return ws;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;

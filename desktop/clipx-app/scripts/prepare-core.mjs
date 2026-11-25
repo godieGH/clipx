@@ -6,7 +6,7 @@ const ext = process.platform === "win32" ? ".exe" : "";
 
 // the workspace root is one level up from clipx-app
 execSync("cargo build -p clipx-core --release", { stdio: "inherit", cwd: ".." });
-execSync("cargo build -p clipx --bin clipx-send --release", { stdio: "inherit", cwd: ".." });
+execSync("cargo build -p clipx --bin clipx-send --bin clipx --release", { stdio: "inherit", cwd: ".." });
 
 mkdirSync("src-tauri/binaries", { recursive: true });
 copyFileSync(
@@ -16,4 +16,8 @@ copyFileSync(
 copyFileSync(
   `../target/release/clipx-send${ext}`,
   `src-tauri/binaries/clipx-send-${triple}${ext}`
+);
+copyFileSync(
+  `../target/release/clipx${ext}`,
+  `src-tauri/binaries/clipx-${triple}${ext}`
 );

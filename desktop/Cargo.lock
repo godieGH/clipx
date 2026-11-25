@@ -799,6 +799,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap",
+ "directories",
  "futures-util",
  "image",
  "interprocess",
@@ -863,7 +864,9 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "widestring",
  "windows",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
