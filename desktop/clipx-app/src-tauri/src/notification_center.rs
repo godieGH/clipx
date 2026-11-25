@@ -180,16 +180,32 @@ impl NotificationCenter {
         });
     }
 
+    /// Makes sure the user can see that something is waiting for an answer.
+    ///
+    /// Hidden: the window is shown (over the main window, see `show_center`).
+    /// Already open but minimized, or open behind other apps: it cannot just be
+    /// pulled to the front, because Windows, macOS and most Linux desktops stop
+    /// an app from taking focus while the user is working elsewhere. So it is
+    /// restored if minimized and the OS is asked to flag it instead (taskbar
+    /// flash, Dock bounce, urgency hint). Already in front: nothing to do.
     fn show_if_hidden(self: &Arc<Self>) {
-        let visible = self
-            .app
-            .get_webview_window(WINDOW_LABEL)
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false);
-        if !visible {
+        let Some(window) = self.app.get_webview_window(WINDOW_LABEL) else {
             if let Err(error) = show_center(&self.app) {
                 eprintln!("ClipX: could not show the notification center: {error}");
             }
+            return;
+        };
+        if !window.is_visible().unwrap_or(false) {
+            if let Err(error) = show_center(&self.app) {
+                eprintln!("ClipX: could not show the notification center: {error}");
+            }
+            return;
+        }
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
+        if !window.is_focused().unwrap_or(false) {
+            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Critical));
         }
     }
 
