@@ -369,7 +369,7 @@ async fn pausing_with_an_old_peer_is_refused_but_cancel_still_works() {
         cancels(&mut h).is_empty(),
         "nothing is sent to the old peer"
     );
-    assert!(!last_event(&mut h).is_some_and(|e| e.state == "paused"));
+    assert!(last_event(&mut h).is_none_or(|e| e.state != "paused"));
 
     let reply = h.mgr.control_transfer(FILE, None, TransferAction::Cancel);
     assert_eq!(reply, Ok("transfer cancelled".to_string()));
