@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window and the notification center window",
   "windows": [
-    "main"
+    "main",
+    "notifications"
   ],
   "permissions": [
     "core:default",

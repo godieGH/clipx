@@ -35,6 +35,12 @@ pub struct Client {
     events_rx: Option<mpsc::UnboundedReceiver<clipx::IpcEvent>>,
     events_tx: mpsc::UnboundedSender<clipx::IpcEvent>,
     reader_task: Option<JoinHandle<()>>,
+    /// The owner wants the core's prompts shown in its own UI. Attachment is
+    /// per connection, so it is repeated by `start()` on every (re)connect.
+    attach_notification_center: bool,
+    /// Set when the core did not accept the attach request (an older core), so
+    /// reconnects do not repeat a request that would only be refused again.
+    attach_failed: bool,
 }
 
 enum State {
@@ -53,7 +59,21 @@ impl Client {
             events_rx: Some(events_rx),
             events_tx,
             reader_task: None,
+            attach_notification_center: false,
+            attach_failed: false,
         }
+    }
+
+    /// Asks the core to send its prompts (pairing, code confirmation, incoming
+    /// files) to this client instead of the OS notification system. Takes effect
+    /// on the next connection and on every reconnect after it.
+    pub fn enable_notification_center(&mut self) {
+        self.attach_notification_center = true;
+    }
+
+    /// Whether the core accepted the attach request on the current or last connection.
+    pub fn notification_center_attached(&self) -> bool {
+        self.attach_notification_center && !self.attach_failed && self.is_running()
     }
 
     /// Takes the event receiver. Only meaningful once, right after
@@ -121,6 +141,28 @@ impl Client {
         }));
 
         self.state = State::Running;
+        if self.attach_notification_center && !self.attach_failed {
+            let req = clipx::IpcRequest {
+                request: Some(clipx::ipc_request::Request::AttachNotificationCenter(
+                    clipx::AttachNotificationCenterRequest {},
+                )),
+            };
+            let attached = matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(3), self.send(req)).await,
+                Ok(Ok(clipx::IpcResponse {
+                    response: Some(clipx::ipc_response::Response::AttachNotificationCenter(_)),
+                }))
+            );
+            if !attached {
+                // An older core drops the connection on a request it does not
+                // know. Do not retry: the app carries on with native notifications.
+                self.attach_failed = true;
+                eprintln!("core did not accept the notification-center attach; using native notifications");
+                if !self.is_running() {
+                    return Err("connection closed while attaching the notification center".into());
+                }
+            }
+        }
         Ok(())
     }
 

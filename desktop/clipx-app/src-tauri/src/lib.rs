@@ -1,4 +1,6 @@
 mod core_supervisor;
+mod nc_store;
+mod notification_center;
 
 #[cfg(windows)]
 mod error_dialog;
@@ -162,7 +164,8 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
                 let item = items.GetValueAtIndex(i)?;
                 let mut name = windows::core::PWSTR::null();
                 item.Name(&mut name)?;
-                if matches!(take_pwstr(name).as_str(), "saveAs" | "print" | "moreTools") {
+                // Only "Refresh" stays; everything else (and the separators) goes.
+                if take_pwstr(name).as_str() != "reload" {
                     remove.push(i);
                 }
             }
@@ -182,6 +185,10 @@ fn configure_windows_context_menu(window: &tauri::WebviewWindow) -> tauri::Resul
 pub fn run() {
     let supervisor = Arc::new(core_supervisor::CoreSupervisor::new());
     let mut client = ipc::non_blocking::Client::new("clipx");
+    // Show the core's prompts (pairing, code confirmation, incoming files) in the
+    // notification center window instead of the OS notification system. The
+    // client re-attaches by itself on every reconnect.
+    client.enable_notification_center();
     let events_rx = client.take_events();
     let ipc = Mutex::new(client);
 
@@ -225,10 +232,19 @@ pub fn run() {
             // `listen("devices-changed" | "clipboard-changed", ...)` and
             // re-fetches on demand — same invoke commands as before, just
             // triggered by a push instead of a timer.
+            let notification_center =
+                notification_center::NotificationCenter::new(app.handle().clone());
+            app.manage(notification_center.clone());
+
             if let Some(mut events_rx) = events_rx {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = events_rx.recv().await {
+                        // The notification center keeps its own list of prompts,
+                        // messages and transfers from the same stream.
+                        if let Some(inner) = &event.event {
+                            notification_center.handle_event(inner);
+                        }
                         match event.event {
                             Some(clipx::ipc_event::Event::DevicesChanged(_)) => {
                                 let _ = app_handle.emit("devices-changed", ());
@@ -258,6 +274,8 @@ pub fn run() {
             let show_item = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
             let diagnostics_item =
                 MenuItem::with_id(app, "diagnostics", "Help & diagnostics", true, None::<&str>)?;
+            let notifications_item =
+                MenuItem::with_id(app, "notifications", "Notifications", true, None::<&str>)?;
             let logs_item = MenuItem::with_id(app, "logs", "Open logs folder", true, None::<&str>)?;
             // let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let status_item =
@@ -279,6 +297,7 @@ pub fn run() {
                 app,
                 &[
                     &show_item,
+                    &notifications_item,
                     &diagnostics_item,
                     &logs_item,
                     //&settings_item,
@@ -296,7 +315,7 @@ pub fn run() {
 
             let autostart_item_for_event = autostart_item.clone();
 
-            tray::TrayIconBuilder::new()
+            tray::TrayIconBuilder::with_id(notification_center::TRAY_ID)
                 .tooltip("Clipx")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -306,6 +325,11 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "notifications" => {
+                        if let Err(error) = notification_center::show_center(app) {
+                            eprintln!("ClipX: could not show the notification center: {error}");
                         }
                     }
                     "diagnostics" => {
@@ -373,6 +397,8 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            app.state::<Arc<notification_center::NotificationCenter>>()
+                .attach_tray_item(notifications_item.clone());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -402,6 +428,17 @@ pub fn run() {
             get_diagnostic_snapshot,
             open_logs_folder,
             start_hidden,
+            notification_center::open_notification_center,
+            notification_center::nc_list,
+            notification_center::nc_resolve,
+            notification_center::nc_transfer_action,
+            notification_center::nc_mark_read,
+            notification_center::nc_mark_all_read,
+            notification_center::nc_clear_read,
+            notification_center::nc_remove,
+            notification_center::nc_reveal_download,
+            notification_center::nc_badge,
+            notification_center::nc_refresh_transfers,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

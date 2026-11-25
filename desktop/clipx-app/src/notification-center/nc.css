@@ -1,0 +1,348 @@
+/*
+ * Notification window: only what the main window's styles don't already cover.
+ * Cards (.clip-row), buttons (.icon-button, .word-button, .device-action), the
+ * title bar, the scroll indicator, the count chip, the empty state and the Mica
+ * backdrop all come from styles/*.css, so the two windows stay in step.
+ */
+
+.nc-title-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.nc-header-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.nc-header-action:disabled:hover {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  .nc-header-action:disabled:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+}
+
+/* ---- tabs: a segmented control in the same soft-surface language as the rows ---- */
+
+.nc-tabs {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+}
+
+.nc-tab {
+  position: relative;
+  z-index: 1;
+  transition: opacity 0.2s ease;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.65;
+}
+.nc-tab:hover {
+  border-color: transparent;
+  opacity: 1;
+}
+.nc-tab:active {
+  background: transparent;
+}
+.nc-tab[aria-selected="true"] {
+  opacity: 1;
+}
+
+/* The highlight is one pill that slides between the two tabs. */
+.nc-tab-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 10px) / 2);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+.nc-tabs[data-tab="read"] .nc-tab-pill {
+  transform: translateX(calc(100% + 4px));
+}
+
+.nc-count-quiet {
+  background: rgba(128, 128, 128, 0.2);
+  color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nc-tabs {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .nc-tab-pill {
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: none;
+  }
+}
+
+/* ---- cards: the history row, stacked, with an accent edge while unread ---- */
+
+.nc-card {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nc-card.nc-unread {
+  box-shadow: inset 3px 0 0 #396cd8;
+}
+
+.nc-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nc-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.nc-countdown {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+.nc-code {
+  margin: 2px 0;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nc-preview {
+  margin: 0;
+  max-height: 4.6em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  user-select: text;
+  -webkit-user-select: text;
+}
+@media (prefers-color-scheme: dark) {
+  .nc-preview {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.nc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nc-outcome {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.nc-error {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #e81123;
+}
+@media (prefers-color-scheme: dark) {
+  .nc-error {
+    color: #ff7a6b;
+  }
+}
+
+/* ---- switching tabs: the list slides in from the side the tab is on ---- */
+
+.nc-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nc-enter-unread {
+  animation: nc-enter-from-left 0.26s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.nc-enter-read {
+  animation: nc-enter-from-right 0.26s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes nc-enter-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes nc-enter-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-enter-unread,
+  .nc-enter-read {
+    animation: none;
+  }
+  .nc-tab-pill {
+    transition: none;
+  }
+}
+
+/* ---- transfer ring (the Android ring: percent in the middle, arrows while it runs) ---- */
+
+.nc-ring {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+}
+.nc-ring:hover,
+.nc-ring:active {
+  border-color: transparent;
+  background: transparent;
+}
+.nc-ring-static {
+  cursor: default;
+}
+.nc-ring-dimmed {
+  opacity: 0.5;
+}
+
+.nc-ring-track {
+  fill: none;
+  stroke: rgba(128, 128, 128, 0.25);
+  stroke-width: 4;
+}
+.nc-ring-arc {
+  fill: none;
+  stroke: #396cd8;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s linear;
+}
+.nc-ring-paused .nc-ring-arc {
+  stroke: rgba(128, 128, 128, 0.85);
+}
+.nc-ring-failed .nc-ring-arc {
+  stroke: #e81123;
+}
+
+.nc-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.nc-flow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: -13px 0 0 -13px;
+  color: #396cd8;
+  pointer-events: none;
+}
+.nc-flow-tray {
+  stroke: currentColor;
+  stroke-opacity: 0.4;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.nc-flow-arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: nc-flow-move 1.4s linear infinite;
+}
+.nc-flow-fade {
+  animation: nc-flow-fade 1.4s linear infinite;
+}
+
+/* The arrow eases toward the tray over the first 80% of the loop, then waits for the fade. */
+@keyframes nc-flow-move {
+  0% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  80%,
+  100% {
+    transform: translateY(8.32px);
+  }
+}
+@keyframes nc-flow-fade {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-flow-arrow,
+  .nc-flow-fade {
+    animation: none;
+  }
+  .nc-flow-fade {
+    opacity: 0.6;
+  }
+}

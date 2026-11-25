@@ -137,6 +137,24 @@ function App() {
 
   useEffect(() => subscribeToast(setToast), []);
 
+  const [notifBadge, setNotifBadge] = useState({ unread: 0, waiting: 0 });
+  useEffect(() => {
+    let cancelled = false;
+    invoke<{ unread: number; waiting: number }>("nc_badge")
+      .then((badge) => {
+        if (!cancelled) setNotifBadge(badge);
+      })
+      .catch(() => {});
+    const unlisten = listen<{ unread: number; waiting: number }>(
+      "nc-badge",
+      ({ payload }) => setNotifBadge(payload),
+    );
+    return () => {
+      cancelled = true;
+      void unlisten.then((off) => off());
+    };
+  }, []);
+
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
@@ -248,7 +266,15 @@ function App() {
       // info or setPosition may be refused; that must never keep the window
       // from being shown, or the app is invisible on desktops without a tray.
       try {
-        const monitor = await currentMonitor();
+        // Only on launch: sessionStorage survives a reload (Ctrl+R, Refresh)
+        // but not a restart, so a refresh doesn't snap a moved window back.
+        let placed = false;
+        try {
+          placed = sessionStorage.getItem("clipx-window-placed") === "1";
+        } catch {
+          // Storage unavailable: treat as a fresh launch and place the window.
+        }
+        const monitor = placed ? null : await currentMonitor();
         if (monitor) {
           const windowSize = await appWindow.outerSize();
           const workArea = monitor.workArea;
@@ -264,6 +290,7 @@ function App() {
             windowSize.height -
             margin;
           await appWindow.setPosition(new PhysicalPosition(x, y));
+          sessionStorage.setItem("clipx-window-placed", "1");
         }
       } catch (error) {
         console.debug(
@@ -1331,13 +1358,26 @@ function App() {
               <Settings size={15} />
             </button>
             <button
-              className="icon-button titlebar-icon"
-              title="notifications"
+              className={`icon-button titlebar-icon${notifBadge.unread > 0 ? " has-badge" : ""}`}
+              title={
+                notifBadge.unread > 0
+                  ? `Notifications (${notifBadge.unread} unread)`
+                  : "Notifications"
+              }
               onClick={() => {
-                showToast("This feature is not implemented yet.");
+                invoke("open_notification_center").catch((error) =>
+                  showToast(String(error), { variant: "error" }),
+                );
               }}
             >
               <Bell size={15} />
+              {notifBadge.unread > 0 && (
+                <span
+                  className={`titlebar-badge${notifBadge.waiting > 0 ? " urgent" : ""}`}
+                >
+                  {notifBadge.unread > 9 ? "9+" : notifBadge.unread}
+                </span>
+              )}
             </button>
           </div>
         </div>

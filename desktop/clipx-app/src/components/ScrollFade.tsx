@@ -54,6 +54,9 @@ function useScrollFade<T extends HTMLElement>() {
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    // Also watch the content, so the indicator follows a list that grows or
+    // shrinks without the viewport itself being resized.
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
     return () => ro.disconnect();
   }, [measure]);
 
