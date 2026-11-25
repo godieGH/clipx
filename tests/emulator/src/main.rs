@@ -130,7 +130,13 @@ async fn main() {
         _ => DeviceType::Unspecified,
     };
 
-    let identity = Arc::new(DeviceIdentity::load_or_create(id_path.clone()));
+    let identity = match DeviceIdentity::load_or_create(id_path.clone()) {
+        Ok(id) => Arc::new(id),
+        Err(e) => {
+            eprintln!("failed to load identity at {id_path:?}: {e}");
+            std::process::exit(1);
+        }
+    };
     let (events_tx, mut printer_rx) = broadcast::channel(1024);
 
     let state = Arc::new(AppState {
